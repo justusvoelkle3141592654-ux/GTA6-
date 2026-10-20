@@ -1,5 +1,5 @@
 import { BLOCK, ROAD, GRID, inCity, type World } from "./world";
-import type { Car } from "./engine";
+import type { Car } from "./vehicles";
 
 export type CivState = "walk" | "wait" | "flee" | "cower" | "down";
 export type AlarmKind = "shot" | "blast";

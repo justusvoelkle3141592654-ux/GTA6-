@@ -1,33 +1,22 @@
 import { sfx } from "./audio";
-import { World, BLOCK, ROAD, GRID, MAP_MIN, MAP_MAX, inCity, terrainH, terrainGrad, roofOf, type Building } from "./world";
+import { World, ROAD, GRID, MAP_MIN, MAP_MAX, inCity, terrainH, terrainGrad, roofOf, type Building } from "./world";
 import { Renderer3D } from "./renderer3d";
 import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, SEEN_CLOSE, SEEN_DIST, type Crime } from "./wanted";
 import { buildPlaces, respawnCost, RESPAWN_RULES, type Place } from "./places";
 import { PedSystem, PED_LIMIT, type Civilian } from "./peds";
+import { Car, CARS, MODEL_STATS, type CarDef } from "./vehicles";
+import { Traffic, PARKED_LIMIT, steerTo, avoid, stuck } from "./traffic";
 
 export type GameState = "menu" | "playing" | "paused" | "over";
 export type { Mode } from "./modes";
+export { Car, CARS, LEGACY_CAR_IDS } from "./vehicles";
+export type { CarDef, CarModel } from "./vehicles";
 export type Difficulty = "easy" | "normal" | "hard";
 export type CameraMode = "chase" | "fp" | "top";
 export type Quality = "high" | "low";
-export type CarModel = "sport" | "super" | "muscle" | "suv" | "sedan" | "van" | "police" | "taxi";
 export type Weapon = "pistol" | "rocket" | "bomb";
 export const WEAPONS: Weapon[] = ["pistol", "rocket", "bomb"];
-
-export interface CarDef { id: string; name: string; model: CarModel; color: string; maxV: number; acc: number; grip: number; hp: number; mass: number; desc: string; }
-export const CARS: CarDef[] = [
-  { id: "corsaro", name: "Corsaro", model: "sport", color: "#ff2d95", maxV: 560, acc: 640, grip: 11, hp: 120, mass: 1.4, desc: "Ausgewogen" },
-  { id: "zephyra", name: "Zephyra", model: "super", color: "#2bf0ff", maxV: 650, acc: 740, grip: 10, hp: 90, mass: 1.2, desc: "Rakete" },
-  { id: "torvan", name: "Torvan", model: "muscle", color: "#ff8a1f", maxV: 540, acc: 700, grip: 7, hp: 130, mass: 1.5, desc: "Drift-König" },
-  { id: "granit", name: "Granit", model: "suv", color: "#ffd23f", maxV: 480, acc: 560, grip: 12, hp: 220, mass: 2.2, desc: "Panzer" },
-];
-// car ids of older versions -> current ids
-export const LEGACY_CAR_IDS: Record<string, string> = { infernus: "corsaro", banshee: "zephyra", sabre: "torvan", patriot: "granit" };
-const MODEL_STATS: Record<CarModel, { maxV: number; acc: number; grip: number }> = {
-  sport: { maxV: 560, acc: 640, grip: 11 }, super: { maxV: 650, acc: 740, grip: 10 }, muscle: { maxV: 540, acc: 700, grip: 7 }, suv: { maxV: 480, acc: 560, grip: 12 },
-  sedan: { maxV: 470, acc: 520, grip: 11 }, van: { maxV: 420, acc: 460, grip: 12 }, police: { maxV: 560, acc: 640, grip: 11 }, taxi: { maxV: 480, acc: 540, grip: 11 },
-};
 
 export interface GameConfig { mode: Mode; difficulty: Difficulty; car: string; camera: CameraMode; quality: Quality; }
 
@@ -57,25 +46,6 @@ interface Callbacks {
   onHurt: (amount: number) => void; onCamera: (c: CameraMode) => void;
 }
 
-type Kind = "player" | "cop" | "civ";
-
-export class Car {
-  x = 0; y = 0; z = 0; vx = 0; vy = 0; vz = 0; a = 0; av = 0;
-  air = false; airT = 0;
-  vF = 0; vR = 0;
-  hp = 100; maxHp = 100; mass = 1;
-  calm = false; // cop without a wanted level: patrols like traffic, no siren
-  route = false; // prevI/prevJ/wpI/wpJ hold a valid street route (traffic AI)
-  dead = false; deadT = 0; wrecked = false; wreckT = 0; parked = false;
-  throttle = 0; steer = 0; handbrake = false; nitro = false;
-  wpI = 0; wpJ = 0; prevI = -1; prevJ = -1; hasWp = false;
-  stuckT = 0; reverseT = 0; nearCd = 0; hitFlash = 0;
-  rlx = NaN; rly = NaN; rrx = NaN; rry = NaN;
-  siren = Math.random() * 10; cruise = 170; smokeT = 0;
-  constructor(public kind: Kind, public model: CarModel, public color: string) {}
-  get speed() { return Math.hypot(this.vx, this.vy); }
-}
-
 export interface Ped { x: number; y: number; z: number; a: number; vx: number; vy: number; hp: number; maxHp: number; walk: number; moving: boolean; sprint: boolean; shootT: number; hitFlash: number; dead: boolean; }
 export interface Proj { kind: "bullet" | "rocket" | "bomb"; x: number; y: number; z: number; vx: number; vy: number; vz: number; a: number; life: number; px: number; py: number; }
 export interface Bomb { car: Car | null; ox: number; oy: number; x: number; y: number; z: number; t: number; }
@@ -86,7 +56,6 @@ interface FloatText { x: number; y: number; h: number; text: string; color: stri
 interface Banner { text: string; sub: string; color: string; life: number; max: number; big: boolean; }
 export interface Flash { x: number; y: number; z: number; life: number; max: number; size: number; }
 
-const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const TAU = Math.PI * 2;
 const GRAV = 620;
 const AIR_THRUST = 520, AIR_MAX = 900; // nitro thrust in the air, max air speed
@@ -94,8 +63,8 @@ export const wrap = (a: number) => { while (a > Math.PI) a -= TAU; while (a < -M
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 
-const CIV_COLORS = ["#d8d8e0", "#2b2f3a", "#8a1c2b", "#1d4e89", "#3c6e47", "#c9a227", "#6b4c9a", "#e07a2e", "#9aa3ad", "#10141c"];
 const MAX_PARTICLES = 560;
+const PAIR_R = 13; // half width of a car for the side-by-side test
 export const MAX_SKIDS = 900;
 
 export class Game {
@@ -104,6 +73,7 @@ export class Game {
   places: Place[] = buildPlaces(this.world);
   wanted = new Wanted(MODE_RULES.chase);
   peds = new PedSystem(this.world);
+  traffic = new Traffic(this.world);
   state: GameState = "menu";
   dpr = 1; cw = 0; ch = 0; mobile = false;
 
@@ -167,6 +137,7 @@ export class Game {
   get diff(): DiffDef { return DIFFS[this.config.difficulty]; }
   get rules(): ModeRules { return MODE_RULES[this.config.mode]; }
   get stars() { return this.wanted.stars; }
+  get parkedLimit() { return this.config.quality === "low" ? PARKED_LIMIT.low : PARKED_LIMIT.high; }
   // currently controlled entity
   get fx() { return this.onFoot ? this.ped.x : this.player.x; }
   get fy() { return this.onFoot ? this.ped.y : this.player.y; }
@@ -246,7 +217,7 @@ export class Game {
   setupMenu() {
     this.resetWorld();
     this.player.cruise = 260;
-    for (let i = 0; i < 14; i++) this.spawnCiv(true);
+    for (let i = 0; i < 14; i++) this.traffic.spawnCiv(this, true);
     this.ending = null; this.timeScale = 1;
     this.setState("menu");
   }
@@ -271,9 +242,10 @@ export class Game {
     for (let i = 0; i < 5; i++) this.spawnPickup("repair", true);
     for (let i = 0; i < 5; i++) this.spawnPickup("rocket", true);
     for (let i = 0; i < 4; i++) this.spawnPickup("bomb", true);
-    for (let i = 0; i < 14; i++) this.spawnCiv(true);
+    for (let i = 0; i < 14; i++) this.traffic.spawnCiv(this, true);
     this.peds.limit = this.config.quality === "low" ? PED_LIMIT.low : PED_LIMIT.high;
-    if (rules.city) this.peds.populate(p.x, p.y);
+    this.traffic.reset();
+    if (rules.city) { this.peds.populate(p.x, p.y); this.traffic.updateParking(this, 0, this.parkedLimit, true); }
     const m = this.config.mode;
     this.banner(m === "free" ? "FREIE FAHRT" : m === "open" ? "SOLARA BAY" : "LOS GEHT'S", m === "free" ? "Keine Cops – erkunde Stadt & Berge" : m === "open" ? "Die Stadt gehört dir – benimm dich (oder nicht)" : "Schnapp dir das Cash!", "#ff3cac", 2.6);
     this.setState("playing");
@@ -292,32 +264,6 @@ export class Game {
   }
 
   // ---------- spawning ----------
-  private spawnCiv(anywhereNear = false) {
-    const fx = this.fx, fy = this.fy;
-    for (let tries = 0; tries < 20; tries++) {
-      const i = Math.floor(Math.random() * (GRID + 1)), j = Math.floor(Math.random() * (GRID + 1));
-      const np = this.world.nodePos(i, j);
-      const d = Math.hypot(np.x - fx, np.y - fy);
-      if (d > 1400 || d < (anywhereNear ? 250 : 750)) continue;
-      const dir = DIRS[Math.floor(Math.random() * 4)];
-      const ni = i + dir[0], nj = j + dir[1];
-      if (ni < 0 || nj < 0 || ni > GRID || nj > GRID) continue;
-      const r = Math.random();
-      const model: CarModel = r < 0.15 ? "taxi" : r < 0.3 ? "van" : r < 0.4 ? "suv" : r < 0.5 ? "muscle" : "sedan";
-      const color = model === "taxi" ? "#ffc21a" : CIV_COLORS[Math.floor(Math.random() * CIV_COLORS.length)];
-      const c = new Car("civ", model, color);
-      const t = rnd(0.2, 0.7);
-      c.x = np.x + dir[0] * BLOCK * t - dir[1] * 34; c.y = np.y + dir[1] * BLOCK * t + dir[0] * 34;
-      c.a = Math.atan2(dir[1], dir[0]);
-      c.prevI = i; c.prevJ = j; c.wpI = ni; c.wpJ = nj; c.route = true;
-      c.cruise = rnd(150, 200);
-      c.vx = Math.cos(c.a) * c.cruise; c.vy = Math.sin(c.a) * c.cruise;
-      c.hp = c.maxHp = 90; c.mass = model === "van" || model === "suv" ? 1.2 : 0.8;
-      this.cars.push(c);
-      return;
-    }
-  }
-
   private spawnCop() {
     const fx = this.fx, fy = this.fy;
     const outside = !inCity(fx, fy);
@@ -735,20 +681,30 @@ export class Game {
       // leave old car behind as a parked civ car (or wreck)
       const old = new Car("civ", p.model, p.color);
       old.x = p.x; old.y = p.y; old.z = p.z; old.a = p.a; old.vx = p.vx; old.vy = p.vy;
-      old.hp = p.hp; old.maxHp = p.maxHp; old.mass = p.mass; old.dead = p.dead; old.wrecked = p.wrecked; old.parked = true; old.deadT = p.deadT; old.wreckT = p.wreckT;
+      old.hp = p.hp; old.maxHp = p.maxHp; old.mass = p.mass; old.dead = p.dead; old.wrecked = p.wrecked; old.parked = true; old.owned = true; old.deadT = p.deadT; old.wreckT = p.wreckT;
       this.cars.push(old);
       for (const b of this.bombs) if (b.car === p) b.car = old;
-      // take the new one
+      // take the new one; whoever sits inside gets pulled out
       const wasCop = c.kind === "cop";
+      const jacked = c.kind === "civ" && c.driver && !c.dead;
+      if (jacked && this.rules.city) {
+        const ca = Math.cos(c.a), sa = Math.sin(c.a);
+        let dx = c.x + sa * 26, dy = c.y - ca * 26;
+        if (this.world.isSolid(dx, dy, 6)) { dx = c.x - sa * 26; dy = c.y + ca * 26; }
+        this.peds.spawnAt(dx, dy, this.ped.x, this.ped.y);
+      }
+      const parkedTheft = c.kind === "civ" && !c.driver;
+      const own = c.owned && this.rules.city; // back into your own car: no crime
+      this.traffic.release(c);
       p.x = c.x; p.y = c.y; p.z = c.z; p.a = c.a; p.vx = c.vx; p.vy = c.vy; p.av = 0; p.vz = 0; p.air = false;
       p.model = c.model; p.color = c.color; p.hp = Math.max(c.hp, c.maxHp * 0.6); p.maxHp = c.maxHp; p.mass = Math.max(1, c.mass);
       p.dead = false; p.wrecked = false; p.deadT = 0; p.wreckT = 0; p.parked = false; p.hitFlash = 0;
       p.rlx = NaN;
       for (const b of this.bombs) if (b.car === c) b.car = p;
       this.cars.splice(this.cars.indexOf(c), 1);
-      this.banner(wasCop ? "STREIFENWAGEN GEKLAUT" : "AUTO GEKLAUT", wasCop ? "Die mögen das gar nicht" : "+ Fahndung", "#ffd23f", 1.4);
-      this.crime(wasCop ? "copCarjack" : "carjack");
-      this.addScore(wasCop ? 300 : 100, p.x, p.y, "CARJACK", "#ffd23f", 20);
+      if (!own) this.banner(wasCop ? "STREIFENWAGEN GEKLAUT" : jacked ? "AUTO GEKLAUT" : "AUTO GEKNACKT", wasCop ? "Die mögen das gar nicht" : jacked ? "Der Fahrer ergreift die Flucht" : "+ Fahndung", "#ffd23f", 1.4);
+      if (!own) this.crime(wasCop ? "copCarjack" : parkedTheft ? "parkedTheft" : "carjack");
+      if (!own) this.addScore(wasCop ? 300 : 100, p.x, p.y, "CARJACK", "#ffd23f", 20);
     }
     this.onFoot = false;
     p.handbrake = false; p.parked = false;
@@ -899,7 +855,7 @@ export class Game {
     } else if (playing && this.ending) {
       p.throttle = 0; p.steer = 0; p.nitro = false; p.handbrake = this.ending.reason === "arrested" || this.onFoot;
       this.ped.vx *= 0.9; this.ped.vy *= 0.9;
-    } else { this.civAI(p, dt); p.nitro = false; }
+    } else { this.traffic.civAI(this, p, dt); p.nitro = false; }
 
     this.nitro = 1; // unlimited nitro
 
@@ -908,8 +864,8 @@ export class Game {
       if (c.dead || c.parked || (c.kind === "civ" && c.wrecked)) { c.throttle = 0; c.steer = 0; c.handbrake = true; continue; }
       if (c.kind === "cop") {
         c.calm = this.wanted.stars === 0;
-        if (c.calm) this.patrolAI(c, dt); else this.copAI(c, dt);
-      } else this.civAI(c, dt);
+        if (c.calm) this.traffic.patrol(this, c, dt); else this.copAI(c, dt);
+      } else this.traffic.civAI(this, c, dt);
     }
 
     const def = this.carDef;
@@ -932,7 +888,7 @@ export class Game {
     }
     this.collideCars();
     if (this.onFoot && playing) this.updatePed(dt);
-    if (playing && this.rules.city) this.peds.update(dt, this);
+    if (playing && this.rules.city) { this.peds.update(dt, this); this.traffic.updateParking(this, dt, this.parkedLimit); }
     if (playing) this.updateProjs(dt);
 
     for (const c of this.cars) {
@@ -951,10 +907,10 @@ export class Game {
       const d = Math.hypot(c.x - this.fx, c.y - this.fy);
       const remove = d > 1900 || (c.wrecked && c.wreckT > 9 && d > 500) || (c.wrecked && c.wreckT > 20 && !c.parked);
       if (remove) { this.cars.splice(i, 1); continue; }
-      if (c.kind === "civ" && !c.wrecked) civs++;
+      if (c.kind === "civ" && !c.wrecked && !c.parked) civs++;
       if (c.kind === "cop" && !c.dead) cops++;
     }
-    if (civs < civTarget && Math.random() < 0.1 && inCity(this.fx, this.fy)) this.spawnCiv();
+    if (civs < civTarget && Math.random() < 0.1 && inCity(this.fx, this.fy)) this.traffic.spawnCiv(this);
 
     if (!playing) return;
 
@@ -1251,6 +1207,7 @@ export class Game {
         if (Math.abs(a.z - b.z) > 22) continue;
         const d2 = dx * dx + dy * dy;
         if (d2 >= R2 * R2 || d2 < 0.0001) continue;
+        if ((a.parked || b.parked) && !this.closePair(a, b)) continue;
         const d = Math.sqrt(d2);
         dx /= d; dy /= d;
         const pen = R2 - d;
@@ -1265,6 +1222,17 @@ export class Game {
         this.onCarHit(a, b, -vn, a.x + dx * 19, a.y + dy * 19, dx, dy);
       }
     }
+  }
+
+  // finer test for cars side by side: two circles per car (front and back half)
+  private closePair(a: Car, b: Car) {
+    const R = PAIR_R * 2;
+    const ax = Math.cos(a.a) * 12, ay = Math.sin(a.a) * 12, bx = Math.cos(b.a) * 12, by = Math.sin(b.a) * 12;
+    for (let i = -1; i <= 1; i += 2) for (let j = -1; j <= 1; j += 2) {
+      const dx = (b.x + bx * j) - (a.x + ax * i), dy = (b.y + by * j) - (a.y + ay * i);
+      if (dx * dx + dy * dy < R * R) return true;
+    }
+    return false;
   }
 
   private onCarHit(a: Car, b: Car, impact: number, x: number, y: number, nx: number, ny: number) {
@@ -1299,84 +1267,13 @@ export class Game {
   }
 
   // ---------- AI ----------
-  private steerTo(c: Car, tx: number, ty: number) {
-    const diff = wrap(Math.atan2(ty - c.y, tx - c.x) - c.a);
-    c.steer = clamp(diff * 2.4, -1, 1);
-    return diff;
-  }
-  private avoid(c: Car) {
-    const look = 46 + Math.abs(c.vF) * 0.28;
-    const w = this.world;
-    if (w.isSolid(c.x + Math.cos(c.a) * look, c.y + Math.sin(c.a) * look, 6)) {
-      const l = w.isSolid(c.x + Math.cos(c.a - 0.75) * look * 0.85, c.y + Math.sin(c.a - 0.75) * look * 0.85, 6);
-      const r = w.isSolid(c.x + Math.cos(c.a + 0.75) * look * 0.85, c.y + Math.sin(c.a + 0.75) * look * 0.85, 6);
-      if (l && !r) c.steer = 1; else if (r && !l) c.steer = -1;
-      if (Math.abs(c.vF) > 260) c.throttle = Math.min(c.throttle, 0.2);
-    }
-  }
-  private stuck(c: Car, dt: number) {
-    if (c.reverseT > 0) { c.reverseT -= dt; c.throttle = -1; c.steer = -c.steer; return; }
-    if (Math.abs(c.vF) < 25 && c.throttle > 0) { c.stuckT += dt; if (c.stuckT > 0.8) { c.reverseT = 0.7; c.stuckT = 0; } }
-    else c.stuckT = 0;
-  }
-
-  private civAI(c: Car, dt: number) {
-    const w = this.world;
-    const from = w.nodePos(c.prevI, c.prevJ), to = w.nodePos(c.wpI, c.wpJ);
-    let dx = to.x - from.x, dy = to.y - from.y;
-    const L = Math.hypot(dx, dy) || 1;
-    dx /= L; dy /= L;
-    const tx = to.x - dy * 34 - dx * 10, ty = to.y + dx * 34 - dy * 10;
-    if (Math.hypot(tx - c.x, ty - c.y) < 55) {
-      const opts: number[][] = [];
-      for (const d of DIRS) {
-        const ni = c.wpI + d[0], nj = c.wpJ + d[1];
-        if (ni < 0 || nj < 0 || ni > GRID || nj > GRID) continue;
-        if (ni === c.prevI && nj === c.prevJ) continue;
-        opts.push([ni, nj]);
-      }
-      const chs = opts.length ? opts[Math.floor(Math.random() * opts.length)] : [c.prevI, c.prevJ];
-      c.prevI = c.wpI; c.prevJ = c.wpJ; c.wpI = chs[0]; c.wpJ = chs[1];
-    }
-    const diff = this.steerTo(c, tx, ty);
-    const want = c.cruise * (Math.abs(diff) > 0.45 ? 0.55 : 1);
-    c.throttle = c.vF < want ? 1 : c.vF > want + 40 ? -0.4 : 0;
-    c.handbrake = false;
-    for (const o of this.cars) {
-      if (o === c) continue;
-      const ox = o.x - c.x, oy = o.y - c.y;
-      const fwd = ox * Math.cos(c.a) + oy * Math.sin(c.a);
-      if (fwd > 0 && fwd < 80) { const lat = -ox * Math.sin(c.a) + oy * Math.cos(c.a); if (Math.abs(lat) < 22) { c.throttle = c.vF > 40 ? -0.6 : 0; break; } }
-    }
-    if (this.onFoot) {
-      const ox = this.ped.x - c.x, oy = this.ped.y - c.y;
-      const fwd = ox * Math.cos(c.a) + oy * Math.sin(c.a);
-      if (fwd > 0 && fwd < 90 && Math.abs(-ox * Math.sin(c.a) + oy * Math.cos(c.a)) < 20) c.throttle = c.vF > 20 ? -1 : 0;
-    }
-    if (this.rules.city && this.peds.blocking(c)) c.throttle = c.vF > 20 ? -1 : 0;
-    this.stuck(c, dt);
-  }
-
-  // cop without a wanted level: drive along the streets like traffic
-  private patrolAI(c: Car, dt: number) {
-    if (!c.route) {
-      const n = this.world.nearestNode(c.x, c.y);
-      const dir = DIRS[Math.floor(Math.random() * 4)];
-      c.prevI = n.i; c.prevJ = n.j;
-      c.wpI = clamp(n.i + dir[0], 0, GRID); c.wpJ = clamp(n.j + dir[1], 0, GRID);
-      if (c.wpI === n.i && c.wpJ === n.j) c.wpI = n.i > 0 ? n.i - 1 : n.i + 1;
-      c.route = true;
-    }
-    this.civAI(c, dt);
-  }
-
   private copAI(c: Car, dt: number) {
     c.route = false;
     const fx = this.fx, fy = this.fy;
     const w = this.world;
     const d = Math.hypot(fx - c.x, fy - c.y);
     let tx: number, ty: number;
-    if (this.ending || this.ped.dead) { this.steerTo(c, fx, fy); c.throttle = d > 120 ? 0.6 : -0.3; c.handbrake = false; return; }
+    if (this.ending || this.ped.dead) { steerTo(c, fx, fy); c.throttle = d > 120 ? 0.6 : -0.3; c.handbrake = false; return; }
     // cops also use ramps: "elevated" = currently on a ramp or roof
     const elevated = c.z > terrainH(c.x, c.y) + 15;
     const roofRamp = !this.onFoot && this.player.z > 25 ? w.rampToRoofAt(fx, fy) : null;
@@ -1409,12 +1306,12 @@ export class Game {
       const np = w.nodePos(c.wpI, c.wpJ);
       tx = np.x; ty = np.y;
     }
-    const diff = this.steerTo(c, tx, ty);
+    const diff = steerTo(c, tx, ty);
     c.throttle = Math.abs(diff) > 1.4 ? 0.45 : 1;
     c.handbrake = Math.abs(diff) > 1.1 && Math.abs(c.vF) > 260;
     if (this.onFoot && d < 320 && c.vF > 240) c.throttle = -0.3;
-    this.avoid(c);
-    this.stuck(c, dt);
+    avoid(c, this.world);
+    stuck(c, dt);
   }
 
   // ---------- effects ----------
