@@ -6,6 +6,8 @@ import { Wanted, SEEN_CLOSE, SEEN_DIST, type Crime } from "./wanted";
 import { buildPlaces, respawnCost, RESPAWN_RULES, type Place } from "./places";
 import { PedSystem, PED_LIMIT, type Civilian } from "./peds";
 import { Car, CARS, MODEL_STATS, type CarDef } from "./vehicles";
+import { WEAPONS, type Weapon } from "./weapons";
+import { AUTOSAVE_EVERY, emptyStats, writeSave, type SaveData, type SaveResult, type SaveStats } from "./save";
 import { Traffic, PARKED_LIMIT, steerTo, avoid, stuck } from "./traffic";
 
 export type GameState = "menu" | "playing" | "paused" | "over";
@@ -15,8 +17,8 @@ export type { CarDef, CarModel } from "./vehicles";
 export type Difficulty = "easy" | "normal" | "hard";
 export type CameraMode = "chase" | "fp" | "top";
 export type Quality = "high" | "low";
-export type Weapon = "pistol" | "rocket" | "bomb";
-export const WEAPONS: Weapon[] = ["pistol", "rocket", "bomb"];
+export { WEAPONS } from "./weapons";
+export type { Weapon } from "./weapons";
 
 export interface GameConfig { mode: Mode; difficulty: Difficulty; car: string; camera: CameraMode; quality: Quality; }
 
@@ -44,6 +46,7 @@ export interface TouchInput { active: boolean; jx: number; jy: number; drift: bo
 interface Callbacks {
   onHud: (h: HudData) => void; onState: (s: GameState) => void; onGameOver: (d: GameOverData) => void;
   onHurt: (amount: number) => void; onCamera: (c: CameraMode) => void;
+  onStartKey?: () => void; // Enter/R in menu or after a run: lets the UI decide (new game or continue)
 }
 
 export interface Ped { x: number; y: number; z: number; a: number; vx: number; vy: number; hp: number; maxHp: number; walk: number; moving: boolean; sprint: boolean; shootT: number; hitFlash: number; dead: boolean; }
@@ -96,6 +99,8 @@ export class Game {
   touch: TouchInput = { active: false, jx: 0, jy: 0, drift: false, nitro: false, fire: false };
   minimap: HTMLCanvasElement;
 
+  stats: SaveStats = emptyStats();
+  private autosaveT = AUTOSAVE_EVERY;
   private raf = 0; private last = 0; private hudT = 0; private tmpB: Building[] = [];
 
   constructor(glCanvas: HTMLCanvasElement, overlay: HTMLCanvasElement, cb: Callbacks, config: GameConfig) {
@@ -166,7 +171,10 @@ export class Game {
     this.keys.add(k);
     if (k === "KeyP" || k === "Escape") { if (this.state === "playing") this.pause(); else if (this.state === "paused") this.resume(); }
     if ((k === "KeyC" || k === "KeyV") && (this.state === "playing" || this.state === "paused")) this.cycleCamera();
-    if (k === "Enter" || k === "KeyR") { if (this.state === "over" || this.state === "menu" || (this.state === "paused" && k === "KeyR")) this.start(); }
+    if (k === "Enter" || k === "KeyR") {
+      if (this.state === "paused" && k === "KeyR" && this.rules.respawn) { /* no quick restart in the open world */ }
+      else if (this.state === "over" || this.state === "menu" || (this.state === "paused" && k === "KeyR")) { if (this.cb.onStartKey) this.cb.onStartKey(); else this.start(); }
+    }
     if (this.state !== "playing" || this.ending) return;
     if (k === "KeyE") this.toggleCar();
     if (k === "KeyQ" || k === "Tab") { e.preventDefault(); this.cycleWeapon(); }
@@ -222,10 +230,13 @@ export class Game {
     this.setState("menu");
   }
 
-  start() {
+  // save: continue an open-world game (the caller sets mode and difficulty before)
+  start(save?: SaveData) {
     sfx.init();
     this.resetWorld();
     const rules = this.rules;
+    this.stats = save ? { ...save.stats } : emptyStats();
+    this.autosaveT = AUTOSAVE_EVERY;
     this.wanted.reset(rules);
     this.score = 0; this.mult = 1; this.comboT = 0;
     this.time = 0; this.takedowns = 0; this.cash = rules.respawn ? 200 : 0; this.lastHurt = -10;
@@ -234,9 +245,10 @@ export class Game {
     this.weapon = "pistol"; this.rockets = rules.respawn ? 0 : 30; this.bombsAmmo = rules.respawn ? 0 : 30; this.fireCd = 0; this.hint = ""; this.hintT = 0;
     this.copSpawnT = this.diff.firstCop;
     const p = this.player;
-    p.vx = 120;
-    for (let i = 0; i < 6; i++) this.pickups.push({ x: p.x + 180 + i * 85, y: p.y, type: "cash", t: Math.random() * 6, value: 100 });
-    this.pickups.push({ x: p.x + 760, y: p.y, type: "nitro", t: 0, value: 0 });
+    if (save) this.applySave(save);
+    else p.vx = 120;
+    if (!save) for (let i = 0; i < 6; i++) this.pickups.push({ x: p.x + 180 + i * 85, y: p.y, type: "cash", t: Math.random() * 6, value: 100 });
+    if (!save) this.pickups.push({ x: p.x + 760, y: p.y, type: "nitro", t: 0, value: 0 });
     for (let i = 0; i < 22; i++) this.spawnPickup("cash", true);
     for (let i = 0; i < 5; i++) this.spawnPickup("nitro", true);
     for (let i = 0; i < 5; i++) this.spawnPickup("repair", true);
@@ -245,10 +257,57 @@ export class Game {
     for (let i = 0; i < 14; i++) this.traffic.spawnCiv(this, true);
     this.peds.limit = this.config.quality === "low" ? PED_LIMIT.low : PED_LIMIT.high;
     this.traffic.reset();
-    if (rules.city) { this.peds.populate(p.x, p.y); this.traffic.updateParking(this, 0, this.parkedLimit, true); }
+    if (rules.city) { this.peds.populate(this.fx, this.fy); this.traffic.updateParking(this, 0, this.parkedLimit, true); }
     const m = this.config.mode;
-    this.banner(m === "free" ? "FREIE FAHRT" : m === "open" ? "SOLARA BAY" : "LOS GEHT'S", m === "free" ? "Keine Cops – erkunde Stadt & Berge" : m === "open" ? "Die Stadt gehört dir – benimm dich (oder nicht)" : "Schnapp dir das Cash!", "#ff3cac", 2.6);
+    if (save) this.banner("WILLKOMMEN ZURÜCK", "Spielstand geladen", "#3dff8b", 2.6);
+    else this.banner(m === "free" ? "FREIE FAHRT" : m === "open" ? "SOLARA BAY" : "LOS GEHT'S", m === "free" ? "Keine Cops – erkunde Stadt & Berge" : m === "open" ? "Die Stadt gehört dir – benimm dich (oder nicht)" : "Schnapp dir das Cash!", "#ff3cac", 2.6);
     this.setState("playing");
+  }
+
+  private applySave(sv: SaveData) {
+    const p = this.player;
+    this.cash = sv.cash; this.rockets = sv.rockets; this.bombsAmmo = sv.bombs; this.weapon = sv.weapon;
+    this.time = sv.stats.playTime;
+    const pd = this.ped;
+    pd.x = sv.ped.x; pd.y = sv.ped.y; pd.z = terrainH(pd.x, pd.y); pd.a = sv.ped.a; pd.hp = Math.min(pd.maxHp, Math.max(1, sv.ped.hp));
+    if (sv.car) {
+      const c = sv.car;
+      p.model = c.model; p.color = c.color; p.maxHp = c.maxHp; p.hp = Math.min(c.maxHp, Math.max(1, c.hp)); p.mass = c.mass;
+      p.x = c.x; p.y = c.y; p.a = c.a;
+    } else {
+      // the car was destroyed: a replacement waits on the nearest street
+      const n = this.world.nearestNode(pd.x, pd.y), np = this.world.nodePos(n.i, n.j);
+      p.x = np.x + 10; p.y = np.y + 34; p.a = 0;
+    }
+    p.z = terrainH(p.x, p.y); p.vx = 0; p.vy = 0;
+    this.onFoot = sv.onFoot || !sv.car;
+    if (this.onFoot) p.handbrake = true;
+    else { pd.x = p.x; pd.y = p.y; }
+    this.r3d.resetCamera(this.onFoot ? pd.a : p.a);
+  }
+
+  // why saving is not possible right now (null: it is)
+  saveBlock(): SaveResult | null {
+    if (!this.rules.save) return "mode";
+    if (this.ending || (this.state !== "playing" && this.state !== "paused")) return "busy";
+    if (this.wanted.stars > 0) return "wanted";
+    return null;
+  }
+
+  saveGame(): SaveResult {
+    const block = this.saveBlock();
+    if (block) return block;
+    const p = this.player, pd = this.ped;
+    this.stats.playTime = this.time;
+    this.stats.maxStars = Math.max(this.stats.maxStars, this.wanted.maxStars);
+    const d: SaveData = {
+      v: 1, savedAt: Date.now(), difficulty: this.config.difficulty,
+      onFoot: this.onFoot, ped: { x: pd.x, y: pd.y, a: pd.a, hp: pd.hp },
+      car: p.dead ? null : { model: p.model, color: p.color, hp: p.hp, maxHp: p.maxHp, mass: p.mass, x: p.x, y: p.y, a: p.a },
+      cash: this.cash, rockets: this.rockets, bombs: this.bombsAmmo, weapon: this.weapon, stats: { ...this.stats },
+    };
+    this.autosaveT = AUTOSAVE_EVERY;
+    return writeSave(d);
   }
 
   pause() { if (this.state === "playing") { this.setState("paused"); this.keys.clear(); this.fireHeld = false; } }
@@ -345,7 +404,7 @@ export class Game {
     this.emit(x, y, z + 1, 0, 0, 0, 0.45, 20, 520, "#ffc88c", 4, 0);
     const R = 160 * Math.sqrt(big);
     const knocked = this.peds.blast(x, y, R);
-    if (knocked) this.crime("pedHit", knocked);
+    if (knocked && this.state === "playing" && !this.ending) { this.crime("pedHit", knocked); this.stats.pedsHit += knocked; }
     this.peds.alarm(x, y, 900, "blast");
     for (const c of this.cars) {
       const d = Math.hypot(c.x - x, c.y - y);
@@ -433,6 +492,7 @@ export class Game {
     this.peds.alarm(c.x, c.y, 350, "blast");
     if (by !== this.player || this.onFoot) return;
     this.crime("pedHit");
+    this.stats.pedsHit++;
     sfx.crash(Math.min(0.5, speed / 900));
     this.shake(0.06);
   }
@@ -453,6 +513,7 @@ export class Game {
   // open world: no game over, wake up at the hospital or get released at the police station
   private respawn(reason: EndReason) {
     const rule = RESPAWN_RULES[reason];
+    if (reason === "dead") this.stats.deaths++; else this.stats.arrests++;
     const place = this.places.find((pl) => pl.kind === rule.place);
     const cost = respawnCost(rule, this.cash);
     this.cash -= cost;
@@ -469,6 +530,7 @@ export class Game {
     this.onFoot = true;
     this.r3d.resetCamera(this.ped.a + Math.PI); // camera on the street, looking at the entrance
     this.banners.length = 0;
+    this.autosaveT = 1; // save the new state right after waking up
     this.banner(rule.title, `${place ? place.name + " · " : ""}−$${cost.toLocaleString("de-DE")} ${rule.sub}`, place ? place.color : "#ffffff", 3.2);
   }
 
@@ -613,6 +675,7 @@ export class Game {
           if (q.kind === "bullet") {
             this.peds.knockDown(cv, q.vx * 0.08, q.vy * 0.08, 40);
             this.crime("pedShot");
+            this.stats.pedsHit++;
             this.peds.alarm(cv.x, cv.y, 400, "blast");
           } else this.explode(cv.x, cv.y, 1.1, 4);
           remove = true;
@@ -703,7 +766,7 @@ export class Game {
       for (const b of this.bombs) if (b.car === c) b.car = p;
       this.cars.splice(this.cars.indexOf(c), 1);
       if (!own) this.banner(wasCop ? "STREIFENWAGEN GEKLAUT" : jacked ? "AUTO GEKLAUT" : "AUTO GEKNACKT", wasCop ? "Die mögen das gar nicht" : jacked ? "Der Fahrer ergreift die Flucht" : "+ Fahndung", "#ffd23f", 1.4);
-      if (!own) this.crime(wasCop ? "copCarjack" : parkedTheft ? "parkedTheft" : "carjack");
+      if (!own) { this.crime(wasCop ? "copCarjack" : parkedTheft ? "parkedTheft" : "carjack"); this.stats.carsStolen++; }
       if (!own) this.addScore(wasCop ? 300 : 100, p.x, p.y, "CARJACK", "#ffd23f", 20);
     }
     this.onFoot = false;
@@ -939,6 +1002,10 @@ export class Game {
         }
       }
       if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) { this.mult = 1; this.comboT = 0; } }
+      if (rules.save) {
+        this.autosaveT -= dt;
+        if (this.autosaveT <= 0 && !this.saveBlock()) { if (this.saveGame() === "saved") this.setHint("Automatisch gespeichert", 1.6); }
+      }
 
       if (!this.onFoot) {
         const sp = p.speed;

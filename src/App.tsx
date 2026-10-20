@@ -5,6 +5,7 @@ import {
 } from "./game/engine";
 import { sfx } from "./game/audio";
 import { MODE_RULES, type ModeRules } from "./game/modes";
+import { loadSave, storageAvailable, type SaveData, type SaveResult } from "./game/save";
 import { DEFAULT_NAME, loadName, loadScores, saveName, saveScore, type ScoreEntry } from "./game/scores";
 import TouchControls from "./components/TouchControls";
 
@@ -18,6 +19,11 @@ const DIFF_LABEL: Record<Difficulty, string> = { easy: "Leicht", normal: "Normal
 const CAM_LABEL: Record<CameraMode, string> = { chase: "3D Verfolger", fp: "Ego (im Auto)", top: "Vogelperspektive" };
 const WICON: Record<Weapon, string> = { pistol: "🔫", rocket: "🚀", bomb: "💣" };
 const WNAME: Record<Weapon, string> = { pistol: "Pistole", rocket: "Raketenwerfer", bomb: "Haftbombe" };
+const SAVE_MSG: Record<SaveResult, string> = {
+  saved: "Gespeichert ✓", memory: "Nur vorübergehend gespeichert – der Browser blockiert den lokalen Speicher",
+  wanted: "Speichern geht nur ohne Fahndung (keine Sterne)", busy: "Gerade nicht möglich", mode: "",
+};
+const fmtDate = (t: number) => new Date(t).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 const CFG_KEY = "solarabay.config.v1";
 const LEGACY_CFG_KEY = "viceheat.config.v3";
 
@@ -54,6 +60,9 @@ export default function App() {
   const [touchInput, setTouchInput] = useState<TouchInput | null>(null);
   const [isTouch] = useState(isTouchDevice);
   const [glError, setGlError] = useState(false);
+  const [save, setSave] = useState<SaveData | null>(loadSave);
+  const [saveMsg, setSaveMsg] = useState("");
+  const startKeyRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     let game: Game;
@@ -62,6 +71,7 @@ export default function App() {
         onHud: setHud,
         onState: setState,
         onCamera: (c: CameraMode) => updateConfig({ camera: c }, false),
+        onStartKey: () => startKeyRef.current(),
         onGameOver: (d: GameOverData) => {
           setOver(d);
           const tag = d.mode === "free" ? "Frei" : DIFF_LABEL[d.difficulty];
@@ -95,9 +105,26 @@ export default function App() {
   }
 
   const start = () => { saveName(nameRef.current); setOver(null); setRank(-1); setHud(EMPTY_HUD); gameRef.current?.configure(cfgRef.current); gameRef.current?.start(); };
-  const toMenu = () => { setOver(null); gameRef.current?.setupMenu(); };
+  const continueGame = () => {
+    const sv = loadSave();
+    if (!sv) { setSave(null); start(); return; }
+    saveName(nameRef.current); setOver(null); setRank(-1); setHud(EMPTY_HUD);
+    updateConfig({ mode: "open", difficulty: sv.difficulty });
+    gameRef.current?.start(sv);
+  };
+  // main button / Enter: continue the saved open-world game if there is one
+  const primary = () => { if (cfgRef.current.mode === "open" && loadSave()) continueGame(); else start(); };
+  startKeyRef.current = () => { if (gameRef.current?.state === "menu") primary(); else start(); };
+  const saveNow = () => { const g = gameRef.current; if (!g) return; setSaveMsg(SAVE_MSG[g.saveGame()]); setSave(loadSave()); };
+  const toMenu = () => {
+    const g = gameRef.current;
+    if (g && config.mode === "open") { g.saveGame(); setSave(loadSave()); }
+    setOver(null); g?.setupMenu();
+  };
   const toggleMute = () => { const m = !muted; setMuted(m); sfx.setMuted(m); };
   const cycleCam = () => gameRef.current?.cycleCamera();
+
+  useEffect(() => { if (state === "paused") setSaveMsg(""); }, [state]);
 
   const playing = state === "playing";
   const rules = MODE_RULES[config.mode];
@@ -129,7 +156,7 @@ export default function App() {
       )}
 
       {state === "menu" && !glError && (
-        <StartScreen name={name} setName={(n) => { setName(n); nameRef.current = n; }} scores={scores} config={config} update={updateConfig} onStart={start} isTouch={isTouch} muted={muted} toggleMute={toggleMute} />
+        <StartScreen name={name} setName={(n) => { setName(n); nameRef.current = n; }} scores={scores} config={config} update={updateConfig} onStart={primary} onNew={start} save={save} isTouch={isTouch} muted={muted} toggleMute={toggleMute} />
       )}
 
       {state === "paused" && (
@@ -139,6 +166,8 @@ export default function App() {
           <div className="mt-8 flex w-72 flex-col gap-3">
             <Btn primary onClick={() => gameRef.current?.resume()}>Weiter</Btn>
             <Btn onClick={cycleCam}>Kamera: {CAM_LABEL[config.camera]}</Btn>
+            {open && <Btn onClick={saveNow}>Speichern</Btn>}
+            {open && saveMsg && <div className="-mt-1 text-center text-xs text-white/70">{saveMsg}</div>}
             {!open && <Btn onClick={() => gameRef.current?.finish()}>Fahrt beenden</Btn>}
             {!open && <Btn onClick={start}>Neustart</Btn>}
             <Btn onClick={toggleMute}>{muted ? "Ton an" : "Ton aus"}</Btn>
@@ -297,10 +326,23 @@ function StatBar({ v, color }: { v: number; color: string }) {
   return <div className="h-1 w-full overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full" style={{ width: `${Math.round(v * 100)}%`, background: color }} /></div>;
 }
 
-function StartScreen({ name, setName, scores, config, update, onStart, isTouch, muted, toggleMute }: {
-  name: string; setName: (n: string) => void; scores: ScoreEntry[]; config: GameConfig; update: (p: Partial<GameConfig>) => void; onStart: () => void; isTouch: boolean; muted: boolean; toggleMute: () => void;
+function StartScreen({ name, setName, scores, config, update, onStart, onNew, save, isTouch, muted, toggleMute }: {
+  name: string; setName: (n: string) => void; scores: ScoreEntry[]; config: GameConfig; update: (p: Partial<GameConfig>) => void;
+  onStart: () => void; onNew: () => void; save: SaveData | null; isTouch: boolean; muted: boolean; toggleMute: () => void;
 }) {
   const [tab, setTab] = useState<"setup" | "scores" | "help">("setup");
+  const [confirmNew, setConfirmNew] = useState(false);
+  const cont = config.mode === "open" && !!save;
+  const startLabel = cont ? "WEITERSPIELEN" : "LOS GEHT'S";
+  const saveBox = cont && save && (
+    <div className="rounded-xl border border-green-300/30 bg-green-400/10 p-3 text-sm">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.25em] text-green-200/80">Spielstand</div>
+      <div className="mt-1 text-white/85">${fmt(save.cash)} · Spielzeit {fmtTime(save.stats.playTime)} · gespeichert {fmtDate(save.savedAt)}</div>
+      <button onClick={() => { if (confirmNew) { setConfirmNew(false); onNew(); } else setConfirmNew(true); }} className="mt-2 text-xs font-semibold text-white/60 underline hover:text-white">
+        {confirmNew ? "Wirklich neu anfangen? Der Spielstand wird beim nächsten Speichern überschrieben – nochmal tippen" : "Neues Spiel starten"}
+      </button>
+    </div>
+  );
   return (
     <div className="absolute inset-0 z-20 overflow-y-auto">
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#0b0614]/95 via-[#0b0614]/55 to-[#0b0614]/80 lg:to-transparent" />
@@ -313,7 +355,7 @@ function StartScreen({ name, setName, scores, config, update, onStart, isTouch, 
           </h1>
           <p className="mt-3 max-w-md text-sm text-white/75 sm:text-base">Solara Bay und die Berge dahinter: klau Autos, steig aus, schieß mit Pistole, Raketenwerfer und Haftbomben zurück – oder genieß einfach die Fahrt über die Hügel.</p>
           <div className="mt-5 hidden w-full max-w-sm lg:block">
-            <button onClick={onStart} className="pulseglow w-full rounded-xl bg-gradient-to-r from-pink-500 via-fuchsia-500 to-orange-400 px-8 py-4 font-display text-4xl tracking-[0.2em] text-white transition-transform hover:scale-[1.03] active:scale-95">LOS GEHT'S</button>
+            <button onClick={onStart} className="pulseglow w-full rounded-xl bg-gradient-to-r from-pink-500 via-fuchsia-500 to-orange-400 px-8 py-4 font-display text-4xl tracking-[0.2em] text-white transition-transform hover:scale-[1.03] active:scale-95">{startLabel}</button>
             <div className="mt-2 text-xs text-white/40">Enter zum Starten</div>
           </div>
         </div>
@@ -327,6 +369,8 @@ function StartScreen({ name, setName, scores, config, update, onStart, isTouch, 
 
           {tab === "setup" && (
             <div className="space-y-4">
+              {saveBox}
+              {config.mode === "open" && !storageAvailable() && <div className="rounded-xl border border-yellow-300/30 bg-yellow-300/10 p-3 text-xs text-yellow-100">Dein Browser blockiert den lokalen Speicher – der Fortschritt bleibt nur bis zum Neuladen der Seite erhalten.</div>}
               <Section title="Spielmodus">
                 <Choice<Mode> value={config.mode} onChange={(v) => update({ mode: v })} options={[{ v: "open", label: "Open World", sub: "Stadtleben, Fahndung, Respawn" }, { v: "chase", label: "Verfolgungsjagd", sub: "Cops, Sterne, Takedowns" }, { v: "free", label: "Freie Fahrt", sub: "Keine Cops, kein Schaden" }]} />
               </Section>
@@ -361,7 +405,7 @@ function StartScreen({ name, setName, scores, config, update, onStart, isTouch, 
                 </div>
                 <button onClick={toggleMute} className="rounded-xl border border-white/15 bg-black/30 px-4 py-3 text-sm text-white/70 hover:text-white">{muted ? "🔇 Ton aus" : "🔊 Ton an"}</button>
               </div>
-              <button onClick={onStart} className="pulseglow w-full rounded-xl bg-gradient-to-r from-pink-500 via-fuchsia-500 to-orange-400 px-8 py-4 font-display text-4xl tracking-[0.2em] text-white transition-transform active:scale-95 lg:hidden">LOS GEHT'S</button>
+              <button onClick={onStart} className="pulseglow w-full rounded-xl bg-gradient-to-r from-pink-500 via-fuchsia-500 to-orange-400 px-8 py-4 font-display text-4xl tracking-[0.2em] text-white transition-transform active:scale-95 lg:hidden">{startLabel}</button>
             </div>
           )}
 
@@ -375,6 +419,7 @@ function StartScreen({ name, setName, scores, config, update, onStart, isTouch, 
                   <li><b className="text-orange-300">FEUER</b> – schießt automatisch auf den nächsten Cop · <b>🔫/🚀/💣</b> antippen = Waffe wechseln · <b>💥</b> = Bomben zünden</li>
                   <li><b className="text-pink-300">DRIFT</b> – Handbremse · <b className="text-cyan-300">NITRO / SPRINT</b></li>
                   <li><b>🚪 / 🚗</b> oben – aus- & einsteigen (jedes Auto lässt sich klauen) · <b>🎥</b> – Kamera</li>
+                  <li><b>⏸</b> Pause – <b>Speichern</b> (Open World, nur ohne Sterne)</li>
                 </ul>
               ) : (
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-white/80">
@@ -386,7 +431,7 @@ function StartScreen({ name, setName, scores, config, update, onStart, isTouch, 
                   <span><Key>G</Key></span><span>Haftbomben zünden</span>
                   <span><Key>E</Key></span><span>Aussteigen / Einsteigen (Auto klauen)</span>
                   <span><Key>C</Key></span><span>Kamera: 3D → Ego → Vogel</span>
-                  <span><Key>P</Key> / <Key>Esc</Key></span><span>Pause</span>
+                  <span><Key>P</Key> / <Key>Esc</Key></span><span>Pause (dort: Speichern in der Open World)</span>
                 </div>
               )}
               <div className="mt-4 border-t border-white/10 pt-3 text-xs leading-relaxed text-white/60">
@@ -394,7 +439,9 @@ function StartScreen({ name, setName, scores, config, update, onStart, isTouch, 
                 Säulen: <b className="text-green-300">grün</b> Cash · <b className="text-orange-300">orange</b> Raketen · <b className="text-red-300">rot</b> Bomben · <b className="text-cyan-300">blau</b> Nitro · <b>weiß</b> Reparatur<br />
                 ⛰️ Über die Highways raus in die Berge – Sprünge geben AIRTIME-Punkte. Cops folgen dir überall hin.<br />
                 🌆 <b>Open World:</b> Verbrechen bringen Sterne. Bleib außer Sicht der Cops, bis die Sterne aufhören zu blinken – dann bist du entkommen.
-                Erledigt → <b className="text-red-300">Krankenhaus (+)</b>, verhaftet → <b className="text-blue-300">Polizeiwache (★)</b>, jeweils mit Geldverlust und ohne Spezialmunition.
+                Erledigt → <b className="text-red-300">Krankenhaus (+)</b>, verhaftet → <b className="text-blue-300">Polizeiwache (★)</b>, jeweils mit Geldverlust und ohne Spezialmunition.<br />
+                🚗 Geparkte Autos am Straßenrand lassen sich unauffälliger klauen als besetzte – der Fahrer flüchtet. Passanten anfahren oder anschießen bringt Sterne.<br />
+                💾 Automatisches Speichern jede Minute, sobald du keine Sterne hast. Hauptmenü speichert ebenfalls.
               </div>
             </div>
           )}
