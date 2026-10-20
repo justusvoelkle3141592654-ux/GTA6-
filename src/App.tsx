@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  CARS, Game,
+  CARS, END_LABEL, Game, LEGACY_CAR_IDS,
   type CameraMode, type Difficulty, type GameConfig, type GameOverData, type GameState, type HudData, type Mode, type Quality, type TouchInput, type Weapon,
 } from "./game/engine";
 import { sfx } from "./game/audio";
-import { loadName, loadScores, saveName, saveScore, type ScoreEntry } from "./game/scores";
+import { DEFAULT_NAME, loadName, loadScores, saveName, saveScore, type ScoreEntry } from "./game/scores";
 import TouchControls from "./components/TouchControls";
 
 const EMPTY_HUD: HudData = {
@@ -17,12 +17,16 @@ const DIFF_LABEL: Record<Difficulty, string> = { easy: "Leicht", normal: "Normal
 const CAM_LABEL: Record<CameraMode, string> = { chase: "3D Verfolger", fp: "Ego (im Auto)", top: "Vogelperspektive" };
 const WICON: Record<Weapon, string> = { pistol: "🔫", rocket: "🚀", bomb: "💣" };
 const WNAME: Record<Weapon, string> = { pistol: "Pistole", rocket: "Raketenwerfer", bomb: "Haftbombe" };
-const CFG_KEY = "viceheat.config.v3";
+const CFG_KEY = "solarabay.config.v1";
+const LEGACY_CFG_KEY = "viceheat.config.v3";
 
 function isTouchDevice() { return typeof window !== "undefined" && (window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window); }
 function loadConfig(): GameConfig {
-  const def: GameConfig = { mode: "chase", difficulty: "easy", car: "infernus", camera: "chase", quality: isTouchDevice() ? "low" : "high" };
-  try { const raw = localStorage.getItem(CFG_KEY); if (raw) return { ...def, ...JSON.parse(raw) }; } catch { /* ignore */ }
+  const def: GameConfig = { mode: "chase", difficulty: "easy", car: "corsaro", camera: "chase", quality: isTouchDevice() ? "low" : "high" };
+  try {
+    const raw = localStorage.getItem(CFG_KEY) ?? localStorage.getItem(LEGACY_CFG_KEY);
+    if (raw) { const cfg: GameConfig = { ...def, ...JSON.parse(raw) }; cfg.car = LEGACY_CAR_IDS[cfg.car] ?? cfg.car; return cfg; }
+  } catch { /* ignore */ }
   return def;
 }
 
@@ -55,7 +59,7 @@ export default function App() {
         onGameOver: (d: GameOverData) => {
           setOver(d);
           const tag = d.mode === "free" ? "Frei" : DIFF_LABEL[d.difficulty];
-          const entry: ScoreEntry = { name: (nameRef.current || "TOMMY").slice(0, 12).toUpperCase(), score: d.score, time: d.time, stars: d.maxStars, reason: d.reason, date: Date.now(), tag };
+          const entry: ScoreEntry = { name: (nameRef.current || DEFAULT_NAME).slice(0, 12).toUpperCase(), score: d.score, time: d.time, stars: d.maxStars, reason: d.reason, date: Date.now(), tag };
           const res = saveScore(entry);
           setScores(res.list); setRank(res.rank);
         },
@@ -293,9 +297,9 @@ function StartScreen({ name, setName, scores, config, update, onStart, isTouch, 
         <div className="flex flex-col items-center text-center lg:w-[42%] lg:items-start lg:text-left">
           <div className="mb-2 rounded-full border border-cyan-300/40 bg-cyan-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-cyan-200">3D Open World · Stadt & Berge</div>
           <h1 className="floaty font-display text-[24vw] leading-[0.82] tracking-wide text-white neon-text sm:text-[8.5rem]">
-            VICE<br /><span className="bg-gradient-to-b from-yellow-200 via-orange-400 to-pink-500 bg-clip-text text-transparent" style={{ textShadow: "none", filter: "drop-shadow(0 0 18px rgba(255,120,60,0.6))" }}>HEAT</span>
+            SOLARA<br /><span className="bg-gradient-to-b from-yellow-200 via-orange-400 to-pink-500 bg-clip-text text-transparent" style={{ textShadow: "none", filter: "drop-shadow(0 0 18px rgba(255,120,60,0.6))" }}>BAY</span>
           </h1>
-          <p className="mt-3 max-w-md text-sm text-white/75 sm:text-base">Neon City und die Berge dahinter: klau Autos, steig aus, schieß mit Pistole, Raketenwerfer und Haftbomben zurück – oder genieß einfach die Fahrt über die Hügel.</p>
+          <p className="mt-3 max-w-md text-sm text-white/75 sm:text-base">Solara Bay und die Berge dahinter: klau Autos, steig aus, schieß mit Pistole, Raketenwerfer und Haftbomben zurück – oder genieß einfach die Fahrt über die Hügel.</p>
           <div className="mt-5 hidden w-full max-w-sm lg:block">
             <button onClick={onStart} className="pulseglow w-full rounded-xl bg-gradient-to-r from-pink-500 via-fuchsia-500 to-orange-400 px-8 py-4 font-display text-4xl tracking-[0.2em] text-white transition-transform hover:scale-[1.03] active:scale-95">LOS GEHT'S</button>
             <div className="mt-2 text-xs text-white/40">Enter zum Starten</div>
@@ -391,8 +395,8 @@ function Key({ children }: { children: React.ReactNode }) {
 }
 
 function GameOver({ data, scores, rank, onRestart, onMenu, isTouch }: { data: GameOverData; scores: ScoreEntry[]; rank: number; onRestart: () => void; onMenu: () => void; isTouch: boolean }) {
-  const title = data.reason === "FINISHED" ? "FAHRT BEENDET" : data.reason;
-  const color = data.reason === "WASTED" ? "#ff2a3a" : data.reason === "BUSTED" ? "#4da3ff" : "#ff3cac";
+  const title = data.reason === "finished" ? "FAHRT BEENDET" : END_LABEL[data.reason];
+  const color = data.reason === "dead" ? "#ff2a3a" : data.reason === "arrested" ? "#4da3ff" : "#ff3cac";
   return (
     <div className="absolute inset-0 z-20 overflow-y-auto bg-[#0b0614]/75 backdrop-blur-sm">
       <div className="mx-auto flex min-h-full max-w-3xl flex-col items-center justify-center px-5 py-8">

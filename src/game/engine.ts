@@ -13,11 +13,13 @@ export const WEAPONS: Weapon[] = ["pistol", "rocket", "bomb"];
 
 export interface CarDef { id: string; name: string; model: CarModel; color: string; maxV: number; acc: number; grip: number; hp: number; mass: number; desc: string; }
 export const CARS: CarDef[] = [
-  { id: "infernus", name: "Infernus", model: "sport", color: "#ff2d95", maxV: 560, acc: 640, grip: 11, hp: 120, mass: 1.4, desc: "Ausgewogen" },
-  { id: "banshee", name: "Banshee", model: "super", color: "#2bf0ff", maxV: 650, acc: 740, grip: 10, hp: 90, mass: 1.2, desc: "Rakete" },
-  { id: "sabre", name: "Sabre", model: "muscle", color: "#ff8a1f", maxV: 540, acc: 700, grip: 7, hp: 130, mass: 1.5, desc: "Drift-König" },
-  { id: "patriot", name: "Patriot", model: "suv", color: "#ffd23f", maxV: 480, acc: 560, grip: 12, hp: 220, mass: 2.2, desc: "Panzer" },
+  { id: "corsaro", name: "Corsaro", model: "sport", color: "#ff2d95", maxV: 560, acc: 640, grip: 11, hp: 120, mass: 1.4, desc: "Ausgewogen" },
+  { id: "zephyra", name: "Zephyra", model: "super", color: "#2bf0ff", maxV: 650, acc: 740, grip: 10, hp: 90, mass: 1.2, desc: "Rakete" },
+  { id: "torvan", name: "Torvan", model: "muscle", color: "#ff8a1f", maxV: 540, acc: 700, grip: 7, hp: 130, mass: 1.5, desc: "Drift-König" },
+  { id: "granit", name: "Granit", model: "suv", color: "#ffd23f", maxV: 480, acc: 560, grip: 12, hp: 220, mass: 2.2, desc: "Panzer" },
 ];
+// car ids of older versions -> current ids
+export const LEGACY_CAR_IDS: Record<string, string> = { infernus: "corsaro", banshee: "zephyra", sabre: "torvan", patriot: "granit" };
 const MODEL_STATS: Record<CarModel, { maxV: number; acc: number; grip: number }> = {
   sport: { maxV: 560, acc: 640, grip: 11 }, super: { maxV: 650, acc: 740, grip: 10 }, muscle: { maxV: 540, acc: 700, grip: 7 }, suv: { maxV: 480, acc: 560, grip: 12 },
   sedan: { maxV: 470, acc: 520, grip: 11 }, van: { maxV: 420, acc: 460, grip: 12 }, police: { maxV: 560, acc: 640, grip: 11 }, taxi: { maxV: 480, acc: 540, grip: 11 },
@@ -37,8 +39,11 @@ export interface HudData {
   kmh: number; time: number; drift: number; bust01: number; takedowns: number;
   weapon: Weapon; rockets: number; bombs: number; bombsPlaced: number; onFoot: boolean; canEnter: boolean; hint: string; air: boolean;
 }
+export type EndReason = "dead" | "arrested";
+export const END_LABEL: Record<EndReason, string> = { dead: "ERLEDIGT", arrested: "VERHAFTET" };
+
 export interface GameOverData {
-  score: number; time: number; takedowns: number; maxStars: number; reason: "WASTED" | "BUSTED" | "FINISHED";
+  score: number; time: number; takedowns: number; maxStars: number; reason: EndReason | "finished";
   bestDrift: number; cash: number; mode: Mode; difficulty: Difficulty;
 }
 export interface TouchInput { active: boolean; jx: number; jy: number; drift: boolean; nitro: boolean; fire: boolean; }
@@ -72,7 +77,7 @@ export interface Particle { x: number; y: number; z: number; vx: number; vy: num
 export type PickupType = "cash" | "repair" | "nitro" | "rocket" | "bomb";
 export interface Pickup { x: number; y: number; type: PickupType; t: number; value: number; }
 interface FloatText { x: number; y: number; h: number; text: string; color: string; life: number; max: number; size: number; }
-interface Banner { text: string; sub: string; color: string; life: number; max: number; }
+interface Banner { text: string; sub: string; color: string; life: number; max: number; big: boolean; }
 export interface Flash { x: number; y: number; z: number; life: number; max: number; size: number; }
 
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -105,7 +110,7 @@ export class Game {
   score = 0; mult = 1; comboT = 0; heat = 0; stars = 1; maxStars = 1; time = 0; takedowns = 0; cash = 0;
   driftPts = 0; driftHold = 0; bestDrift = 0; bust = 0; nitro = 1; nitroWasOn = false; lastHurt = -10;
   weapon: Weapon = "pistol"; rockets = 30; bombsAmmo = 30; fireCd = 0; fireHeld = false; hint = ""; hintT = 0;
-  ending: null | { reason: "WASTED" | "BUSTED"; t: number } = null;
+  ending: null | { reason: EndReason; t: number } = null;
   copSpawnT = 0;
 
   keys = new Set<string>();
@@ -265,7 +270,7 @@ export class Game {
     if (this.state !== "playing" && this.state !== "paused") return;
     this.bankDrift();
     this.setState("over");
-    this.cb.onGameOver(this.overData("FINISHED"));
+    this.cb.onGameOver(this.overData("finished"));
   }
   private overData(reason: GameOverData["reason"]): GameOverData {
     return { score: Math.floor(this.score), time: this.time, takedowns: this.takedowns, maxStars: this.maxStars, reason, bestDrift: Math.round(this.bestDrift), cash: this.cash, mode: this.config.mode, difficulty: this.config.difficulty };
@@ -353,8 +358,8 @@ export class Game {
     this.texts.push({ x, y, h: terrainH(x, y) + 40, text, color, life: 1.2, max: 1.2, size });
     if (this.texts.length > 14) this.texts.shift();
   }
-  banner(text: string, sub: string, color: string, dur = 1.6) {
-    this.banners.push({ text, sub, color, life: dur, max: dur });
+  banner(text: string, sub: string, color: string, dur = 1.6, big = false) {
+    this.banners.push({ text, sub, color, life: dur, max: dur, big });
     if (this.banners.length > 2) this.banners.shift();
   }
   private setHint(h: string, t = 1.5) { this.hint = h; this.hintT = t; }
@@ -407,7 +412,7 @@ export class Game {
     if (p.hp <= 0) {
       p.hp = 0; p.dead = true; p.wrecked = true;
       this.explode(p.x, p.y, 1.4);
-      if (!this.onFoot) this.endRun("WASTED");
+      if (!this.onFoot) this.endRun("dead");
       else { this.banner("AUTO ZERSTÖRT", "Klau dir ein neues (E)", "#ff9f43", 2); this.detachBombs(p); }
     }
   }
@@ -422,7 +427,7 @@ export class Game {
     this.lastHurt = this.time;
     this.cb.onHurt(amt);
     this.shake(Math.min(0.5, amt / 40));
-    if (pd.hp <= 0) { pd.hp = 0; pd.dead = true; this.endRun("WASTED"); }
+    if (pd.hp <= 0) { pd.hp = 0; pd.dead = true; this.endRun("dead"); }
   }
 
   private damageCar(c: Car, amt: number, byWeapon = false) {
@@ -451,10 +456,10 @@ export class Game {
     for (const b of this.bombs) if (b.car === c) { b.car = null; }
   }
 
-  private endRun(reason: "WASTED" | "BUSTED") {
+  private endRun(reason: EndReason) {
     if (this.ending) return;
     this.ending = { reason, t: 0 };
-    this.banner(reason, reason === "WASTED" ? (this.onFoot ? "Du bist draufgegangen" : "Dein Wagen ist Schrott") : "Die Cops haben dich", reason === "WASTED" ? "#ff2a3a" : "#4da3ff", 3);
+    this.banner(END_LABEL[reason], reason === "dead" ? (this.onFoot ? "Du bist draufgegangen" : "Dein Wagen ist Schrott") : "Die Cops haben dich", reason === "dead" ? "#ff2a3a" : "#4da3ff", 3, true);
     sfx.gameOver();
     this.bankDrift();
   }
@@ -815,7 +820,7 @@ export class Game {
       else this.readCarInput();
       if ((this.fireHeld || this.touch.fire || this.keys.has("KeyF") || this.keys.has("ControlLeft") || this.keys.has("ControlRight")) && (this.weapon === "pistol" || this.fireCd <= 0)) this.fire();
     } else if (playing && this.ending) {
-      p.throttle = 0; p.steer = 0; p.nitro = false; p.handbrake = this.ending.reason === "BUSTED" || this.onFoot;
+      p.throttle = 0; p.steer = 0; p.nitro = false; p.handbrake = this.ending.reason === "arrested" || this.onFoot;
       this.ped.vx *= 0.9; this.ped.vy *= 0.9;
     } else { this.civAI(p, dt); p.nitro = false; }
 
@@ -927,7 +932,7 @@ export class Game {
         for (const c of this.cars) if (c.kind === "cop" && !c.dead && Math.hypot(c.x - fx, c.y - fy) < 85) close++;
         if (close > 0 && this.fspeed < 60) this.bust += dt * (0.3 + close * 0.1) * D.bust * (this.onFoot ? 1.6 : 1);
         else this.bust = Math.max(0, this.bust - dt * 0.8);
-        if (this.bust >= 1) { this.bust = 1; this.endRun("BUSTED"); }
+        if (this.bust >= 1) { this.bust = 1; this.endRun("arrested"); }
       }
     } else {
       this.ending.t += dt / Math.max(this.timeScale, 0.01);
@@ -1495,7 +1500,7 @@ export class Game {
       const age = b.max - b.life;
       const pop = age < 0.12 ? 0.4 + (age / 0.12) * 0.8 : age < 0.22 ? 1.2 - ((age - 0.12) / 0.1) * 0.2 : 1;
       const alpha = Math.min(1, b.life * 3);
-      const big = b.text === "WASTED" || b.text === "BUSTED";
+      const big = b.big;
       const fs = Math.min(cw * (big ? 0.2 : 0.11), big ? 140 : 72) * pop;
       const by = big ? ch * 0.42 : yy;
       ctx.globalAlpha = alpha;

@@ -8,12 +8,16 @@ export interface ScoreEntry {
   tag?: string;
 }
 
-const KEY = "viceheat.scores.v1";
-const NAME_KEY = "viceheat.name";
+const KEY = "solarabay.scores.v1";
+const NAME_KEY = "solarabay.name";
+// keys of the previous version, read once as a fallback
+const LEGACY_KEY = "viceheat.scores.v1";
+const LEGACY_NAME_KEY = "viceheat.name";
+export const DEFAULT_NAME = "SPIELER";
 
 export function loadScores(): ScoreEntry[] {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(KEY) ?? localStorage.getItem(LEGACY_KEY);
     if (!raw) return [];
     const arr = JSON.parse(raw) as ScoreEntry[];
     return Array.isArray(arr) ? arr.slice(0, 10) : [];
@@ -38,9 +42,10 @@ export function saveScore(e: ScoreEntry): { list: ScoreEntry[]; rank: number } {
 
 export function loadName(): string {
   try {
-    return localStorage.getItem(NAME_KEY) || "TOMMY";
+    const n = localStorage.getItem(NAME_KEY) ?? localStorage.getItem(LEGACY_NAME_KEY);
+    return !n || n === "TOMMY" ? DEFAULT_NAME : n;
   } catch {
-    return "TOMMY";
+    return DEFAULT_NAME;
   }
 }
 

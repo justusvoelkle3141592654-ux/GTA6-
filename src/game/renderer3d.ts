@@ -888,7 +888,7 @@ export class Renderer3D {
       g.fillStyle = "#ffd23f"; g.beginPath();
       for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2 - Math.PI / 2, rr = i % 2 ? 9 : 20; g.lineTo(36 + Math.cos(a) * rr, 35 + Math.sin(a) * rr); }
       g.closePath(); g.fill();
-      g.fillStyle = "#0b1530"; g.font = "bold 12px Inter, sans-serif"; g.fillText("VCPD", 36, 60);
+      g.fillStyle = "#0b1530"; g.font = "bold 12px Inter, sans-serif"; g.fillText("SBPD", 36, 60);
     });
     this.decalMat = new THREE.MeshBasicMaterial({ map: decal, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 });
     const decalB = canvasTex(256, 70, (g) => {
@@ -903,7 +903,7 @@ export class Renderer3D {
       g.closePath(); g.fill();
     });
     this.decalMatB = new THREE.MeshBasicMaterial({ map: decalB, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 });
-    const roofDecal = canvasTex(128, 64, (g) => { g.clearRect(0, 0, 128, 64); g.fillStyle = "#0b1530"; g.font = "bold 46px 'Bebas Neue', Impact, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("V-07", 64, 34); });
+    const roofDecal = canvasTex(128, 64, (g) => { g.clearRect(0, 0, 128, 64); g.fillStyle = "#0b1530"; g.font = "bold 46px 'Bebas Neue', Impact, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("S-07", 64, 34); });
     this.roofDecalMat = new THREE.MeshBasicMaterial({ map: roofDecal, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 });
 
     // pickups
