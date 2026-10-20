@@ -62,6 +62,7 @@ export interface Flash { x: number; y: number; z: number; life: number; max: num
 const TAU = Math.PI * 2;
 const GRAV = 620;
 const AIR_THRUST = 520, AIR_MAX = 900; // nitro thrust in the air, max air speed
+const NITRO_DRAIN = 0.22, NITRO_REGEN = 0.03; // tank per second: ~4.5 s of boost, ~33 s to refill
 export const wrap = (a: number) => { while (a > Math.PI) a -= TAU; while (a < -Math.PI) a += TAU; return a; };
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
@@ -920,7 +921,9 @@ export class Game {
       this.ped.vx *= 0.9; this.ped.vy *= 0.9;
     } else { this.traffic.civAI(this, p, dt); p.nitro = false; }
 
-    this.nitro = 1; // unlimited nitro
+    // nitro burns while boosting and refills slowly (pickups refill faster)
+    if (p.nitro && !this.onFoot) { this.nitro = Math.max(0, this.nitro - dt * NITRO_DRAIN); if (this.nitro <= 0) p.nitro = false; }
+    else this.nitro = Math.min(1, this.nitro + dt * NITRO_REGEN);
 
     for (const c of this.cars) {
       if (c === p) continue;
