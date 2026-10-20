@@ -69,10 +69,12 @@ export class CrowdRenderer {
 
   setShadows(on: boolean) { for (const p of PARTS) this.meshes[p].castShadow = on; }
 
-  private setLook(i: number, look: number) {
-    const r = mulberry32(look);
+  private setLook(i: number, c: Civilian) {
+    const look = c.look, r = mulberry32(look);
     const pick = (a: string[]) => a[Math.floor(r() * a.length)];
-    const skin = pick(SKIN), shirt = pick(SHIRT), pants = pick(PANTS), hair = pick(HAIR);
+    const skin = pick(SKIN), hair = pick(HAIR);
+    let shirt = pick(SHIRT), pants = pick(PANTS);
+    if (c.shirt) { shirt = c.shirt; pants = c.pants; } // uniforms and gang colours
     const M = this.meshes;
     M.head.setColorAt(i, _col.set(skin)); M.armL.setColorAt(i, _col); M.armR.setColorAt(i, _col);
     M.torso.setColorAt(i, _col.set(shirt));
@@ -91,7 +93,7 @@ export class CrowdRenderer {
         this.shadow.setMatrixAt(i, _zero);
         continue;
       }
-      if (this.looks[i] !== c.look) { this.setLook(i, c.look); colors = true; }
+      if (this.looks[i] !== c.look) { this.setLook(i, c); colors = true; }
       const sp = Math.hypot(c.vx, c.vy);
       const w = c.walk, amp = c.state === "down" ? 0 : Math.min(1.1, sp / 120) * 0.8;
       const bob = Math.abs(Math.sin(w * 2)) * amp * 0.9;
@@ -101,6 +103,7 @@ export class CrowdRenderer {
       _e.set(0, -c.a, fall); _q.setFromEuler(_e);
       _base.compose(_p.set(c.x, c.z + lift, c.y), _q, _s.set(c.scale, c.scale, c.scale));
       const cower = c.state === "cower";
+      const aim = c.state === "attack" && c.armed; // arms forward like holding a gun
       const hipY = cower ? -3.5 : bob;
       // legs (pivot at the hips)
       const legA = cower ? 1.0 : Math.sin(w) * amp;
@@ -113,8 +116,8 @@ export class CrowdRenderer {
       M.torso.setMatrixAt(i, _torso);
       _m.makeTranslation(0, 9.5, 0).premultiply(_torso); M.head.setMatrixAt(i, _m); M.hair.setMatrixAt(i, _m);
       const armA = -Math.sin(w) * amp * 0.8;
-      this.arm("armL", i, -5.2, cower ? 2.7 : armA); // cowering: hands over the head
-      this.arm("armR", i, 5.2, cower ? 2.7 : -armA);
+      this.arm("armL", i, -5.2, cower ? 2.7 : aim ? 1.35 : armA); // cowering: hands over the head
+      this.arm("armR", i, 5.2, cower ? 2.7 : aim ? 1.5 : -armA);
       // blob shadow stays flat on the ground
       _e.set(0, -c.a, 0); _q.setFromEuler(_e);
       _m.compose(_p.set(c.x, 0, c.y), _q, _s.set(0.32 * c.scale * (c.state === "down" ? 1.6 : 1), 1, 0.42 * c.scale));

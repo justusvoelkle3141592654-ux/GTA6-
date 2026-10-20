@@ -94,11 +94,35 @@ export class World {
   rand: () => number;
 
   ramps: Ramp[] = [];
+  extras: Building[] = []; // solid props outside the block grid (harbour containers, crane legs)
 
   constructor(seed = 1337) {
     this.rand = mulberry32(seed);
     this.generate();
     this.generateRamps();
+    this.generateExtras(seed + 99);
+  }
+
+  // harbour quay east of the city: container stacks between the highways (own seed: the city stays the same)
+  private generateExtras(seed: number) {
+    const r = mulberry32(seed);
+    const COLS = ["#c0392b", "#1d4e89", "#e67e22", "#3c6e47", "#7d3c98", "#c9a227", "#9aa3ad"];
+    const free = (y: number, h: number) => HIGHWAYS.every((i) => Math.abs(y + h / 2 - (i * BLOCK + ROAD / 2)) > ROAD / 2 + h / 2 + 30);
+    for (let y = 120; y < WORLD - 120; y += 70) {
+      if (r() < 0.35) continue;
+      const h = 28, w = 60 + Math.floor(r() * 2) * 30;
+      const x = WORLD + 40 + Math.floor(r() * 3) * 30;
+      if (!free(y, h)) continue;
+      const stack = 1 + Math.floor(r() * 3);
+      const pal = COLS[Math.floor(r() * COLS.length)];
+      this.extras.push({ x, y, w, h, height: (stack * 26) / H_SCALE - 14 / H_SCALE, wall: pal, wallDark: pal, roof: pal, neon: null, detail: stack, seed: r() });
+    }
+  }
+
+  private extraHit(x: number, y: number, pad: number) {
+    if (cityDist(x, y) > 320) return false;
+    for (const e of this.extras) if (x > e.x - pad && x < e.x + e.w + pad && y > e.y - pad && y < e.y + e.h + pad) return true;
+    return false;
   }
 
   private generateRamps() {
@@ -162,11 +186,25 @@ export class World {
     return best;
   }
 
+  // index of the ramp under (x, y), -1 if none
+  rampIndexAt(x: number, y: number): number {
+    for (let i = 0; i < this.ramps.length; i++) {
+      const rp = this.ramps[i];
+      const s = rp.alongX ? x : y, v = rp.alongX ? y : x;
+      const sA = rp.alongX ? rp.x0 : rp.y0, vA = rp.alongX ? rp.y0 : rp.x0;
+      if (s >= sA && s <= sA + rp.l && v >= vA && v <= vA + rp.w) return i;
+    }
+    return -1;
+  }
+
   // roof height of the building whose footprint contains (x, y), -Infinity if none
   roofAt(x: number, y: number): number {
     const b = this.blockAt(x, y);
-    if (!b) return -Infinity;
     let best = -Infinity;
+    if (!b) {
+      if (cityDist(x, y) < 320) for (const e of this.extras) if (x >= e.x && x <= e.x + e.w && y >= e.y && y <= e.y + e.h) best = Math.max(best, roofOf(e));
+      return best;
+    }
     for (const bd of b.buildings) {
       if (x >= bd.x && x <= bd.x + bd.w && y >= bd.y && y <= bd.y + bd.h) best = Math.max(best, roofOf(bd));
     }
@@ -258,7 +296,7 @@ export class World {
   isSolid(x: number, y: number, pad = 0): boolean {
     if (x < MAP_MIN + pad || y < MAP_MIN + pad || x > MAP_MAX - pad || y > MAP_MAX - pad) return true;
     const b = this.blockAt(x, y);
-    if (!b) return false;
+    if (!b) return this.extraHit(x, y, pad);
     for (const bd of b.buildings) {
       if (x > bd.x - pad && x < bd.x + bd.w + pad && y > bd.y - pad && y < bd.y + bd.h + pad) return true;
     }
@@ -282,6 +320,7 @@ export class World {
       if (i < 0 || j < 0 || i >= GRID || j >= GRID) continue;
       for (const bd of this.blocks[j * GRID + i].buildings) out.push(bd);
     }
+    if (cityDist(x, y) > 0 && cityDist(x, y) < 320) for (const e of this.extras) if (Math.abs(e.x + e.w / 2 - x) < 260 && Math.abs(e.y + e.h / 2 - y) < 260) out.push(e);
     return out;
   }
 
@@ -345,6 +384,11 @@ export class World {
       g.fillStyle = "#2c2342";
       for (const bd of b.buildings) g.fillRect(ox + bd.x * s, ox + bd.y * s, bd.w * s, bd.h * s);
     }
+    // beach strip west, quay east
+    g.fillStyle = "#d9c08a"; g.fillRect(ox - 220 * s, ox, 220 * s, WORLD * s);
+    g.fillStyle = "#5c5f66"; g.fillRect(ox + WORLD * s, ox, 230 * s, WORLD * s);
+    g.fillStyle = "#8a6a4a";
+    for (const e of this.extras) g.fillRect(ox + e.x * s, ox + e.y * s, Math.max(1, e.w * s), Math.max(1, e.h * s));
     return c;
   }
 }

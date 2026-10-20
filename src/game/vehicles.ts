@@ -1,7 +1,12 @@
 // vehicle data and the shared car entity
+import { noTune, type Tune } from "./garage";
 
-export type CarModel = "sport" | "super" | "muscle" | "suv" | "sedan" | "van" | "police" | "taxi";
-export const CAR_MODELS: CarModel[] = ["sport", "super", "muscle", "suv", "sedan", "van", "police", "taxi"];
+export type CarModel = "sport" | "super" | "muscle" | "suv" | "sedan" | "van" | "police" | "taxi" | "bike" | "truck" | "bus" | "swat";
+export const CAR_MODELS: CarModel[] = ["sport", "super", "muscle", "suv", "sedan", "van", "police", "taxi", "bike", "truck", "bus", "swat"];
+export const MODEL_NAME: Record<CarModel, string> = {
+  sport: "Corsaro", super: "Zephyra", muscle: "Torvan", suv: "Granit", sedan: "Limousine", van: "Lieferwagen", police: "Streifenwagen",
+  taxi: "Taxi", bike: "Motorrad", truck: "Lastwagen", bus: "Stadtbus", swat: "SEK-Transporter",
+};
 
 export interface CarDef { id: string; name: string; model: CarModel; color: string; maxV: number; acc: number; grip: number; hp: number; mass: number; desc: string; }
 export const CARS: CarDef[] = [
@@ -12,29 +17,49 @@ export const CARS: CarDef[] = [
 ];
 // car ids of older versions -> current ids
 export const LEGACY_CAR_IDS: Record<string, string> = { infernus: "corsaro", banshee: "zephyra", sabre: "torvan", patriot: "granit" };
-export const MODEL_STATS: Record<CarModel, { maxV: number; acc: number; grip: number }> = {
-  sport: { maxV: 560, acc: 640, grip: 11 }, super: { maxV: 650, acc: 740, grip: 10 }, muscle: { maxV: 540, acc: 700, grip: 7 }, suv: { maxV: 480, acc: 560, grip: 12 },
-  sedan: { maxV: 470, acc: 520, grip: 11 }, van: { maxV: 420, acc: 460, grip: 12 }, police: { maxV: 560, acc: 640, grip: 11 }, taxi: { maxV: 480, acc: 540, grip: 11 },
+
+export interface ModelStats { maxV: number; acc: number; grip: number; hp: number; mass: number; price: number; }
+// hp/mass: for traffic and parked cars; price: what the garage pays when you sell one
+export const MODEL_STATS: Record<CarModel, ModelStats> = {
+  sport: { maxV: 560, acc: 640, grip: 11, hp: 110, mass: 1.3, price: 4000 },
+  super: { maxV: 650, acc: 740, grip: 10, hp: 90, mass: 1.2, price: 7000 },
+  muscle: { maxV: 540, acc: 700, grip: 7, hp: 120, mass: 1.4, price: 3000 },
+  suv: { maxV: 480, acc: 560, grip: 12, hp: 160, mass: 1.6, price: 2500 },
+  sedan: { maxV: 470, acc: 520, grip: 11, hp: 90, mass: 0.8, price: 1200 },
+  van: { maxV: 420, acc: 460, grip: 12, hp: 120, mass: 1.2, price: 1000 },
+  police: { maxV: 560, acc: 640, grip: 11, hp: 100, mass: 1.25, price: 2000 },
+  taxi: { maxV: 480, acc: 540, grip: 11, hp: 90, mass: 0.8, price: 1100 },
+  bike: { maxV: 600, acc: 780, grip: 13, hp: 60, mass: 0.6, price: 2200 },
+  truck: { maxV: 360, acc: 320, grip: 13, hp: 240, mass: 3, price: 1800 },
+  bus: { maxV: 340, acc: 290, grip: 13, hp: 260, mass: 3.2, price: 1500 },
+  swat: { maxV: 520, acc: 600, grip: 12, hp: 220, mass: 2.2, price: 3500 },
 };
 
 export type CarKind = "player" | "cop" | "civ";
+export type FactionId = "halcones" | "kings";
 
 export class Car {
   x = 0; y = 0; z = 0; vx = 0; vy = 0; vz = 0; a = 0; av = 0;
   air = false; airT = 0;
   vF = 0; vR = 0;
   hp = 100; maxHp = 100; mass = 1;
+  tune: Tune = noTune();
   calm = false; // cop without a wanted level: patrols like traffic, no siren
   route = false; // prevI/prevJ/wpI/wpJ hold a valid street route (traffic AI)
   driver = false; // somebody sits inside (gets pulled out when the car is stolen)
   spotId = -1;    // parking spot this car belongs to (-1: none)
   owned = false;  // left behind by the player
+  keep = false;   // taken out of the garage: never despawns
+  roadblock = false; // police car standing across the road
+  faction: FactionId | null = null; // gang car
+  tag = "";       // mission marker ("target", "deliver", ...)
+  flee = false;   // drives away from the player (mission targets)
   dead = false; deadT = 0; wrecked = false; wreckT = 0; parked = false;
   throttle = 0; steer = 0; handbrake = false; nitro = false;
   wpI = 0; wpJ = 0; prevI = -1; prevJ = -1; hasWp = false;
   stuckT = 0; reverseT = 0; nearCd = 0; hitFlash = 0;
   rlx = NaN; rly = NaN; rrx = NaN; rry = NaN;
-  siren = Math.random() * 10; cruise = 170; smokeT = 0;
+  siren = Math.random() * 10; cruise = 170; smokeT = 0; shootT = 0;
   constructor(public kind: CarKind, public model: CarModel, public color: string) {}
   get speed() { return Math.hypot(this.vx, this.vy); }
 }

@@ -1,8 +1,14 @@
 // Procedural WebAudio sound engine – no assets required.
+export type Channel = "master" | "effects" | "engine" | "radio";
+export const CHANNELS: Channel[] = ["master", "effects", "engine", "radio"];
+const MASTER_GAIN = 0.55;
+
 export class Sfx {
   ctx: AudioContext | null = null;
   master: GainNode | null = null;
   muted = false;
+  volume: Record<Channel, number> = { master: 1, effects: 1, engine: 1, radio: 0.7 };
+  private bus: Partial<Record<Exclude<Channel, "master">, GainNode>> = {};
   private engOsc: OscillatorNode | null = null;
   private engOsc2: OscillatorNode | null = null;
   private engFilter: BiquadFilterNode | null = null;
@@ -24,10 +30,17 @@ export class Sfx {
     const ctx = new AC();
     this.ctx = ctx;
     this.master = ctx.createGain();
-    this.master.gain.value = this.muted ? 0 : 0.55;
+    this.master.gain.value = this.muted ? 0 : MASTER_GAIN * this.volume.master;
     const comp = ctx.createDynamicsCompressor();
     this.master.connect(comp);
     comp.connect(ctx.destination);
+    for (const ch of ["effects", "engine", "radio"] as const) {
+      const g = ctx.createGain();
+      g.gain.value = this.volume[ch];
+      g.connect(this.bus.effects ?? this.master);
+      this.bus[ch] = g;
+    }
+    const fx = this.bus.effects!, eng = this.bus.engine!;
 
     // noise buffer
     const len = ctx.sampleRate * 2;
@@ -52,7 +65,7 @@ export class Sfx {
     this.engOsc2.connect(g2);
     g2.connect(this.engFilter);
     this.engFilter.connect(this.engGain);
-    this.engGain.connect(this.master);
+    this.engGain.connect(eng);
     this.engOsc.start();
     this.engOsc2.start();
 
@@ -68,7 +81,7 @@ export class Sfx {
     this.skidGain.gain.value = 0;
     skid.connect(this.skidFilter);
     this.skidFilter.connect(this.skidGain);
-    this.skidGain.connect(this.master);
+    this.skidGain.connect(eng);
     skid.start();
 
     // siren
@@ -77,13 +90,23 @@ export class Sfx {
     this.sirenGain = ctx.createGain();
     this.sirenGain.gain.value = 0;
     this.sirenOsc.connect(this.sirenGain);
-    this.sirenGain.connect(this.master);
+    this.sirenGain.connect(fx);
     this.sirenOsc.start();
   }
 
+  // output node for the radio (null before the first user interaction)
+  get radioOut(): GainNode | null { return this.bus.radio ?? null; }
+
   setMuted(m: boolean) {
     this.muted = m;
-    if (this.master && this.ctx) this.master.gain.setTargetAtTime(m ? 0 : 0.55, this.ctx.currentTime, 0.05);
+    if (this.master && this.ctx) this.master.gain.setTargetAtTime(m ? 0 : MASTER_GAIN * this.volume.master, this.ctx.currentTime, 0.05);
+  }
+
+  setVolume(ch: Channel, v: number) {
+    this.volume[ch] = Math.max(0, Math.min(1, v));
+    if (!this.ctx) return;
+    if (ch === "master") { if (!this.muted) this.master?.gain.setTargetAtTime(MASTER_GAIN * this.volume.master, this.ctx.currentTime, 0.05); }
+    else this.bus[ch]?.gain.setTargetAtTime(this.volume[ch], this.ctx.currentTime, 0.05);
   }
 
   update(speed01: number, throttle: number, skid01: number, sirenLevel: number, t: number, active: boolean) {
@@ -123,7 +146,7 @@ export class Sfx {
     if (sweepTo) filt.frequency.exponentialRampToValueAtTime(sweepTo, now + dur);
     src.connect(filt);
     filt.connect(g);
-    g.connect(this.master);
+    g.connect(this.bus.effects ?? this.master);
     src.start(now, Math.random());
     src.stop(now + dur + 0.05);
   }
@@ -141,7 +164,7 @@ export class Sfx {
     g.gain.exponentialRampToValueAtTime(gain, now + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
     o.connect(g);
-    g.connect(this.master);
+    g.connect(this.bus.effects ?? this.master);
     o.start(now);
     o.stop(now + dur + 0.05);
   }
@@ -226,6 +249,52 @@ export class Sfx {
   gameOver() {
     this.tone(220, 0.5, "sawtooth", 0.12, 0, 110);
     this.tone(165, 0.8, "sawtooth", 0.12, 0.35, 55);
+  }
+
+  reload() {
+    this.noise(0.05, 3000, 0.2, "highpass");
+    this.tone(700, 0.04, "square", 0.06, 0.12);
+    this.noise(0.06, 2500, 0.25, "highpass", 900);
+  }
+
+  punch() {
+    this.noise(0.1, 700, 0.45, "lowpass", 150);
+    this.tone(120, 0.08, "sine", 0.25, 0, 60);
+  }
+
+  swing() { this.noise(0.12, 1500, 0.12, "bandpass", 400); }
+
+  shotgun() {
+    this.noise(0.3, 1800, 0.8, "lowpass", 200);
+    this.tone(90, 0.15, "square", 0.25, 0, 40);
+  }
+
+  cashier() {
+    this.tone(1320, 0.07, "triangle", 0.1);
+    this.tone(1760, 0.18, "triangle", 0.1, 0.07);
+  }
+
+  success() {
+    [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.22, "square", 0.07, i * 0.11));
+  }
+
+  fail() {
+    [392, 330, 262].forEach((f, i) => this.tone(f, 0.3, "sawtooth", 0.08, i * 0.16));
+  }
+
+  phone() {
+    for (let i = 0; i < 3; i++) { this.tone(1400, 0.08, "square", 0.05, i * 0.18); this.tone(1100, 0.08, "square", 0.05, i * 0.18 + 0.08); }
+  }
+
+  checkpoint() {
+    this.tone(880, 0.08, "triangle", 0.1);
+    this.tone(1320, 0.12, "triangle", 0.1, 0.06);
+  }
+
+  // helicopter rotor: short low noise bursts, called a few times per second while one is near
+  rotor(level: number) {
+    if (level <= 0.01) return;
+    this.noise(0.07, 260, 0.35 * level, "lowpass", 90);
   }
 }
 

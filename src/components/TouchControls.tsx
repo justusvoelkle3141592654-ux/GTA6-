@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { TouchInput, Weapon } from "../game/engine";
+import { wIcon } from "./ui";
 
 interface Props {
   input: TouchInput;
@@ -7,17 +8,23 @@ interface Props {
   relative?: boolean;
   onFoot: boolean;
   weapon: Weapon;
-  rockets: number;
-  bombs: number;
+  ammo: string;
   bombsPlaced: number;
   onCycleWeapon: () => void;
+  onWheel: () => void;
   onDetonate: () => void;
 }
 
 const RADIUS = 60;
-const WICON: Record<Weapon, string> = { pistol: "🔫", rocket: "🚀", bomb: "💣" };
+const LONG_PRESS = 420; // ms: holding the weapon button opens the wheel
 
-export default function TouchControls({ input, nitro01, relative = false, onFoot, weapon, rockets, bombs, bombsPlaced, onCycleWeapon, onDetonate }: Props) {
+export default function TouchControls({ input, nitro01, relative = false, onFoot, weapon, ammo, bombsPlaced, onCycleWeapon, onWheel, onDetonate }: Props) {
+  const pressT = useRef<number | null>(null);
+  const weaponDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    pressT.current = window.setTimeout(() => { pressT.current = null; onWheel(); }, LONG_PRESS);
+  };
+  const weaponUp = () => { if (pressT.current !== null) { clearTimeout(pressT.current); pressT.current = null; onCycleWeapon(); } };
   const [stick, setStick] = useState<{ x: number; y: number; kx: number; ky: number } | null>(null);
   const pid = useRef<number | null>(null);
   const [drift, setDrift] = useState(false);
@@ -59,8 +66,6 @@ export default function TouchControls({ input, nitro01, relative = false, onFoot
     </div>
   );
 
-  const ammo = weapon === "rocket" ? rockets : weapon === "bomb" ? bombs : "∞";
-
   return (
     <div className="pointer-events-none absolute inset-0 z-10">
       <div className="pointer-events-auto absolute bottom-0 left-0 top-24 w-[55%]" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
@@ -82,9 +87,9 @@ export default function TouchControls({ input, nitro01, relative = false, onFoot
           {bombsPlaced > 0 && (
             <button onPointerDown={(e) => { e.stopPropagation(); onDetonate(); }} className="flex h-16 w-16 animate-pulse items-center justify-center rounded-full border-2 border-red-400 bg-red-600/70 text-2xl shadow-[0_0_24px_rgba(255,40,60,0.9)] active:scale-90">💥</button>
           )}
-          <button onPointerDown={(e) => { e.stopPropagation(); onCycleWeapon(); }} className="flex h-16 w-16 flex-col items-center justify-center rounded-2xl border-2 border-white/30 bg-black/50 active:scale-90">
-            <span className="text-2xl leading-none">{WICON[weapon]}</span>
-            <span className="mt-0.5 font-display text-sm tracking-wider text-white/80">{ammo}</span>
+          <button onPointerDown={weaponDown} onPointerUp={weaponUp} onPointerCancel={weaponUp} className="flex h-16 w-16 flex-col items-center justify-center rounded-2xl border-2 border-white/30 bg-black/50 active:scale-90">
+            <span className="text-2xl leading-none">{wIcon(weapon)}</span>
+            <span className="mt-0.5 font-display text-xs tracking-wider text-white/80">{ammo}</span>
           </button>
           {!onFoot && btn("DRIFT", drift, setDrift, "drift", "#ff3cac", "h-16 w-16")}
         </div>

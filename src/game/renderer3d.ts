@@ -9,6 +9,9 @@ import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeom
 import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_MAX, MAP_SIZE, EXT, HIGHWAYS, H_SCALE, terrainH, terrainGrad, cityDist, inCity, isHighway, mulberry32, type Building, type Ramp } from "./world";
 import type { Place } from "./places";
 import { CrowdRenderer } from "./crowd3d";
+import { DISTRICTS, blockDistrict } from "./districts";
+import { WEAPONS, WEAPON_DEFS, type Weapon } from "./weapons";
+import { OUTFITS } from "./economy";
 import { MAX_PEDS } from "./peds";
 import type { Game, Car, Pickup, CameraMode, Quality, CarModel, Proj, Bomb, PickupType } from "./engine";
 
@@ -137,7 +140,31 @@ const SPECS: Record<CarModel, CarSpec> = {
   police: { L: 50, W: 25, y0: 3.5, noseY: 11, beltY: 12.2, deckY: 13, xCowl: 9, xRoofF: 2, xRoofR: -9, xDeck: -14, roofY: 19.6, r: 6.2, wx: 15.5, wxr: -15.5, wd: 4.5 },
   sedan: SEDAN,
   taxi: SEDAN,
+  truck: { L: 66, W: 27, y0: 5, noseY: 18, beltY: 22, deckY: 20, xCowl: 27, xRoofF: 23, xRoofR: 13, xDeck: 12, roofY: 33, r: 7.5, wx: 22, wxr: -21, wd: 5 },
+  bus: { L: 82, W: 28, y0: 4, noseY: 16, beltY: 17, deckY: 17, xCowl: 39, xRoofF: 37, xRoofR: -38, xDeck: -39.5, roofY: 34, r: 7, wx: 27, wxr: -25, wd: 5 },
+  swat: { L: 54, W: 26, y0: 4.5, noseY: 12, beltY: 16, deckY: 16, xCowl: 25, xRoofF: 17, xRoofR: 15, xDeck: 15, roofY: 26, r: 7, wx: 17, wxr: -17, wd: 5 },
+  bike: { L: 34, W: 8, y0: 6, noseY: 12, beltY: 14, deckY: 14, xCowl: 6, xRoofF: 2, xRoofR: -4, xDeck: -6, roofY: 18, r: 6, wx: 13, wxr: -13, wd: 3 },
 };
+
+// motorbike: frame, tank, seat, handlebar; the rider goes into the "glass" mesh so it can be hidden
+function bikeGeo(color: string): CarGeo {
+  const B: THREE.BufferGeometry[] = [], G: THREE.BufferGeometry[] = [], Lg: THREE.BufferGeometry[] = [];
+  const body = C(color), trim = "#15161b", chrome = "#c9ced8";
+  B.push(bar(-13, 6, 2, 11, 1.6, 1.6, 0, trim), bar(2, 11, 12, 6, 1.6, 1.6, 0, trim), bar(-4, 7, 9, 14, 1.4, 1.4, 0, trim));
+  B.push(rbox(11, 5, 7, 2, 14.5, 0, body, 1.8), rbox(10, 2.2, 6, -6, 15.5, 0, "#1d1d22", 0.8), rbox(7, 4, 7.5, -12, 11.5, 0, body, 1.4));
+  B.push(bar(9, 14, 12.5, 6, 1, 1, 2.2, chrome), bar(9, 14, 12.5, 6, 1, 1, -2.2, chrome), nb(1, 1, 13, 9.5, 19, 0, trim), nb(1, 6, 1, 9, 16.5, 0, trim));
+  B.push(cylX(1.3, 12, -9, 7, 3.2, chrome, 8), nb(8, 4, 4, 0, 8, 0, "#3a3d45"));
+  Lg.push(nb(1, 2.4, 3, 13.4, 15, 0, "#fff4d6", 3.2), nb(0.8, 1.4, 3, -15.6, 12, 0, "#ff1838", 2.6));
+  // rider: legs, torso, helmet
+  const jacket = "#23252c", helmet = "#e8e8ec";
+  for (const sd of [-1, 1]) G.push(bar(-6, 16, 2, 13, 2.4, 2.6, sd * 3.2, "#2c3e57"), bar(2, 13, 1, 6, 2.2, 2.2, sd * 3.4, "#2c3e57"));
+  G.push(bar(-6, 16, 0, 27, 4.5, 6.5, 0, jacket), bar(-1, 26, 8, 19, 1.8, 1.8, 3.6, jacket), bar(-1, 26, 8, 19, 1.8, 1.8, -3.6, jacket));
+  G.push(ni(withColor(new THREE.SphereGeometry(3.4, 12, 10).scale(1.1, 1, 0.95).translate(0.5, 30.5, 0), C(helmet))), nb(1.5, 2, 5, 3.6, 30.4, 0, "#0b121c"));
+  const wheels: CarWheel[] = [{ x: 13, z: 0, r: 6, wd: 3, front: true }, { x: -13, z: 0, r: 6, wd: 3, front: false }];
+  const res: CarGeo = { body: mergeGeometries(B)!, glass: mergeGeometries(G)!, lights: mergeGeometries(Lg)!, wheels, roofY: 26 };
+  for (const g of [...B, ...G, ...Lg]) g.dispose();
+  return res;
+}
 
 interface CarWheel { x: number; z: number; r: number; wd: number; front: boolean; }
 interface CarGeo { body: THREE.BufferGeometry; glass: THREE.BufferGeometry; lights: THREE.BufferGeometry; wheels: CarWheel[]; roofY: number; }
@@ -147,6 +174,7 @@ function getCarGeo(model: CarModel, color: string): CarGeo {
   const key = model + color;
   const hit = carGeoCache.get(key);
   if (hit) return hit;
+  if (model === "bike") { const g = bikeGeo(color); carGeoCache.set(key, g); return g; }
   const B: THREE.BufferGeometry[] = [], G: THREE.BufferGeometry[] = [], Lg: THREE.BufferGeometry[] = [];
   const s = SPECS[model] ?? SEDAN;
   const body = C(color), dark = body.clone().multiplyScalar(0.45);
@@ -228,6 +256,23 @@ function getCarGeo(model: CarModel, color: string): CarGeo {
       Lg.push(nb(4, 3.5, 10, -3, s.roofY + 2.8, 0, "#fff5b0", 1.8));
       for (let i = 0; i < 8; i++) for (const sd of [-1, 1]) B.push(nb(3, 1.2, 0.3, -10 + i * 3.2, s.beltY - 3.2 + (i % 2) * 1.2, sd * (hw + 0.12), "#111"));
       break;
+    case "truck":
+      // cargo box behind the cab
+      B.push(rbox(s.xDeck + hl - 1.5, 27, s.W + 1, (-hl + s.xDeck - 1.5) / 2, s.y0 + 15.5, 0, "#e4e2dc", 1));
+      B.push(nb(s.xDeck + hl - 2, 1.2, s.W + 1.3, (-hl + s.xDeck - 1.5) / 2, s.y0 + 6, 0, dark));
+      B.push(cylY(1, 14, s.xCowl - 6, s.roofY + 2, hw - 1, "#3a3d45", 8));
+      break;
+    case "bus":
+      B.push(nb(s.L - 2, 1, s.W + 0.4, 0, s.beltY - 4, 0, "#f4f4f6"), nb(s.L - 2, 1, s.W + 0.4, 0, s.beltY - 7, 0, dark));
+      B.push(nb(10, 3, s.W - 6, -10, s.roofY + 1.5, 0, "#c9ccd2"));
+      Lg.push(nb(0.6, 3, 14, hl + 0.3, s.roofY - 3, 0, "#ffc21a", 2));
+      break;
+    case "swat": {
+      const navy = "#141820";
+      B.push(rbox(43, 21, s.W, -5.5, s.y0 + 10.5, 0, body, 1.4), nb(s.L - 2, 2.5, s.W + 0.4, 0, 10, 0, navy));
+      B.push(nb(1.5, 6, 22, hl + 1.2, 7, 0, "#2a2d36"), nb(2, 4, s.W - 6, -hl - 1, 8, 0, "#2a2d36"));
+      break;
+    }
     default:
       break;
   }
@@ -295,8 +340,11 @@ class PedModel {
   legL = new THREE.Group(); legR = new THREE.Group();
   armL = new THREE.Group(); armR = new THREE.Group();
   torsoG = new THREE.Group();
-  gunPistol: THREE.Mesh; gunRocket: THREE.Mesh; gunBomb: THREE.Mesh;
+  guns: Record<Weapon, THREE.Mesh | null>;
+  vest: THREE.Mesh; jacket: THREE.MeshStandardMaterial; jeans: THREE.MeshStandardMaterial;
+  flashMats: THREE.MeshStandardMaterial[];
   shadow: THREE.Mesh;
+  private flashOn = false; private outfit = -1;
   constructor(shirtTex: THREE.Texture, shadowGeo: THREE.PlaneGeometry, shadowMat: THREE.Material) {
     const skin = new THREE.MeshStandardMaterial({ color: 0xd9a07c, roughness: 0.6 });
     const jacket = new THREE.MeshStandardMaterial({ map: shirtTex, roughness: 0.85 });
@@ -340,11 +388,26 @@ class PedModel {
       arm.add(mk(new THREE.SphereGeometry(1.55, 10, 8), jacket), cap(1.4, 3.2, -2.6, jacket), cap(1.2, 3.0, -6.5, jacket), mk(new THREE.SphereGeometry(1.25, 10, 8).translate(0, -9.1, 0), skin));
       this.torsoG.add(arm);
     }
-    // guns in right hand
-    this.gunPistol = mk(mergeGeometries([new THREE.BoxGeometry(4.5, 1.6, 1.2).translate(2.2, -9.2, 0), new THREE.BoxGeometry(1.2, 2.8, 1.1).translate(0.6, -10.6, 0)])!, gunM);
-    this.gunRocket = mk(mergeGeometries([new THREE.CylinderGeometry(1.8, 1.8, 20, 10).rotateZ(Math.PI / 2).translate(2, -8.5, 0), new THREE.CylinderGeometry(2.4, 1.8, 3, 10).rotateZ(Math.PI / 2).translate(12.5, -8.5, 0), new THREE.BoxGeometry(2, 3, 1.5).translate(-2, -11, 0)])!, new THREE.MeshStandardMaterial({ color: 0x4a5a3a, roughness: 0.6, metalness: 0.3 }));
-    this.gunBomb = mk(new THREE.SphereGeometry(1.8, 10, 8).translate(1.4, -9.4, 0), new THREE.MeshStandardMaterial({ color: 0x3a3a44, emissive: 0xff2040, emissiveIntensity: 0.8, roughness: 0.4, metalness: 0.5 }));
-    this.armR.add(this.gunPistol, this.gunRocket, this.gunBomb);
+    // weapons in the right hand
+    const gun = (parts: THREE.BufferGeometry[], m: THREE.Material) => mk(mergeGeometries(parts)!, m);
+    const wood = new THREE.MeshStandardMaterial({ color: 0x9a6a3a, roughness: 0.7 });
+    this.guns = {
+      fist: null,
+      bat: gun([new THREE.CylinderGeometry(0.6, 1.1, 18, 8).translate(0, -9, 0).rotateZ(-1.2).translate(4, -6, 0)], wood),
+      pistol: gun([new THREE.BoxGeometry(4.5, 1.6, 1.2).translate(2.2, -9.2, 0), new THREE.BoxGeometry(1.2, 2.8, 1.1).translate(0.6, -10.6, 0)], gunM),
+      smg: gun([new THREE.BoxGeometry(8, 2, 1.4).translate(3.5, -9.2, 0), new THREE.BoxGeometry(1.2, 4, 1).translate(3.2, -11.4, 0), new THREE.BoxGeometry(1.2, 2.6, 1.1).translate(0.4, -10.6, 0)], gunM),
+      shotgun: gun([new THREE.CylinderGeometry(0.7, 0.7, 16, 8).rotateZ(Math.PI / 2).translate(6, -8.8, 0), new THREE.BoxGeometry(6, 2.2, 1.6).translate(-1, -9.6, 0)], wood),
+      grenade: gun([new THREE.SphereGeometry(1.6, 10, 8).translate(1.4, -9.4, 0)], new THREE.MeshStandardMaterial({ color: 0x3f5a2a, roughness: 0.6 })),
+      rocket: gun([new THREE.CylinderGeometry(1.8, 1.8, 20, 10).rotateZ(Math.PI / 2).translate(2, -8.5, 0), new THREE.CylinderGeometry(2.4, 1.8, 3, 10).rotateZ(Math.PI / 2).translate(12.5, -8.5, 0), new THREE.BoxGeometry(2, 3, 1.5).translate(-2, -11, 0)], new THREE.MeshStandardMaterial({ color: 0x4a5a3a, roughness: 0.6, metalness: 0.3 })),
+      bomb: gun([new THREE.SphereGeometry(1.8, 10, 8).translate(1.4, -9.4, 0)], new THREE.MeshStandardMaterial({ color: 0x3a3a44, emissive: 0xff2040, emissiveIntensity: 0.8, roughness: 0.4, metalness: 0.5 })),
+    };
+    for (const w of WEAPONS) { const m = this.guns[w]; if (m) this.armR.add(m); }
+    // armour vest over the jacket
+    this.vest = cap(3.25, 3.0, 4.9, new THREE.MeshStandardMaterial({ color: 0x3a4a34, roughness: 0.8 }), 0.82, 1.42);
+    this.vest.visible = false;
+    this.torsoG.add(this.vest);
+    this.jacket = jacket; this.jeans = jeans;
+    this.flashMats = [skin, jacket, jeans, shoeM, dark, hairM];
     this.group.add(this.hips, this.torsoG);
     this.shadow = new THREE.Mesh(shadowGeo, shadowMat);
     this.shadow.scale.set(0.35, 1, 0.5);
@@ -366,19 +429,30 @@ class PedModel {
     this.torsoG.position.y = 11.5 + bob;
     this.legL.rotation.z = Math.sin(w) * amp;
     this.legR.rotation.z = -Math.sin(w) * amp;
-    const aiming = pd.shootT > 0 || g.weapon === "rocket";
-    if (aiming) {
-      const t = Math.min(1, pd.shootT * 4 + (g.weapon === "rocket" ? 1 : 0));
+    const wpn = g.weapon, kind = WEAPON_DEFS[wpn].kind;
+    const twoHand = wpn === "pistol" || wpn === "smg" || wpn === "shotgun";
+    const aiming = pd.shootT > 0 || wpn === "rocket";
+    if (kind === "melee" && pd.shootT > 0) {
+      // swing / punch: arm goes up and comes down
+      const k = 1 - pd.shootT / 0.4;
+      this.armR.rotation.z = (wpn === "bat" ? 2.2 : 1.6) * Math.sin(k * Math.PI) - 0.2;
+      this.armL.rotation.z = -Math.sin(w) * amp; this.armL.rotation.y = 0;
+    } else if (aiming) {
+      const t = Math.min(1, pd.shootT * 4 + (wpn === "rocket" ? 1 : 0));
       const kick = pd.shootT > 0.3 ? (pd.shootT - 0.3) * 4 : 0;
       this.armR.rotation.z = -(Math.PI / 2 - 0.1) * t + kick * 0.6;
-      this.armL.rotation.z = g.weapon === "pistol" ? -(Math.PI / 2 - 0.4) * t : -Math.sin(w) * amp;
-      this.armL.rotation.y = g.weapon === "pistol" ? 0.5 * t : 0;
+      this.armL.rotation.z = twoHand ? -(Math.PI / 2 - 0.4) * t : -Math.sin(w) * amp;
+      this.armL.rotation.y = twoHand ? 0.5 * t : 0;
     } else {
       this.armR.rotation.z = -Math.sin(w) * amp * 0.8; this.armL.rotation.z = Math.sin(w) * amp * 0.8; this.armL.rotation.y = 0;
     }
-    this.gunPistol.visible = g.weapon === "pistol";
-    this.gunRocket.visible = g.weapon === "rocket";
-    this.gunBomb.visible = g.weapon === "bomb";
+    for (const k of WEAPONS) { const m = this.guns[k]; if (m) m.visible = k === wpn; }
+    this.vest.visible = g.ped.armor > 0;
+    if (this.outfit !== g.outfit) {
+      this.outfit = g.outfit;
+      const o = OUTFITS[g.outfit] ?? OUTFITS[0];
+      this.jacket.color.set(o.shirt); this.jeans.color.set(o.pants);
+    }
     this.torsoG.rotation.x = Math.sin(w) * amp * 0.08;
     const lean = clamp(sp / 250, 0, 1) * 0.12;
     this.torsoG.rotation.z = lean;
@@ -390,7 +464,7 @@ class PedModel {
       this.group.rotation.set(0, -pd.a, 0);
     }
     const flash = pd.hitFlash > 0.2;
-    this.group.traverse((o) => { if ((o as THREE.Mesh).isMesh && o !== this.shadow) { const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial; if (m.emissive) { m.emissive.setScalar(flash ? 0.6 : 0); if (o === this.gunBomb) m.emissive.setHex(0xff2040); } } });
+    if (flash !== this.flashOn) { this.flashOn = flash; for (const m of this.flashMats) m.emissive.setScalar(flash ? 0.6 : 0); }
   }
 }
 
@@ -412,6 +486,12 @@ export class Renderer3D {
   private terrain!: THREE.Mesh;
   private forest: THREE.InstancedMesh[] = [];
   private carObjs = new Map<Car, CarObj>();
+  private seenCars = new Set<Car>();
+  private seenProjs = new Set<Proj>(); private seenBombs = new Set<Bomb>();
+  private enemyBulletMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 0.8, 0.6), toneMapped: false });
+  private grenadeMat = new THREE.MeshStandardMaterial({ color: 0x3f5a2a, roughness: 0.6 });
+  private nearCops: Car[] = [];
+  private dmgMat!: THREE.MeshStandardMaterial;
   private pickObjs = new Map<Pickup, THREE.Group>();
   private projObjs = new Map<Proj, THREE.Object3D>();
   private bombObjs = new Map<Bomb, THREE.Mesh>();
@@ -454,7 +534,7 @@ export class Renderer3D {
     pmrem.dispose();
     this.scene.fog = new THREE.Fog(0xcdbca4, 450, 3600);
     this.scene.background = new THREE.Color(0xb7cbe6);
-    this.buildLights(); this.buildSky(); this.buildGround(); this.buildTerrain(); this.buildCity(); this.buildRamps(); this.buildLamps(); this.buildShared(); this.buildPlaces(places);
+    this.buildLights(); this.buildSky(); this.buildGround(); this.buildTerrain(); this.buildCity(); this.buildRamps(); this.buildLamps(); this.buildShared(); this.buildPlaces(places); this.buildMarkers(); this.buildHeli();
     this.setQuality(quality);
   }
 
@@ -789,8 +869,9 @@ export class Renderer3D {
       if (!L) { L = { wall: [], prop: [], neon: [], ground: [] }; chunks.set(key, L); }
       const size = BLOCK - ROAD;
       const x0 = blk.bx * BLOCK + ROAD, z0 = blk.by * BLOCK + ROAD, mx = x0 + size / 2, mz = z0 + size / 2;
+      const dist = DISTRICTS[blockDistrict(blk.bx, blk.by)], distWall = C(dist.wall);
       L.ground.push(box(size, 2, size, mx, 1, mz, "#8f8c86"), box(size - 8, 0.2, size - 8, mx, 2.1, mz, "#a09d96"));
-      if (blk.kind === "city") L.ground.push(box(size - 32, 0.4, size - 32, mx, 2.3, mz, "#5d5b57"));
+      if (blk.kind === "city") L.ground.push(box(size - 32, 0.4, size - 32, mx, 2.3, mz, dist.ground));
       else if (blk.kind === "park") {
         L.ground.push(box(size - 20, 0.8, size - 20, mx, 2.5, mz, "#4c7a3a"), box(size * 0.45, 0.4, size * 0.4, x0 + size * 0.35, 3.0, z0 + size * 0.4, "#58853f"));
         L.ground.push(box(size - 20, 0.6, 12, mx, 3.0, mz, "#6b6350"), box(12, 0.6, size - 20, mx, 3.0, mz, "#6b6350"));
@@ -798,7 +879,7 @@ export class Renderer3D {
       } else L.ground.push(box(size - 24, 0.4, size - 24, mx, 2.3, mz, "#a8a49a"));
       for (const b of blk.buildings) {
         const H = b.height * H_SCALE + 14, cx = b.x + b.w / 2, cz = b.y + b.h / 2;
-        const col = C(WALL_COLS[Math.floor(r() * WALL_COLS.length)]).clone().multiplyScalar(0.75 + r() * 0.3);
+        const col = C(WALL_COLS[Math.floor(r() * WALL_COLS.length)]).clone().multiplyScalar(0.75 + r() * 0.3).lerp(distWall, dist.wallMix);
         L.wall.push(wallBox(b, H, col));
         // ground-floor storefront band, cornice and corner piers
         const dk = col.clone().multiplyScalar(0.62);
@@ -845,10 +926,52 @@ export class Renderer3D {
       };
       add(L.ground, groundMat, false, true); add(L.wall, wallMat, true, true); add(L.prop, propMat, true, true); add(L.neon, neonMat, false, false);
     }
+    this.buildEdge();
     const E: THREE.BufferGeometry[] = [];
     const B = MAP_SIZE;
     for (const [w, d, x, z] of [[B, 3, MAP_MIN + B / 2, MAP_MIN - 2], [B, 3, MAP_MIN + B / 2, MAP_MAX + 2], [3, B, MAP_MIN - 2, MAP_MIN + B / 2], [3, B, MAP_MAX + 2, MAP_MIN + B / 2]]) E.push(box(w, 6, d, x, 2, z, "#a8a49c"));
     this.scene.add(new THREE.Mesh(mergeGeometries(E)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 })));
+  }
+
+  // beach west of the city, harbour quay with containers and cranes east of it
+  private buildEdge() {
+    const r = mulberry32(4711);
+    const P: THREE.BufferGeometry[] = [];
+    const hw = HIGHWAYS.map((i) => i * BLOCK + ROAD / 2);
+    // strips between the highways
+    let a = 0;
+    for (const c of [...hw, WORLD + ROAD]) {
+      const b = Math.min(WORLD, c - ROAD / 2 - 4);
+      if (b - a > 20) {
+        P.push(box(216, 0.8, b - a, -112, 0.4, (a + b) / 2, "#e3cd98"));
+        P.push(box(226, 2.4, b - a, WORLD + 117, 1.2, (a + b) / 2, "#6e7177"));
+        P.push(box(4, 3, b - a, WORLD + 228, 1.5, (a + b) / 2, "#d9b23a"));
+      }
+      a = c + ROAD / 2 + 4;
+    }
+    // beach umbrellas and loungers
+    const UMB = ["#ff3cac", "#2bf0ff", "#ffd23f", "#ff8a3d", "#3dff8b"];
+    for (let i = 0; i < 46; i++) {
+      const z = 60 + r() * (WORLD - 120);
+      if (hw.some((c) => Math.abs(z - c) < ROAD / 2 + 30)) continue;
+      const x = -40 - r() * 160;
+      P.push(cyl(0.8, 0.8, 22, x, 11, z, "#e8e8ec", 6), withColor(new THREE.ConeGeometry(15, 6, 10).translate(x, 24, z), C(UMB[i % UMB.length])));
+      P.push(box(18, 2, 7, x + 12, 2, z + 4, "#f4f4f6"));
+    }
+    // containers (solid, from world.extras) and cranes
+    for (const e of this.world.extras) {
+      const stack = e.detail, col = C(e.wall);
+      for (let k = 0; k < stack; k++) P.push(box(e.w - 1, 25, e.h - 1, e.x + e.w / 2, 13 + k * 26, e.y + e.h / 2, col.clone().multiplyScalar(0.85 + 0.15 * ((k + e.seed * 3) % 1))));
+    }
+    for (const zc of [WORLD * 0.18, WORLD * 0.5, WORLD * 0.82]) {
+      const x = WORLD + 205;
+      for (const dz of [-22, 22]) P.push(box(4, 120, 4, x - 18, 60, zc + dz, "#d98a1a"), box(4, 120, 4, x + 18, 60, zc + dz, "#d98a1a"));
+      P.push(box(44, 6, 50, x, 122, zc, "#d98a1a"), box(190, 5, 6, x - 60, 128, zc, "#d98a1a"), box(12, 10, 12, x - 130, 118, zc, "#555"));
+    }
+    const m = new THREE.Mesh(mergeGeometries(P)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }));
+    m.receiveShadow = true; m.castShadow = this.quality === "high"; m.userData.cast = true;
+    this.scene.add(m); this.cityMeshes.push(m);
+    for (const g of P) g.dispose();
   }
 
   // signs and entrance markers for hospital, police station, ...
@@ -880,15 +1003,23 @@ export class Renderer3D {
       const symMesh = new THREE.Mesh(sym, symMat);
       symMesh.position.set(cx, H + (pl.kind === "hospital" ? 22 : 4), cz);
       this.scene.add(symMesh);
-      // entrance ring on the sidewalk
-      const ring = new THREE.Mesh(new THREE.RingGeometry(9, 12, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8, depthWrite: false, toneMapped: false }));
-      ring.position.set(pl.x, 0.5, pl.y);
-      ring.renderOrder = 1;
-      this.scene.add(ring);
+      // entrance ring on the sidewalk, a big one on the street for places you drive into
+      const ringMat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8, depthWrite: false, toneMapped: false });
+      if (pl.access === "foot" || pl.access === "both" || pl.access === "none") {
+        const ring = new THREE.Mesh(new THREE.RingGeometry(9, 12, 32).rotateX(-Math.PI / 2), ringMat);
+        ring.position.set(pl.x, 0.5, pl.y); ring.renderOrder = 1;
+        this.scene.add(ring);
+      }
+      if (pl.access === "car" || pl.access === "both") {
+        const ring = new THREE.Mesh(new THREE.RingGeometry(36, 42, 40).rotateX(-Math.PI / 2), ringMat);
+        ring.position.set(pl.cx, 0.6, pl.cy); ring.renderOrder = 1;
+        this.scene.add(ring);
+      }
     }
   }
 
   resetCamera(yaw = this.camYaw) { this.camInit = false; this.camYaw = yaw; }
+  cinematic: { x: number; y: number; z: number; a: number } | null = null;
 
   private buildLamps() {
     const pts: [number, number][] = [];
@@ -908,6 +1039,7 @@ export class Renderer3D {
     this.glassMat = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.85, roughness: 0.06, envMapIntensity: 1.7 });
     this.wheelMat = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.3, roughness: 0.55 });
     this.wreckMat = new THREE.MeshStandardMaterial({ vertexColors: true, color: 0x2a2624, metalness: 0.2, roughness: 0.95 });
+    this.dmgMat = new THREE.MeshStandardMaterial({ vertexColors: true, color: 0x8a7f78, metalness: 0.3, roughness: 0.8 });
     this.flashMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.5, 2.5, 2.5), toneMapped: false });
     this.lightMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
     const cone = canvasTex(256, 192, (g) => {
@@ -987,9 +1119,10 @@ export class Renderer3D {
 
     // player character
     const shirtTex = canvasTex(128, 128, (g) => {
-      g.fillStyle = "#2b3242"; g.fillRect(0, 0, 128, 128);
+      // neutral fabric; the outfit colour tints it
+      g.fillStyle = "#ffffff"; g.fillRect(0, 0, 128, 128);
       const rr = mulberry32(5);
-      for (let i = 0; i < 1200; i++) { g.fillStyle = rr() < 0.5 ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.09)"; g.fillRect(rr() * 128, rr() * 128, 2, 2); }
+      for (let i = 0; i < 1200; i++) { g.fillStyle = rr() < 0.5 ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.12)"; g.fillRect(rr() * 128, rr() * 128, 2, 2); }
     });
     this.ped = new PedModel(shirtTex, this.shadowGeo, this.shadowMat);
     this.scene.add(this.ped.group);
@@ -1025,7 +1158,9 @@ export class Renderer3D {
     group.add(shadow, pool);
     const obj: CarObj = { group, tilt, body, glass, lights, pool, wheels, model: c.model, color: c.color, wreck: false, pitch: 0, roll: 0, spinA: 0, steerA: 0 };
     if (c.kind === "player") { obj.glow = new THREE.Mesh(this.glowGeo, this.glowMat); obj.glow.renderOrder = 2; group.add(obj.glow); }
-    if (c.model === "police") {
+    if (c.model === "bike") shadow.scale.set(0.6, 1, 0.35);
+    else if (c.model === "bus" || c.model === "truck") shadow.scale.set(1.5, 1, 1.15);
+    if (c.model === "police" || c.model === "swat") {
       const reds = new THREE.MeshBasicMaterial({ color: this.copRed.clone(), toneMapped: false });
       const blues = new THREE.MeshBasicMaterial({ color: this.copBlue.clone(), toneMapped: false });
       const white = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1, 1), toneMapped: false });
@@ -1036,10 +1171,12 @@ export class Renderer3D {
         seg.position.set(-3, geo.roofY + 1.5, z);
         tilt.add(seg);
       }
-      const d1 = new THREE.Mesh(this.decalGeo, this.decalMat); d1.position.set(-1, 8.2, 12.65); tilt.add(d1);
-      const d2 = new THREE.Mesh(this.decalGeo, this.decalMatB); d2.position.set(-1, 8.2, -12.65); d2.rotation.y = Math.PI; tilt.add(d2);
-      const d3 = new THREE.Mesh(new THREE.PlaneGeometry(12, 6), this.roofDecalMat); d3.rotation.x = -Math.PI / 2; d3.rotation.z = -Math.PI / 2; d3.position.set(-3, geo.roofY + 0.05, 0); tilt.add(d3);
-      const d4 = new THREE.Mesh(new THREE.PlaneGeometry(12, 6), this.roofDecalMat); d4.rotation.x = -Math.PI / 2; d4.rotation.z = -Math.PI / 2; d4.position.set(14, 12.15, 0); tilt.add(d4);
+      if (c.model === "police") {
+        const d1 = new THREE.Mesh(this.decalGeo, this.decalMat); d1.position.set(-1, 8.2, 12.65); tilt.add(d1);
+        const d2 = new THREE.Mesh(this.decalGeo, this.decalMatB); d2.position.set(-1, 8.2, -12.65); d2.rotation.y = Math.PI; tilt.add(d2);
+        const d3 = new THREE.Mesh(new THREE.PlaneGeometry(12, 6), this.roofDecalMat); d3.rotation.x = -Math.PI / 2; d3.rotation.z = -Math.PI / 2; d3.position.set(-3, geo.roofY + 0.05, 0); tilt.add(d3);
+        const d4 = new THREE.Mesh(new THREE.PlaneGeometry(12, 6), this.roofDecalMat); d4.rotation.x = -Math.PI / 2; d4.rotation.z = -Math.PI / 2; d4.position.set(14, 12.15, 0); tilt.add(d4);
+      }
       obj.bar = { reds, blues, white };
     }
     this.scene.add(group);
@@ -1052,7 +1189,8 @@ export class Renderer3D {
   }
 
   private syncCars(g: Game, dt: number) {
-    const seen = new Set<Car>();
+    const seen = this.seenCars;
+    seen.clear();
     const t = g.t;
     for (const c of g.cars) {
       seen.add(c);
@@ -1072,7 +1210,11 @@ export class Renderer3D {
       const k = Math.min(1, dt * (c.air ? 3 : 12));
       o.pitch += (tp - o.pitch) * k; o.roll += (tr - o.roll) * k;
       o.group.rotation.set(o.roll, -c.a, o.pitch);
-      o.tilt.rotation.x = clamp(-c.vR / 900, -0.09, 0.09);
+      if (c.model === "bike") {
+        // lean into the curve; the rider is only there when somebody rides it
+        o.tilt.rotation.x = clamp(-c.av * Math.min(1, c.speed / 250) * 0.22, -0.55, 0.55);
+        o.glass.visible = c === g.player ? !g.onFoot : c.kind !== "civ" || c.driver;
+      } else o.tilt.rotation.x = clamp(-c.vR / 900, -0.09, 0.09);
       o.tilt.rotation.z = c.dead ? 0 : c.throttle > 0 ? 0.025 * c.throttle : c.throttle < 0 && c.vF > 50 ? -0.04 : 0;
       o.pool.visible = !c.air && !c.dead;
       if (c.dead && !o.wreck) {
@@ -1081,7 +1223,8 @@ export class Renderer3D {
         if (o.bar) { o.bar.reds.color.setScalar(0.1); o.bar.blues.color.setScalar(0.1); o.bar.white.color.setScalar(0.1); }
       }
       if (!o.wreck) {
-        o.body.material = c.hitFlash > 0.07 ? this.flashMat : this.bodyMat;
+        // badly damaged cars look scorched and dull
+        o.body.material = c.hitFlash > 0.07 ? this.flashMat : c.hp < c.maxHp * 0.4 ? this.dmgMat : this.bodyMat;
         if (o.glow) { o.glow.visible = !g.onFoot; (o.glow.material as THREE.MeshBasicMaterial).opacity = 0.75 + Math.sin(t * 4) * 0.15 + (c.nitro ? 0.3 : 0); }
         if (o.bar) {
           const on = (c.kind === "cop" && !c.calm) || c === g.player;
@@ -1128,23 +1271,26 @@ export class Renderer3D {
   }
 
   private syncProjs(g: Game) {
-    const seen = new Set<Proj>();
+    const seen = this.seenProjs;
+    seen.clear();
     for (const q of g.projs) {
       seen.add(q);
       let o = this.projObjs.get(q);
       if (!o) {
-        if (q.kind === "bullet") o = new THREE.Mesh(this.bulletGeo, this.bulletMat);
+        if (q.kind === "bullet") o = new THREE.Mesh(this.bulletGeo, q.from === "enemy" ? this.enemyBulletMat : this.bulletMat);
         else if (q.kind === "rocket") o = new THREE.Mesh(this.rocketGeo, this.rocketMat);
+        else if (q.kind === "grenade") o = new THREE.Mesh(this.bombGeo, this.grenadeMat);
         else o = new THREE.Mesh(this.bombGeo, this.bombMat);
         this.scene.add(o);
         this.projObjs.set(q, o);
       }
       o.position.set(q.x, q.z, q.y);
       const a = Math.atan2(q.vy, q.vx);
-      o.rotation.set(0, -a, q.kind === "bomb" ? g.t * 8 : Math.atan2(q.vz, Math.hypot(q.vx, q.vy)));
+      o.rotation.set(0, -a, q.kind === "bomb" || q.kind === "grenade" ? g.t * 8 : Math.atan2(q.vz, Math.hypot(q.vx, q.vy)));
     }
     for (const [q, o] of this.projObjs) if (!seen.has(q)) { this.scene.remove(o); this.projObjs.delete(q); }
-    const seenB = new Set<Bomb>();
+    const seenB = this.seenBombs;
+    seenB.clear();
     for (const b of g.bombs) {
       seenB.add(b);
       let o = this.bombObjs.get(b);
@@ -1208,7 +1354,7 @@ export class Renderer3D {
   private syncLights(g: Game) {
     const p = g.player;
     const ca = Math.cos(p.a), sa = Math.sin(p.a);
-    this.head.visible = !p.dead;
+    this.head.visible = !p.dead && !g.playerCarStored;
     this.head.position.set(p.x + ca * 22, p.z + 13, p.y + sa * 22);
     this.head.target.position.set(p.x + ca * 220, p.z - 10, p.y + sa * 220);
     this.head.target.updateMatrixWorld();
@@ -1221,8 +1367,18 @@ export class Renderer3D {
       const l = this.plights[li++], k = f.life / f.max;
       l.color.setRGB(1, 0.55, 0.2); l.intensity = 30 * k * (f.size / 520); l.distance = f.size * 0.9; l.position.set(f.x, f.z + 20, f.y);
     }
-    const cops = g.cars.filter((c) => c.kind === "cop" && !c.dead && !c.calm);
-    cops.sort((a, b) => (a.x - g.fx) ** 2 + (a.y - g.fy) ** 2 - ((b.x - g.fx) ** 2 + (b.y - g.fy) ** 2));
+    // nearest active cops (reused array, insertion sort keeps it small)
+    const cops = this.nearCops;
+    cops.length = 0;
+    const d2 = (c: Car) => (c.x - g.fx) ** 2 + (c.y - g.fy) ** 2;
+    for (const c of g.cars) {
+      if (c.kind !== "cop" || c.dead || c.calm) continue;
+      let i = cops.length;
+      if (i >= this.plights.length && d2(c) >= d2(cops[i - 1])) continue;
+      while (i > 0 && d2(cops[i - 1]) > d2(c)) i--;
+      cops.splice(i, 0, c);
+      if (cops.length > this.plights.length) cops.length = this.plights.length;
+    }
     for (const c of cops) {
       if (li >= this.plights.length) break;
       const l = this.plights[li++];
@@ -1233,17 +1389,123 @@ export class Renderer3D {
   }
 
   private syncArrow(g: Game) {
-    let best: Pickup | null = null, bd = Infinity;
+    // open world: points along the GPS route to the goal; arcade modes: to the nearest cash
+    let tx = 0, ty = 0, bd = Infinity, found = false;
     if (g.state === "playing" && !g.ending) {
-      for (const pk of g.pickups) { if (pk.type !== "cash") continue; const d = Math.hypot(pk.x - g.fx, pk.y - g.fy); if (d < bd) { bd = d; best = pk; } }
+      if (g.rules.city) {
+        if (g.nav && g.routeN > 1) {
+          // first route point that is not right under us
+          for (let i = 1; i < g.routeN; i++) { tx = g.route[i * 2]; ty = g.route[i * 2 + 1]; if (Math.hypot(tx - g.fx, ty - g.fy) > 120 || i === g.routeN - 1) break; }
+          bd = Math.hypot(g.nav.x - g.fx, g.nav.y - g.fy); found = true;
+          (this.arrow.material as THREE.MeshBasicMaterial).color.set(g.nav.color).multiplyScalar(2);
+        }
+      } else {
+        for (const pk of g.pickups) { if (pk.type !== "cash") continue; const d = Math.hypot(pk.x - g.fx, pk.y - g.fy); if (d < bd) { bd = d; tx = pk.x; ty = pk.y; found = true; } }
+      }
     }
-    if (!best || bd < 220 || this.camMode === "fp") { this.arrow.visible = false; return; }
+    if (!found || bd < 160 || this.camMode === "fp") { this.arrow.visible = false; return; }
     this.arrow.visible = true;
-    const a = Math.atan2(best.y - g.fy, best.x - g.fx);
+    const a = Math.atan2(ty - g.fy, tx - g.fx);
     const r = this.camMode === "chase" ? 0 : 62;
     this.arrow.position.set(g.fx + Math.cos(a) * r, g.fz + (this.camMode === "chase" ? 42 : 30) + Math.sin(g.t * 5) * 2.5, g.fy + Math.sin(a) * r);
     this.arrow.rotation.set(0, -a, 0);
   }
+
+  // mission / job goals: light beam + ring; shells and stunt jump signs (only near the player)
+  private markerObjs: { beam: THREE.Mesh; ring: THREE.Mesh; mat: THREE.MeshBasicMaterial }[] = [];
+  private shellMesh: THREE.InstancedMesh | null = null;
+  private jumpMesh: THREE.InstancedMesh | null = null;
+  private buildMarkers() {
+    for (let i = 0; i < 10; i++) {
+      const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(9, 12, 260, 14, 1, true).translate(0, 130, 0), mat);
+      const ring = new THREE.Mesh(new THREE.RingGeometry(20, 26, 36).rotateX(-Math.PI / 2), mat);
+      beam.visible = ring.visible = false; beam.renderOrder = ring.renderOrder = 3;
+      this.scene.add(beam, ring);
+      this.markerObjs.push({ beam, ring, mat });
+    }
+    const shellGeo = mergeGeometries([withColor(new THREE.ConeGeometry(5, 7, 9).rotateX(Math.PI).translate(0, 4, 0), C("#ffe2b8")), withColor(new THREE.SphereGeometry(3.4, 10, 8).scale(1.3, 0.6, 1).translate(0, 7.5, 0), C("#ffb3c6"))])!;
+    this.shellMesh = new THREE.InstancedMesh(shellGeo, new THREE.MeshStandardMaterial({ vertexColors: true, emissive: 0xff9f7a, emissiveIntensity: 0.6, roughness: 0.4 }), 30);
+    this.shellMesh.frustumCulled = false;
+    const jumpGeo = mergeGeometries([withColor(new THREE.BoxGeometry(1.5, 26, 1.5).translate(0, 13, 0), C("#3a3d45")), withColor(new THREE.BoxGeometry(2, 12, 18).translate(0, 30, 0), C("#2bf0ff"), 1.6)])!;
+    this.jumpMesh = new THREE.InstancedMesh(jumpGeo, new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }), 10);
+    this.jumpMesh.frustumCulled = false;
+    this.scene.add(this.shellMesh, this.jumpMesh);
+  }
+  private syncMarkers(g: Game) {
+    let k = 0;
+    const show = g.state !== "menu" && g.rules.city;
+    if (show) for (const list of [g.missions.markers, g.jobs.markers]) for (const mk of list) {
+      if (k >= this.markerObjs.length) break;
+      if (mk.kind === "enemy") continue; // enemies are visible themselves
+      const o = this.markerObjs[k++], z = terrainH(mk.x, mk.y);
+      o.mat.color.set(mk.color).multiplyScalar(1.4);
+      o.mat.opacity = 0.32 + Math.sin(g.t * 4) * 0.08;
+      o.beam.visible = o.ring.visible = true;
+      o.beam.position.set(mk.x, z, mk.y); o.ring.position.set(mk.x, z + 0.8, mk.y);
+      const s = mk.kind === "race" ? 2.4 : 1; o.ring.scale.set(s, 1, s);
+    }
+    for (; k < this.markerObjs.length; k++) this.markerObjs[k].beam.visible = this.markerObjs[k].ring.visible = false;
+    const m = this.tmpM, q = this.tmpQ, sc = this.tmpS, p = this.tmpP;
+    if (this.shellMesh) {
+      const sh = g.jobs.shells, got = g.progress.shells;
+      for (let i = 0; i < 30; i++) {
+        const s = sh[i];
+        if (!show || !s || got.includes(s.id) || Math.hypot(s.x - g.fx, s.y - g.fy) > 700) { m.makeScale(0, 0, 0); this.shellMesh.setMatrixAt(i, m); continue; }
+        q.setFromAxisAngle(this.up, g.t * 2 + i);
+        m.compose(p.set(s.x, s.z + 6 + Math.sin(g.t * 3 + i) * 2, s.y), q, sc.set(1.4, 1.4, 1.4));
+        this.shellMesh.setMatrixAt(i, m);
+      }
+      this.shellMesh.instanceMatrix.needsUpdate = true;
+    }
+    if (this.jumpMesh) {
+      const js = g.jobs.jumps, got = g.progress.jumps;
+      for (let i = 0; i < 10; i++) {
+        const j = js[i];
+        if (!show || !j || got.includes(j.id)) { m.makeScale(0, 0, 0); this.jumpMesh.setMatrixAt(i, m); continue; }
+        const rp = this.world.ramps[j.ramp];
+        const side = rp.alongX ? [j.x, j.y - rp.w / 2 - 8] : [j.x - rp.w / 2 - 8, j.y];
+        q.setFromAxisAngle(this.up, rp.alongX ? 0 : Math.PI / 2);
+        m.compose(p.set(side[0], 0, side[1]), q, sc.set(1, 1, 1));
+        this.jumpMesh.setMatrixAt(i, m);
+      }
+      this.jumpMesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+  // police helicopter with spotlight cone on the ground
+  private heliG: THREE.Group | null = null; private heliRotor: THREE.Mesh | null = null; private heliSpot: THREE.Mesh | null = null;
+  private buildHeli() {
+    const B: THREE.BufferGeometry[] = [];
+    B.push(ni(withColor(new THREE.SphereGeometry(12, 14, 10).scale(1.6, 1, 1), C("#1f3a6e"))), nb(30, 6, 6, -30, 2, 0, "#1f3a6e"), nb(2, 12, 2, -45, 8, 0, "#1f3a6e"), nb(8, 2, 10, -45, 2, 0, "#f4f6fa"));
+    B.push(nb(26, 1.6, 1.6, 0, -12, 8, "#2a2d36"), nb(26, 1.6, 1.6, 0, -12, -8, "#2a2d36"), nb(1.5, 6, 1.5, 6, -9, 8, "#2a2d36"), nb(1.5, 6, 1.5, -6, -9, -8, "#2a2d36"), nb(1.5, 6, 1.5, 6, -9, -8, "#2a2d36"), nb(1.5, 6, 1.5, -6, -9, 8, "#2a2d36"));
+    B.push(ni(withColor(new THREE.SphereGeometry(7, 10, 8).scale(1, 0.8, 1.1).translate(9, 2, 0), C("#0b121c"))), nb(3, 4, 3, 0, 12, 0, "#2a2d36"));
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(mergeGeometries(B)!, this.bodyMat));
+    for (const b of B) b.dispose();
+    const rotor = new THREE.Mesh(new THREE.BoxGeometry(80, 0.6, 3).translate(0, 14, 0), new THREE.MeshStandardMaterial({ color: 0x15161b }));
+    rotor.add(new THREE.Mesh(new THREE.BoxGeometry(3, 0.6, 80).translate(0, 14, 0), rotor.material));
+    g.add(rotor);
+    g.visible = false;
+    const spot = new THREE.Mesh(new THREE.CircleGeometry(120, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: radialTex("rgba(255,250,220,0.7)", "rgba(255,250,220,0)"), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    spot.renderOrder = 2; spot.visible = false;
+    this.scene.add(g, spot);
+    this.heliG = g; this.heliRotor = rotor; this.heliSpot = spot;
+  }
+  private syncHeli(g: Game) {
+    const h = g.police.heli;
+    if (!this.heliG || !this.heliRotor || !this.heliSpot) return;
+    this.heliG.visible = !!h && g.state !== "menu";
+    this.heliSpot.visible = !!h && !h.dead && g.state !== "menu";
+    if (!h) return;
+    this.heliG.position.set(h.x, h.z, h.y);
+    this.heliG.rotation.set(0, -h.a, h.dead ? 0.4 : -Math.min(0.25, Math.hypot(h.vx, h.vy) / 1200));
+    this.heliRotor.rotation.y = h.rotor;
+    // the spotlight looks at you when they see you
+    const sx = g.police.seen ? g.fx : h.x, sy = g.police.seen ? g.fy : h.y;
+    this.heliSpot.position.set(sx, terrainH(sx, sy) + 1, sy);
+  }
+
+  private tmpM = new THREE.Matrix4(); private tmpQ = new THREE.Quaternion(); private tmpS = new THREE.Vector3(); private tmpP = new THREE.Vector3(); private up = new THREE.Vector3(0, 1, 0);
 
   private updateCamera(g: Game, dt: number) {
     const p = g.player;
@@ -1251,7 +1513,17 @@ export class Renderer3D {
     const tgt = this.tmpV;
     let lx: number, ly: number, lz: number, fov: number, kp: number;
     let instant = false;
-    if (g.state === "menu") {
+    const cin = this.cinematic;
+    if (cin) {
+      // dialog: slow swing in front of the speaker, pulled in when a wall is in the way
+      this.orbit += dt;
+      const a = cin.a + Math.sin(this.orbit * 0.3) * 0.45;
+      const cx = Math.cos(a), cy = Math.sin(a);
+      let dist = 115;
+      for (let s = 0.15; s <= 1.0001; s += 0.1) if (this.world.isSolid(cin.x + cx * 115 * s, cin.y + cy * 115 * s, 6)) { dist = Math.max(30, 115 * s - 10); break; }
+      tgt.set(cin.x + cx * dist, cin.z + 42, cin.y + cy * dist);
+      lx = cin.x; ly = cin.z + 20; lz = cin.y; fov = 50; kp = 2.5;
+    } else if (g.state === "menu") {
       this.orbit += dt * 0.12;
       const d = 210;
       tgt.set(p.x + Math.cos(this.orbit) * d, 80, p.y + Math.sin(this.orbit) * d);
@@ -1330,6 +1602,8 @@ export class Renderer3D {
     this.syncParticles(g);
     this.syncLights(g);
     this.syncArrow(g);
+    this.syncMarkers(g);
+    this.syncHeli(g);
     this.ped.update(g, dt);
     this.crowd.update(g.peds.list, g.state !== "menu");
     this.updateCamera(g, dt);

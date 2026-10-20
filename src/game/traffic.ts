@@ -1,5 +1,6 @@
 import { BLOCK, ROAD, GRID, HIGHWAYS, mulberry32, type World } from "./world";
-import { Car, type CarModel } from "./vehicles";
+import { Car, MODEL_STATS, type CarModel, type FactionId } from "./vehicles";
+import { DISTRICTS, districtAt } from "./districts";
 import type { PedSystem } from "./peds";
 import type { ModeRules } from "./modes";
 
@@ -13,7 +14,8 @@ export const PARKED_LIMIT = { high: 14, low: 8 };
 const PARK_OFF = 62;          // distance from the road centre (lane cars pass at 34)
 const PARK_STEP = 66, PARK_MARGIN = 55, PARK_CHANCE = 0.22;
 const PARK_SPAWN_MIN = 380, PARK_SPAWN_MAX = 1100, PARK_DESPAWN = 1350, PARK_FREE = 1900;
-const PARKED_MODELS: CarModel[] = ["sedan", "sedan", "sedan", "suv", "van", "muscle", "taxi", "sport"];
+const PARKED_MODELS: CarModel[] = ["sedan", "sedan", "sedan", "suv", "van", "muscle", "taxi", "sport", "bike", "truck", "super"];
+const GANG_COLORS: Record<FactionId, string> = { halcones: "#c0392b", kings: "#7d3c98" };
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
@@ -104,16 +106,24 @@ export class Traffic {
       const ni = i + dir[0], nj = j + dir[1];
       if (ni < 0 || nj < 0 || ni > GRID || nj > GRID) continue;
       const r = Math.random();
-      const model: CarModel = r < 0.15 ? "taxi" : r < 0.3 ? "van" : r < 0.4 ? "suv" : r < 0.5 ? "muscle" : "sedan";
-      const color = model === "taxi" ? "#ffc21a" : CIV_COLORS[Math.floor(Math.random() * CIV_COLORS.length)];
+      // gang turf: some cars belong to the gang (their colour)
+      const gang = h.rules.city ? DISTRICTS[districtAt(np.x, np.y)].gang : null;
+      const isGang = !!gang && Math.random() < 0.3;
+      // arcade modes keep the original traffic mix
+      const model: CarModel = !h.rules.city ? (r < 0.15 ? "taxi" : r < 0.3 ? "van" : r < 0.4 ? "suv" : r < 0.5 ? "muscle" : "sedan")
+        : isGang ? (r < 0.5 ? "muscle" : "suv")
+        : r < 0.12 ? "taxi" : r < 0.24 ? "van" : r < 0.32 ? "suv" : r < 0.4 ? "muscle" : r < 0.47 ? "bike" : r < 0.52 ? "truck" : r < 0.56 ? "bus" : "sedan";
+      const color = isGang ? GANG_COLORS[gang!] : model === "taxi" ? "#ffc21a" : model === "bus" ? "#2bb3ff" : CIV_COLORS[Math.floor(Math.random() * CIV_COLORS.length)];
       const c = new Car("civ", model, color);
+      if (isGang) c.faction = gang;
       const t = rnd(0.2, 0.7);
       c.x = np.x + dir[0] * BLOCK * t - dir[1] * LANE; c.y = np.y + dir[1] * BLOCK * t + dir[0] * LANE;
       c.a = Math.atan2(dir[1], dir[0]);
       c.prevI = i; c.prevJ = j; c.wpI = ni; c.wpJ = nj; c.route = true;
-      c.cruise = rnd(150, 200);
+      c.cruise = model === "bus" || model === "truck" ? rnd(120, 150) : model === "bike" ? rnd(170, 220) : rnd(150, 200);
       c.vx = Math.cos(c.a) * c.cruise; c.vy = Math.sin(c.a) * c.cruise;
-      c.hp = c.maxHp = 90; c.mass = model === "van" || model === "suv" ? 1.2 : 0.8;
+      if (h.rules.city) { c.hp = c.maxHp = MODEL_STATS[model].hp; c.mass = MODEL_STATS[model].mass; }
+      else { c.hp = c.maxHp = 90; c.mass = model === "van" || model === "suv" ? 1.2 : 0.8; }
       c.driver = true;
       h.cars.push(c);
       return;
@@ -128,14 +138,17 @@ export class Traffic {
     dx /= L; dy /= L;
     const tx = to.x - dy * LANE - dx * 10, ty = to.y + dx * LANE - dy * 10;
     if (Math.hypot(tx - c.x, ty - c.y) < 55) {
-      // pick the next crossing at random, never straight back
-      let n = 0, ci = c.prevI, cj = c.prevJ;
+      // pick the next crossing at random (fleeing cars: away from the player), never straight back
+      let n = 0, ci = c.prevI, cj = c.prevJ, best = -Infinity;
       for (const d of DIRS) {
         const ni = c.wpI + d[0], nj = c.wpJ + d[1];
         if (ni < 0 || nj < 0 || ni > GRID || nj > GRID) continue;
         if (ni === c.prevI && nj === c.prevJ) continue;
         n++;
-        if (Math.random() * n < 1) { ci = ni; cj = nj; }
+        if (c.flee) {
+          const np = w.nodePos(ni, nj), score = Math.hypot(np.x - h.fx, np.y - h.fy) + Math.random() * 200;
+          if (score > best) { best = score; ci = ni; cj = nj; }
+        } else if (Math.random() * n < 1) { ci = ni; cj = nj; }
       }
       c.prevI = c.wpI; c.prevJ = c.wpJ; c.wpI = ci; c.wpJ = cj;
     }
@@ -204,7 +217,7 @@ export class Traffic {
       if (this.occupied(cars, sp)) continue;
       const c = new Car("civ", sp.model, sp.color);
       c.x = sp.x; c.y = sp.y; c.a = sp.a; c.parked = true; c.handbrake = true; c.spotId = sp.id;
-      c.hp = c.maxHp = 90; c.mass = sp.model === "van" || sp.model === "suv" ? 1.2 : 0.8;
+      c.hp = c.maxHp = MODEL_STATS[sp.model].hp; c.mass = MODEL_STATS[sp.model].mass;
       cars.push(c);
       n++;
     }

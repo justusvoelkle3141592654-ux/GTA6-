@@ -39,8 +39,9 @@ export class Wanted {
 
   clear() { this.heat = 0; this.stars = this.rules.minStars; this.lostT = 0; }
 
-  // heatRate: heat per second (only used when the mode has timeHeat), seen: a cop currently sees the player
-  update(dt: number, heatRate: number, seen: boolean): WantedEvent {
+  // heatRate: heat per second (only used when the mode has timeHeat), seen: a cop currently sees the player,
+  // far: the player is outside the search area (escape goes twice as fast)
+  update(dt: number, heatRate: number, seen: boolean, far = false): WantedEvent {
     if (!this.rules.cops) return null;
     if (this.rules.timeHeat) this.heat += dt * heatRate;
     let target: number;
@@ -55,7 +56,7 @@ export class Wanted {
     if (this.rules.starsDecay && this.stars > 0) {
       if (seen) this.lostT = 0;
       else {
-        this.lostT += dt;
+        this.lostT += far ? dt * 2 : dt;
         if (this.lostT > LOSE_TIME[this.stars]) { this.clear(); return "lost"; }
       }
     }

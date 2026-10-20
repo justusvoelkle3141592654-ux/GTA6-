@@ -1,8 +1,11 @@
 import { BLOCK, ROAD, GRID, inCity, type World } from "./world";
-import type { Car } from "./vehicles";
+import type { Car, FactionId } from "./vehicles";
+import { DISTRICTS, blockDistrict } from "./districts";
 
-export type CivState = "walk" | "wait" | "flee" | "cower" | "down";
+export type CivState = "walk" | "wait" | "flee" | "cower" | "down" | "attack" | "idle";
 export type AlarmKind = "shot" | "blast";
+// civ: passer-by; cop/swat: police on foot; gang: gang member; fare: taxi customer; target: mission target
+export type PedRole = "civ" | "cop" | "swat" | "gang" | "fare" | "target";
 
 export interface Civilian {
   active: boolean;
@@ -17,19 +20,37 @@ export interface Civilian {
   speed: number; walk: number; // walking speed, animation phase
   look: number; scale: number; // appearance seed, body size
   threatX: number; threatY: number;
+  role: PedRole; faction: FactionId | null;
+  hp: number; maxHp: number;
+  armed: boolean; shootT: number; // carries a gun / time to the next shot
+  shirt: string; pants: string;   // fixed colours (uniforms, gang colours); "" = random look
+  tag: string;                    // mission marker
 }
 
 // what the pedestrian system needs from the game
 export interface PedHost {
   readonly cars: readonly Car[];
-  readonly fx: number; readonly fy: number;
+  readonly fx: number; readonly fy: number; readonly fz: number;
   readonly onFoot: boolean;
   readonly ped: { x: number; y: number };
+  readonly stars: number;
   pedHit(c: Civilian, by: Car, speed: number): void;
+  enemyShot(x: number, y: number, z: number, a: number, dmg: number): void;
+  gangHostile(f: FactionId): boolean;
 }
 
-export const MAX_PEDS = 24;
+// uniforms and gang colours
+export const ROLE_LOOK: Record<"cop" | "swat" | FactionId, { shirt: string; pants: string; hp: number }> = {
+  cop: { shirt: "#1f3a6e", pants: "#16213a", hp: 80 },
+  swat: { shirt: "#1b1d22", pants: "#22252b", hp: 160 },
+  halcones: { shirt: "#c0392b", pants: "#2b2f3a", hp: 70 },
+  kings: { shirt: "#7d3c98", pants: "#1c1c22", hp: 70 },
+};
+
+export const MAX_PEDS = 32;
 export const PED_LIMIT = { high: 24, low: 12 };
+const HOSTILE_EXTRA = 8;                 // armed peds may exceed the normal limit by this much
+const ATTACK_RANGE = 230, ATTACK_KEEP = 120, ENEMY_DMG = { cop: 7, swat: 10, gang: 6 };
 const INSET = 12;                        // sidewalk path: distance from the block edge (buildings start at 18)
 const SPAWN_MIN = 300, SPAWN_MAX = 950, DESPAWN = 1150;
 const WALK_V: [number, number] = [26, 36], FLEE_V: [number, number] = [120, 150];
@@ -65,6 +86,7 @@ function newCiv(): Civilian {
     active: false, x: 0, y: 0, z: 0, a: 0, vx: 0, vy: 0, vz: 0, state: "walk", t: 0, dur: 0,
     bx: 0, by: 0, corner: 0, dir: 1, cross: false, offPath: false, tx: 0, ty: 0,
     speed: 30, walk: 0, look: 0, scale: 1, threatX: 0, threatY: 0,
+    role: "civ", faction: null, hp: 30, maxHp: 30, armed: false, shootT: 0, shirt: "", pants: "", tag: "",
   };
 }
 
@@ -87,8 +109,10 @@ export class PedSystem {
     for (let i = 0; i < n; i++) this.trySpawn(fx, fy, 120);
   }
 
-  private free(): Civilian | null {
-    for (let i = 0; i < this.limit; i++) if (!this.list[i].active) return this.list[i];
+  // extra: police, gang fights and mission peds may use the slots above the normal limit
+  private free(extra = false): Civilian | null {
+    const n = extra ? Math.min(MAX_PEDS, this.limit + HOSTILE_EXTRA) : this.limit;
+    for (let i = 0; i < n; i++) if (!this.list[i].active) return this.list[i];
     return null;
   }
 
@@ -97,6 +121,40 @@ export class PedSystem {
     c.state = "walk"; c.t = 0; c.dur = 0; c.cross = false; c.offPath = false;
     c.speed = rnd(WALK_V[0], WALK_V[1]); c.walk = Math.random() * 10;
     c.look = Math.floor(Math.random() * 1e6); c.scale = rnd(0.9, 1.06);
+    c.role = "civ"; c.faction = null; c.hp = c.maxHp = 30; c.armed = false; c.shootT = 0; c.shirt = ""; c.pants = ""; c.tag = "";
+  }
+
+  // police on foot, gang members, mission peds
+  spawnRole(role: PedRole, x: number, y: number, faction: FactionId | null = null): Civilian | null {
+    const c = this.free(true);
+    if (!c) return null;
+    this.init(c, x, y);
+    c.role = role; c.faction = faction;
+    c.bx = clamp(Math.floor((x - ROAD / 2) / BLOCK), 0, GRID - 1); c.by = clamp(Math.floor((y - ROAD / 2) / BLOCK), 0, GRID - 1);
+    const look = role === "cop" || role === "swat" ? ROLE_LOOK[role] : faction ? ROLE_LOOK[faction] : null;
+    if (look) { c.shirt = look.shirt; c.pants = look.pants; c.hp = c.maxHp = look.hp; }
+    if (role === "swat") c.scale = 1.08;
+    c.armed = role === "cop" || role === "swat" || role === "gang";
+    c.state = role === "cop" || role === "swat" ? "attack" : role === "gang" ? "idle" : "walk";
+    if (role === "fare" || role === "target") { c.state = "idle"; c.hp = c.maxHp = 40; }
+    c.shootT = rnd(0.8, 1.6);
+    return c;
+  }
+
+  // gang members hang around in their own district
+  private trySpawnGang(h: PedHost, fx: number, fy: number) {
+    const gx = clamp(Math.floor((fx - ROAD) / BLOCK) + Math.floor(rnd(-2, 3)), 0, GRID - 1), gy = clamp(Math.floor((fy - ROAD) / BLOCK) + Math.floor(rnd(-2, 3)), 0, GRID - 1);
+    const f = DISTRICTS[blockDistrict(gx, gy)].gang;
+    if (!f) return;
+    let n = 0;
+    for (const c of this.list) if (c.active && c.role === "gang") n++;
+    if (n >= 6) return;
+    cornerPos(gx, gy, Math.floor(Math.random() * 4), P);
+    if (Math.hypot(P.x - fx, P.y - fy) < SPAWN_MIN) return;
+    for (let i = 0; i < 2 + Math.floor(Math.random() * 2); i++) {
+      const c = this.spawnRole("gang", P.x + rnd(-14, 14), P.y + rnd(-14, 14), f);
+      if (c && h.gangHostile(f)) c.state = "attack";
+    }
   }
 
   private trySpawn(fx: number, fy: number, minD = SPAWN_MIN) {
@@ -166,7 +224,8 @@ export class PedSystem {
   }
 
   private scare(c: Civilian, x: number, y: number) {
-    if (c.state === "down") return;
+    if (c.state === "down" || c.state === "attack" || c.role === "cop" || c.role === "swat" || c.tag === "fare") return;
+    if (c.role === "gang") { c.state = "attack"; c.t = 0; return; } // gangs fight back
     c.threatX = x; c.threatY = y;
     const wasFleeing = c.state === "flee";
     c.state = "flee"; c.t = 0; c.dur = rnd(5, 8);
@@ -187,7 +246,7 @@ export class PedSystem {
   // gunshots and explosions scare everybody around
   alarm(x: number, y: number, radius: number, kind: AlarmKind) {
     for (const c of this.list) {
-      if (!c.active || c.state === "down") continue;
+      if (!c.active || c.state === "down" || c.armed) continue; // police and gangs do not run
       const d = Math.hypot(c.x - x, c.y - y);
       if (d > radius) continue;
       if (kind === "shot" && d < 160 && c.state !== "flee" && Math.random() < 0.35) { c.state = "cower"; c.t = 0; c.dur = rnd(2.5, 4.5); c.threatX = x; c.threatY = y; }
@@ -239,17 +298,76 @@ export class PedSystem {
     return false;
   }
 
+  // projectile hit / punch; returns true when the ped goes down
+  damage(c: Civilian, dmg: number, fromX: number, fromY: number, push: number): boolean {
+    if (!c.active || c.state === "down") return false;
+    c.hp -= dmg;
+    if (c.hp <= 0) {
+      const dx = c.x - fromX, dy = c.y - fromY, d = Math.max(1, Math.hypot(dx, dy));
+      this.knockDown(c, (dx / d) * push, (dy / d) * push, 50);
+      return true;
+    }
+    if (c.role === "gang") { c.state = "attack"; c.t = 0; }
+    else if (!c.armed) this.scare(c, fromX, fromY);
+    return false;
+  }
+
+  // standing ped in front of (x, y) facing a, for punches and bats
+  meleeTarget(x: number, y: number, a: number, range: number): Civilian | null {
+    let best: Civilian | null = null, bd = range;
+    for (const c of this.list) {
+      if (!c.active || c.state === "down") continue;
+      const d = Math.hypot(c.x - x, c.y - y);
+      if (d >= bd) continue;
+      if (Math.abs(wrap(Math.atan2(c.y - y, c.x - x) - a)) > 1.1) continue;
+      best = c; bd = d;
+    }
+    return best;
+  }
+
+  // police on foot standing close to (x, y) (arrests)
+  copsNear(x: number, y: number, r: number) {
+    let n = 0;
+    for (const c of this.list) if (c.active && c.state === "attack" && (c.role === "cop" || c.role === "swat") && Math.hypot(c.x - x, c.y - y) < r) n++;
+    return n;
+  }
+
+  // a passer-by who can see (x, y) (crime witnesses)
+  witness(x: number, y: number, r: number): boolean {
+    for (const c of this.list) {
+      if (!c.active || c.state === "down" || c.role !== "civ") continue;
+      const d = Math.hypot(c.x - x, c.y - y);
+      if (d < r && (d < 60 || this.world.lineClear(c.x, c.y, x, y, 40))) return true;
+    }
+    return false;
+  }
+
+  private civCount() { let n = 0; for (const c of this.list) if (c.active && c.role === "civ") n++; return n; }
+
   update(dt: number, h: PedHost) {
     const fx = h.fx, fy = h.fy;
     this.cars = h.cars;
-    if (this.count < this.limit && Math.random() < 0.25) this.trySpawn(fx, fy);
+    if (this.civCount() < this.limit && Math.random() < 0.25) this.trySpawn(fx, fy);
+    if (Math.random() < 0.012) this.trySpawnGang(h, fx, fy);
     for (const c of this.list) {
       if (!c.active) continue;
       c.t += dt;
       const dist = Math.hypot(c.x - fx, c.y - fy);
-      if ((c.state === "down" && c.t > DOWN_TIME) || (dist > DESPAWN && c.state !== "down")) { c.active = false; continue; }
+      const far = c.tag ? Infinity : c.armed ? DESPAWN + 400 : DESPAWN; // mission peds stay
+      if ((c.state === "down" && c.t > DOWN_TIME && !c.tag) || (dist > far && c.state !== "down")) { c.active = false; continue; }
       if (c.state === "down") { this.fall(c, dt); continue; }
+      const cop = c.role === "cop" || c.role === "swat";
+      if (cop && c.state === "attack" && h.stars === 0) { c.state = "walk"; c.speed = rnd(WALK_V[0], WALK_V[1]); this.targetSidewalk(c); }
+      else if (cop && c.state !== "attack" && h.stars > 0 && dist < 500) { c.state = "attack"; c.t = 0; }
+      if (c.role === "gang" && c.state === "idle" && c.faction && h.gangHostile(c.faction) && dist < 320) { c.state = "attack"; c.t = 0; }
       switch (c.state) {
+        case "idle":
+          c.vx = 0; c.vy = 0;
+          if (c.role === "gang") c.a += Math.sin(c.t * 0.7 + c.look) * dt * 0.6;
+          break;
+        case "attack":
+          this.attack(c, dt, h, dist);
+          break;
         case "walk": case "flee":
           if (c.state === "flee" && c.t > c.dur && !c.cross) {
             c.state = "walk"; c.speed = rnd(WALK_V[0], WALK_V[1]); c.t = 0;
@@ -266,10 +384,33 @@ export class PedSystem {
           if (c.t > c.dur) this.scare(c, c.threatX, c.threatY);
           break;
       }
-      if (c.state !== "flee" && c.state !== "cower") this.watchTraffic(c, h);
+      if (c.state === "walk" || c.state === "wait" || c.state === "idle") this.watchTraffic(c, h);
       this.hitByCars(c, h);
       if (h.onFoot) this.pushFrom(c, h.ped.x, h.ped.y, 10);
     }
+  }
+
+  // police and gang members: close in on the player and shoot when they have a clear line
+  private attack(c: Civilian, dt: number, h: PedHost, d: number) {
+    const cop = c.role === "cop" || c.role === "swat";
+    const dx = h.fx - c.x, dy = h.fy - c.y;
+    c.a = Math.atan2(dy, dx);
+    const speed = c.role === "swat" ? 125 : cop ? 135 : 115;
+    const arrest = cop && h.stars <= 1; // 1 star: they want to cuff you, not shoot
+    if (d > (arrest ? 18 : ATTACK_KEEP)) {
+      const nx = c.x + (dx / d) * speed * dt, ny = c.y + (dy / d) * speed * dt;
+      if (!this.world.isSolid(nx, c.y, 5)) c.x = nx;
+      if (!this.world.isSolid(c.x, ny, 5)) c.y = ny;
+      c.vx = (dx / d) * speed; c.vy = (dy / d) * speed;
+      c.walk += dt * speed * 0.05;
+    } else { c.vx = 0; c.vy = 0; }
+    if (!c.armed || arrest || d > ATTACK_RANGE) return;
+    c.shootT -= dt;
+    if (c.shootT > 0) return;
+    c.shootT = c.role === "swat" ? rnd(0.35, 0.7) : rnd(0.7, 1.4);
+    if (!this.world.lineClear(c.x, c.y, h.fx, h.fy, 30)) return;
+    const dmg = c.role === "swat" ? ENEMY_DMG.swat : cop ? ENEMY_DMG.cop : ENEMY_DMG.gang;
+    h.enemyShot(c.x + Math.cos(c.a) * 8, c.y + Math.sin(c.a) * 8, c.z + 15, c.a + rnd(-0.1, 0.1), dmg);
   }
 
   // move towards the target; true when it is reached
