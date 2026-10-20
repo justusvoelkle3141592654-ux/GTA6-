@@ -4,6 +4,7 @@ import { Renderer3D } from "./renderer3d";
 import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, SEEN_CLOSE, SEEN_DIST, type Crime } from "./wanted";
 import { buildPlaces, respawnCost, RESPAWN_RULES, type Place } from "./places";
+import { PedSystem, PED_LIMIT, type Civilian } from "./peds";
 
 export type GameState = "menu" | "playing" | "paused" | "over";
 export type { Mode } from "./modes";
@@ -102,6 +103,7 @@ export class Game {
   world = new World(4242);
   places: Place[] = buildPlaces(this.world);
   wanted = new Wanted(MODE_RULES.chase);
+  peds = new PedSystem(this.world);
   state: GameState = "menu";
   dpr = 1; cw = 0; ch = 0; mobile = false;
 
@@ -177,7 +179,7 @@ export class Game {
   configure(cfg: GameConfig) {
     const prevQ = this.config.quality;
     this.config = { ...cfg };
-    if (cfg.quality !== prevQ) { this.r3d.setQuality(cfg.quality); this.resize(); }
+    if (cfg.quality !== prevQ) { this.r3d.setQuality(cfg.quality); this.resize(); this.peds.limit = cfg.quality === "low" ? PED_LIMIT.low : PED_LIMIT.high; }
     this.r3d.camMode = cfg.camera;
     if (this.state === "menu" && this.player) { const d = this.carDef; this.player.model = d.model; this.player.color = d.color; }
   }
@@ -228,6 +230,7 @@ export class Game {
   private resetWorld() {
     this.cars = []; this.particles = []; this.pickups = []; this.texts = []; this.banners = []; this.flashes = []; this.projs = []; this.bombs = [];
     this.skidHead = 0; this.skidTotal = 0;
+    this.peds.clear();
     const d = this.carDef;
     const p = new Car("player", d.model, d.color);
     p.hp = p.maxHp = d.hp; p.mass = d.mass;
@@ -269,6 +272,8 @@ export class Game {
     for (let i = 0; i < 5; i++) this.spawnPickup("rocket", true);
     for (let i = 0; i < 4; i++) this.spawnPickup("bomb", true);
     for (let i = 0; i < 14; i++) this.spawnCiv(true);
+    this.peds.limit = this.config.quality === "low" ? PED_LIMIT.low : PED_LIMIT.high;
+    if (rules.city) this.peds.populate(p.x, p.y);
     const m = this.config.mode;
     this.banner(m === "free" ? "FREIE FAHRT" : m === "open" ? "SOLARA BAY" : "LOS GEHT'S", m === "free" ? "Keine Cops – erkunde Stadt & Berge" : m === "open" ? "Die Stadt gehört dir – benimm dich (oder nicht)" : "Schnapp dir das Cash!", "#ff3cac", 2.6);
     this.setState("playing");
@@ -393,6 +398,9 @@ export class Game {
     this.sparks(x, y, z + 10, 22, 0, 0, 1.3);
     this.emit(x, y, z + 1, 0, 0, 0, 0.45, 20, 520, "#ffc88c", 4, 0);
     const R = 160 * Math.sqrt(big);
+    const knocked = this.peds.blast(x, y, R);
+    if (knocked) this.crime("pedHit", knocked);
+    this.peds.alarm(x, y, 900, "blast");
     for (const c of this.cars) {
       const d = Math.hypot(c.x - x, c.y - y);
       if (d < R && d > 1) {
@@ -472,6 +480,15 @@ export class Game {
     this.banner(END_LABEL[reason], reason === "dead" ? (this.onFoot ? "Du bist draufgegangen" : "Dein Wagen ist Schrott") : "Die Cops haben dich", reason === "dead" ? "#ff2a3a" : "#4da3ff", 3, true);
     sfx.gameOver();
     this.bankDrift();
+  }
+
+  // a pedestrian was run over (PedSystem callback)
+  pedHit(c: Civilian, by: Car, speed: number) {
+    this.peds.alarm(c.x, c.y, 350, "blast");
+    if (by !== this.player || this.onFoot) return;
+    this.crime("pedHit");
+    sfx.crash(Math.min(0.5, speed / 900));
+    this.shake(0.06);
   }
 
   crime(c: Crime, mul = 1) { if (this.state === "playing" && !this.ending) this.wanted.crime(c, mul); }
@@ -555,6 +572,7 @@ export class Game {
       this.fireCd = 0.17;
       sfx.shot();
       this.shake(0.05);
+      this.peds.alarm(ox, oy, 520, "shot");
       this.flashes.push({ x: ox + Math.cos(a) * 18, y: oy + Math.sin(a) * 18, z: oz, life: 0.06, max: 0.06, size: 90 });
       this.emit(ox + Math.cos(a) * 20, oy + Math.sin(a) * 20, oz, bvx * 0.5, bvy * 0.5, 0, 0.06, 7, 60, "#ffd36b", 2, 1);
       this.crime("shot");
@@ -564,6 +582,7 @@ export class Game {
       this.fireCd = 0.85;
       sfx.rocket();
       this.shake(0.25);
+      this.peds.alarm(ox, oy, 600, "shot");
       this.flashes.push({ x: ox, y: oy, z: oz, life: 0.12, max: 0.12, size: 200 });
       this.crime("rocket");
     } else {
@@ -638,6 +657,19 @@ export class Game {
           }
           remove = true;
           break outer;
+        }
+      }
+      // pedestrians (bullets and rockets)
+      if (!remove && q.kind !== "bomb") {
+        for (let s = 1; s <= steps && !remove; s++) {
+          const cv = this.peds.hitTest(q.px + (q.x - q.px) * (s / steps), q.py + (q.y - q.py) * (s / steps), q.z, q.kind === "bullet" ? 7 : 10);
+          if (!cv) continue;
+          if (q.kind === "bullet") {
+            this.peds.knockDown(cv, q.vx * 0.08, q.vy * 0.08, 40);
+            this.crime("pedShot");
+            this.peds.alarm(cv.x, cv.y, 400, "blast");
+          } else this.explode(cv.x, cv.y, 1.1, 4);
+          remove = true;
         }
       }
       if (!remove) {
@@ -900,6 +932,7 @@ export class Game {
     }
     this.collideCars();
     if (this.onFoot && playing) this.updatePed(dt);
+    if (playing && this.rules.city) this.peds.update(dt, this);
     if (playing) this.updateProjs(dt);
 
     for (const c of this.cars) {
@@ -1320,6 +1353,7 @@ export class Game {
       const fwd = ox * Math.cos(c.a) + oy * Math.sin(c.a);
       if (fwd > 0 && fwd < 90 && Math.abs(-ox * Math.sin(c.a) + oy * Math.cos(c.a)) < 20) c.throttle = c.vF > 20 ? -1 : 0;
     }
+    if (this.rules.city && this.peds.blocking(c)) c.throttle = c.vF > 20 ? -1 : 0;
     this.stuck(c, dt);
   }
 

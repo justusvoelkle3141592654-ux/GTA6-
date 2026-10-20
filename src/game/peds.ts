@@ -1,0 +1,371 @@
+import { BLOCK, ROAD, GRID, inCity, type World } from "./world";
+import type { Car } from "./engine";
+
+export type CivState = "walk" | "wait" | "flee" | "cower" | "down";
+export type AlarmKind = "shot" | "blast";
+
+export interface Civilian {
+  active: boolean;
+  x: number; y: number; z: number; a: number; vx: number; vy: number; vz: number;
+  state: CivState; t: number; dur: number; // time in the current state, planned duration
+  bx: number; by: number;   // block whose sidewalk loop the ped walks around
+  corner: number;           // corner it is walking to (0 NW, 1 NE, 2 SE, 3 SW)
+  dir: 1 | -1;              // walking direction around the block
+  cross: boolean;           // crossing a street to the next block
+  offPath: boolean;         // walking back to the sidewalk first (e.g. after being pulled out of a car)
+  tx: number; ty: number;   // current target point
+  speed: number; walk: number; // walking speed, animation phase
+  look: number; scale: number; // appearance seed, body size
+  threatX: number; threatY: number;
+}
+
+// what the pedestrian system needs from the game
+export interface PedHost {
+  readonly cars: readonly Car[];
+  readonly fx: number; readonly fy: number;
+  readonly onFoot: boolean;
+  readonly ped: { x: number; y: number };
+  pedHit(c: Civilian, by: Car, speed: number): void;
+}
+
+export const MAX_PEDS = 24;
+export const PED_LIMIT = { high: 24, low: 12 };
+const INSET = 12;                        // sidewalk path: distance from the block edge (buildings start at 18)
+const SPAWN_MIN = 300, SPAWN_MAX = 950, DESPAWN = 1150;
+const WALK_V: [number, number] = [26, 36], FLEE_V: [number, number] = [120, 150];
+const CROSS_CHANCE = 0.3, MAX_WAIT = 5;
+const DOWN_TIME = 10;                    // knocked-down peds disappear after this
+const CAR_HALF_L = 25, CAR_HALF_W = 13, PED_R = 5;
+const DODGE_DIST = 110, DODGE_SPEED = 110;
+const GRAV = 620;
+
+const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
+const wrap = (a: number) => { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; };
+
+// neighbour reached by crossing a street from a corner: [dbx, dby, corner on the other side]
+const CROSSINGS: [number, number, number][][] = [
+  [[0, -1, 3], [-1, 0, 1]], // NW: north, west
+  [[0, -1, 2], [1, 0, 0]],  // NE: north, east
+  [[0, 1, 1], [1, 0, 3]],   // SE: south, east
+  [[0, 1, 0], [-1, 0, 2]],  // SW: south, west
+];
+
+const P = { x: 0, y: 0 }, Q = { x: 0, y: 0 }; // scratch points
+
+function cornerPos(bx: number, by: number, k: number, out: { x: number; y: number }) {
+  const x0 = bx * BLOCK + ROAD + INSET, y0 = by * BLOCK + ROAD + INSET, s = BLOCK - ROAD - INSET * 2;
+  out.x = k === 1 || k === 2 ? x0 + s : x0;
+  out.y = k >= 2 ? y0 + s : y0;
+  return out;
+}
+
+function newCiv(): Civilian {
+  return {
+    active: false, x: 0, y: 0, z: 0, a: 0, vx: 0, vy: 0, vz: 0, state: "walk", t: 0, dur: 0,
+    bx: 0, by: 0, corner: 0, dir: 1, cross: false, offPath: false, tx: 0, ty: 0,
+    speed: 30, walk: 0, look: 0, scale: 1, threatX: 0, threatY: 0,
+  };
+}
+
+export class PedSystem {
+  list: Civilian[] = [];
+  limit = PED_LIMIT.high;
+  private cars: readonly Car[] = [];
+
+  constructor(private world: World) {
+    for (let i = 0; i < MAX_PEDS; i++) this.list.push(newCiv());
+  }
+
+  get count() { let n = 0; for (const c of this.list) if (c.active) n++; return n; }
+
+  clear() { for (const c of this.list) c.active = false; }
+
+  // fill the area around the player right away (game start)
+  populate(fx: number, fy: number) {
+    const n = Math.round(this.limit * 0.7);
+    for (let i = 0; i < n; i++) this.trySpawn(fx, fy, 120);
+  }
+
+  private free(): Civilian | null {
+    for (let i = 0; i < this.limit; i++) if (!this.list[i].active) return this.list[i];
+    return null;
+  }
+
+  private init(c: Civilian, x: number, y: number) {
+    c.active = true; c.x = x; c.y = y; c.z = 0; c.vx = 0; c.vy = 0; c.vz = 0;
+    c.state = "walk"; c.t = 0; c.dur = 0; c.cross = false; c.offPath = false;
+    c.speed = rnd(WALK_V[0], WALK_V[1]); c.walk = Math.random() * 10;
+    c.look = Math.floor(Math.random() * 1e6); c.scale = rnd(0.9, 1.06);
+  }
+
+  private trySpawn(fx: number, fy: number, minD = SPAWN_MIN) {
+    if (!inCity(fx, fy)) return;
+    const c = this.free();
+    if (!c) return;
+    const cbx = Math.floor((fx - ROAD) / BLOCK), cby = Math.floor((fy - ROAD) / BLOCK);
+    for (let tries = 0; tries < 8; tries++) {
+      const bx = clamp(cbx + Math.floor(rnd(-2, 3)), 0, GRID - 1), by = clamp(cby + Math.floor(rnd(-2, 3)), 0, GRID - 1);
+      const k = Math.floor(Math.random() * 4), t = Math.random();
+      cornerPos(bx, by, k, P); cornerPos(bx, by, (k + 1) % 4, Q);
+      const x = P.x + (Q.x - P.x) * t, y = P.y + (Q.y - P.y) * t;
+      const d = Math.hypot(x - fx, y - fy);
+      if (d < minD || d > SPAWN_MAX) continue;
+      this.init(c, x, y);
+      c.bx = bx; c.by = by;
+      if (Math.random() < 0.5) { c.dir = 1; c.corner = (k + 1) % 4; } else { c.dir = -1; c.corner = k; }
+      this.targetCorner(c);
+      c.a = Math.atan2(c.ty - y, c.tx - x);
+      return;
+    }
+  }
+
+  // a person pulled out of a car: runs away from the car, then back to the sidewalk
+  spawnAt(x: number, y: number, threatX: number, threatY: number) {
+    const c = this.free() ?? this.list.find((o) => o.active && o.state !== "down") ?? null;
+    if (!c) return;
+    this.init(c, x, y);
+    c.bx = clamp(Math.floor((x - ROAD) / BLOCK), 0, GRID - 1); c.by = clamp(Math.floor((y - ROAD) / BLOCK), 0, GRID - 1);
+    c.dir = 1; c.corner = 0;
+    this.scare(c, threatX, threatY);
+  }
+
+  private targetCorner(c: Civilian) { cornerPos(c.bx, c.by, c.corner, P); c.tx = P.x; c.ty = P.y; }
+
+  // nearest point on the sidewalk loop of the block the ped is in or next to
+  private targetSidewalk(c: Civilian) {
+    c.bx = clamp(Math.floor((c.x - ROAD / 2) / BLOCK), 0, GRID - 1); c.by = clamp(Math.floor((c.y - ROAD / 2) / BLOCK), 0, GRID - 1);
+    cornerPos(c.bx, c.by, 0, P); cornerPos(c.bx, c.by, 2, Q);
+    const x = clamp(c.x, P.x, Q.x), y = clamp(c.y, P.y, Q.y);
+    // push to the closest edge of the loop
+    const dl = x - P.x, dr = Q.x - x, dt = y - P.y, db = Q.y - y, m = Math.min(dl, dr, dt, db);
+    c.tx = m === dl ? P.x : m === dr ? Q.x : x;
+    c.ty = m === dt ? P.y : m === db ? Q.y : y;
+    c.offPath = true;
+  }
+
+  // after reaching the loop: head for the nearest corner (the other end of this edge is "behind")
+  private joinLoop(c: Civilian) {
+    c.offPath = false;
+    let best = 0, bd = Infinity;
+    for (let k = 0; k < 4; k++) { cornerPos(c.bx, c.by, k, P); const d = Math.hypot(P.x - c.x, P.y - c.y); if (d < bd) { bd = d; best = k; } }
+    c.corner = best;
+    cornerPos(c.bx, c.by, (best + 1) % 4, P);
+    const nextOnEdge = Math.abs(P.x - c.x) < 3 || Math.abs(P.y - c.y) < 3;
+    c.dir = nextOnEdge ? -1 : 1;
+    if (c.state === "flee") this.fleeDir(c);
+    else this.targetCorner(c);
+  }
+
+  // flee along the sidewalk: keep going or turn around, whichever end of the edge is further from the threat
+  private fleeDir(c: Civilian) {
+    const prev = (c.corner + (c.dir > 0 ? 3 : 1)) % 4;
+    cornerPos(c.bx, c.by, c.corner, P); cornerPos(c.bx, c.by, prev, Q);
+    if (Math.hypot(Q.x - c.threatX, Q.y - c.threatY) > Math.hypot(P.x - c.threatX, P.y - c.threatY)) { c.corner = prev; c.dir = c.dir > 0 ? -1 : 1; }
+    this.targetCorner(c);
+  }
+
+  private scare(c: Civilian, x: number, y: number) {
+    if (c.state === "down") return;
+    c.threatX = x; c.threatY = y;
+    const wasFleeing = c.state === "flee";
+    c.state = "flee"; c.t = 0; c.dur = rnd(5, 8);
+    c.speed = rnd(FLEE_V[0], FLEE_V[1]);
+    if (c.cross) return; // keep running across the street
+    if (!inCity(c.x, c.y) || this.offLoop(c)) { this.targetSidewalk(c); return; }
+    if (!wasFleeing) this.fleeDir(c);
+  }
+
+  private offLoop(c: Civilian) {
+    cornerPos(c.bx, c.by, 0, P); cornerPos(c.bx, c.by, 2, Q);
+    const e = 4;
+    const inX = c.x > P.x - e && c.x < Q.x + e, inY = c.y > P.y - e && c.y < Q.y + e;
+    const onV = Math.abs(c.x - P.x) < e || Math.abs(c.x - Q.x) < e, onH = Math.abs(c.y - P.y) < e || Math.abs(c.y - Q.y) < e;
+    return !((onV && inY) || (onH && inX));
+  }
+
+  // gunshots and explosions scare everybody around
+  alarm(x: number, y: number, radius: number, kind: AlarmKind) {
+    for (const c of this.list) {
+      if (!c.active || c.state === "down") continue;
+      const d = Math.hypot(c.x - x, c.y - y);
+      if (d > radius) continue;
+      if (kind === "shot" && d < 160 && c.state !== "flee" && Math.random() < 0.35) { c.state = "cower"; c.t = 0; c.dur = rnd(2.5, 4.5); c.threatX = x; c.threatY = y; }
+      else if (c.state !== "cower") this.scare(c, x, y);
+    }
+  }
+
+  knockDown(c: Civilian, vx: number, vy: number, vz: number) {
+    c.state = "down"; c.t = 0; c.cross = false;
+    c.vx = vx; c.vy = vy; c.vz = vz;
+    if (Math.hypot(vx, vy) > 5) c.a = Math.atan2(-vy, -vx); // falls on the back, feet towards the hit
+  }
+
+  // explosion: knock down everybody inside the radius; returns how many
+  blast(x: number, y: number, r: number) {
+    let n = 0;
+    for (const c of this.list) {
+      if (!c.active || c.state === "down") continue;
+      const dx = c.x - x, dy = c.y - y, d = Math.hypot(dx, dy);
+      if (d > r) continue;
+      const f = 1 - d / r, s = 260 * f / Math.max(d, 1);
+      this.knockDown(c, dx * s, dy * s, 120 + 220 * f);
+      n++;
+    }
+    return n;
+  }
+
+  // standing ped hit by a projectile at (x, y, z)?
+  hitTest(x: number, y: number, z: number, r: number): Civilian | null {
+    for (const c of this.list) {
+      if (!c.active || c.state === "down") continue;
+      if (Math.abs(z - c.z - 12) > 16) continue;
+      const dx = c.x - x, dy = c.y - y;
+      if (dx * dx + dy * dy < r * r) return c;
+    }
+    return null;
+  }
+
+  // something walks in front of car c (traffic brakes for it)
+  blocking(c: Car): boolean {
+    const ca = Math.cos(c.a), sa = Math.sin(c.a);
+    for (const p of this.list) {
+      if (!p.active) continue;
+      const ox = p.x - c.x, oy = p.y - c.y;
+      const fwd = ox * ca + oy * sa;
+      if (fwd < 0 || fwd > 85) continue;
+      if (Math.abs(-ox * sa + oy * ca) < 18) return true;
+    }
+    return false;
+  }
+
+  update(dt: number, h: PedHost) {
+    const fx = h.fx, fy = h.fy;
+    this.cars = h.cars;
+    if (this.count < this.limit && Math.random() < 0.25) this.trySpawn(fx, fy);
+    for (const c of this.list) {
+      if (!c.active) continue;
+      c.t += dt;
+      const dist = Math.hypot(c.x - fx, c.y - fy);
+      if ((c.state === "down" && c.t > DOWN_TIME) || (dist > DESPAWN && c.state !== "down")) { c.active = false; continue; }
+      if (c.state === "down") { this.fall(c, dt); continue; }
+      switch (c.state) {
+        case "walk": case "flee":
+          if (c.state === "flee" && c.t > c.dur && !c.cross) {
+            c.state = "walk"; c.speed = rnd(WALK_V[0], WALK_V[1]); c.t = 0;
+            if (!c.offPath) { this.targetCorner(c); }
+          }
+          if (this.move(c, dt)) this.arrive(c);
+          break;
+        case "wait":
+          c.vx = 0; c.vy = 0;
+          if (c.t > c.dur || this.roadClear(c)) { c.state = "walk"; c.t = 0; c.cross = true; }
+          break;
+        case "cower":
+          c.vx = 0; c.vy = 0;
+          if (c.t > c.dur) this.scare(c, c.threatX, c.threatY);
+          break;
+      }
+      if (c.state !== "flee" && c.state !== "cower") this.watchTraffic(c, h);
+      this.hitByCars(c, h);
+      if (h.onFoot) this.pushFrom(c, h.ped.x, h.ped.y, 10);
+    }
+  }
+
+  // move towards the target; true when it is reached
+  private move(c: Civilian, dt: number) {
+    const dx = c.tx - c.x, dy = c.ty - c.y, d = Math.hypot(dx, dy), step = c.speed * dt;
+    if (d > 0.01) c.a += wrap(Math.atan2(dy, dx) - c.a) * Math.min(1, dt * 10);
+    if (d <= step) { c.x = c.tx; c.y = c.ty; c.vx = 0; c.vy = 0; c.walk += step * 0.05; return true; }
+    c.vx = (dx / d) * c.speed; c.vy = (dy / d) * c.speed;
+    c.x += c.vx * dt; c.y += c.vy * dt;
+    c.walk += dt * c.speed * 0.05;
+    return false;
+  }
+
+  private arrive(c: Civilian) {
+    if (c.offPath) { this.joinLoop(c); return; }
+    if (c.cross) {
+      // reached the other side of the street: tx/ty are on the new block
+      c.cross = false;
+      c.dir = Math.random() < 0.5 ? 1 : -1;
+      c.corner = (c.corner + (c.dir > 0 ? 1 : 3)) % 4;
+      this.targetCorner(c);
+      return;
+    }
+    if (c.state === "walk" && Math.random() < CROSS_CHANCE) {
+      const opts = CROSSINGS[c.corner];
+      const o = opts[Math.random() < 0.5 ? 0 : 1];
+      const nbx = c.bx + o[0], nby = c.by + o[1];
+      if (nbx >= 0 && nby >= 0 && nbx < GRID && nby < GRID) {
+        c.bx = nbx; c.by = nby; c.corner = o[2];
+        this.targetCorner(c);
+        c.state = "wait"; c.t = 0; c.dur = rnd(1, MAX_WAIT);
+        return;
+      }
+    }
+    c.corner = (c.corner + (c.dir > 0 ? 1 : 3)) % 4;
+    this.targetCorner(c);
+  }
+
+  // no moving car close to the crossing
+  private roadClear(c: Civilian) {
+    const mx = (c.x + c.tx) / 2, my = (c.y + c.ty) / 2;
+    for (const car of this.cars) {
+      if (car.speed < 40) continue;
+      if (Math.abs(car.x - mx) < 170 && Math.abs(car.y - my) < 170) return false;
+    }
+    return true;
+  }
+
+  // dodge cars that come straight at them
+  private watchTraffic(c: Civilian, h: PedHost) {
+    for (const car of h.cars) {
+      const sp = car.speed;
+      if (sp < DODGE_SPEED) continue;
+      const dx = c.x - car.x, dy = c.y - car.y, d = Math.hypot(dx, dy);
+      if (d > DODGE_DIST || d < 1) continue;
+      if ((car.vx * dx + car.vy * dy) / (sp * d) > 0.8) { this.scare(c, car.x, car.y); return; }
+    }
+  }
+
+  private hitByCars(c: Civilian, h: PedHost) {
+    for (const car of h.cars) {
+      const dx = c.x - car.x, dy = c.y - car.y;
+      if (dx * dx + dy * dy > 40 * 40) continue;
+      if (Math.abs(car.z - c.z) > 20) continue;
+      const ca = Math.cos(car.a), sa = Math.sin(car.a);
+      const lx = dx * ca + dy * sa, ly = -dx * sa + dy * ca;
+      if (Math.abs(lx) > CAR_HALF_L + PED_R || Math.abs(ly) > CAR_HALF_W + PED_R) continue;
+      const sp = car.speed;
+      if (sp > 60 && !car.dead) {
+        const s = sp * 0.7;
+        const side = ly >= 0 ? 1 : -1;
+        this.knockDown(c, car.vx * 0.7 - sa * side * 40, car.vy * 0.7 + ca * side * 40, 60 + s * 0.35);
+        car.vx *= 0.94; car.vy *= 0.94;
+        h.pedHit(c, car, sp);
+        return;
+      }
+      // slow car: just step aside
+      const px = CAR_HALF_W + PED_R - Math.abs(ly);
+      const side = ly >= 0 ? 1 : -1;
+      c.x += -sa * side * px; c.y += ca * side * px;
+    }
+  }
+
+  private pushFrom(c: Civilian, x: number, y: number, r: number) {
+    const dx = c.x - x, dy = c.y - y, d2 = dx * dx + dy * dy;
+    if (d2 >= r * r || d2 < 0.0001) return;
+    const d = Math.sqrt(d2), k = (r - d) / d;
+    c.x += dx * k; c.y += dy * k;
+  }
+
+  private fall(c: Civilian, dt: number) {
+    const f = Math.exp(-(c.z > 0.5 ? 0.6 : 5) * dt);
+    c.vx *= f; c.vy *= f;
+    const nx = c.x + c.vx * dt, ny = c.y + c.vy * dt;
+    if (!this.world.isSolid(nx, ny, 4)) { c.x = nx; c.y = ny; } else { c.vx = 0; c.vy = 0; }
+    c.vz -= GRAV * dt; c.z += c.vz * dt;
+    if (c.z < 0) { c.z = 0; c.vz = c.vz < -150 ? -c.vz * 0.25 : 0; }
+  }
+}

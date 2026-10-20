@@ -8,6 +8,8 @@ import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_MAX, MAP_SIZE, EXT, HIGHWAYS, H_SCALE, terrainH, terrainGrad, cityDist, inCity, isHighway, mulberry32, type Building, type Ramp } from "./world";
 import type { Place } from "./places";
+import { CrowdRenderer } from "./crowd3d";
+import { MAX_PEDS } from "./peds";
 import type { Game, Car, Pickup, CameraMode, Quality, CarModel, Proj, Bomb, PickupType } from "./engine";
 
 const MAX_SKIDS = 900;
@@ -433,6 +435,7 @@ export class Renderer3D {
   private skidGeo = new THREE.BufferGeometry(); private skidPos = new Float32Array(MAX_SKIDS * 18); private skidSeen = 0;
   private arrow!: THREE.Mesh;
   private ped!: PedModel;
+  private crowd!: CrowdRenderer;
   private camPos = new THREE.Vector3(); private camLook = new THREE.Vector3(); private camInit = false; private orbit = 0; private fov = 62;
   private tmpV = new THREE.Vector3();
   private copRed = C("#ff1a3a"); private copBlue = C("#2a5bff");
@@ -463,6 +466,7 @@ export class Renderer3D {
     this.moon.castShadow = hi;
     for (const m of this.cityMeshes) m.castShadow = hi && m.userData.cast;
     for (const f of this.forest) f.castShadow = hi;
+    this.crowd.setShadows(hi);
     const fog = this.scene.fog as THREE.Fog;
     fog.far = hi ? 4600 : 3000;
     this.camera.far = hi ? 9000 : 7000;
@@ -989,6 +993,7 @@ export class Renderer3D {
     });
     this.ped = new PedModel(shirtTex, this.shadowGeo, this.shadowMat);
     this.scene.add(this.ped.group);
+    this.crowd = new CrowdRenderer(this.scene, MAX_PEDS, this.quality === "high", this.shadowGeo, this.shadowMat);
   }
 
   // ---------------------------------------------------------- per-frame
@@ -1326,6 +1331,7 @@ export class Renderer3D {
     this.syncLights(g);
     this.syncArrow(g);
     this.ped.update(g, dt);
+    this.crowd.update(g.peds.list, g.state !== "menu");
     this.updateCamera(g, dt);
     const scale = this.renderer.domElement.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
     this.smoke.mat.uniforms.scale.value = scale;
