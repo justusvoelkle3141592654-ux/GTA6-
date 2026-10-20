@@ -4,11 +4,12 @@ import {
   type CameraMode, type Difficulty, type GameConfig, type GameOverData, type GameState, type HudData, type Mode, type Quality, type TouchInput, type Weapon,
 } from "./game/engine";
 import { sfx } from "./game/audio";
+import { MODE_RULES, type ModeRules } from "./game/modes";
 import { DEFAULT_NAME, loadName, loadScores, saveName, saveScore, type ScoreEntry } from "./game/scores";
 import TouchControls from "./components/TouchControls";
 
 const EMPTY_HUD: HudData = {
-  score: 0, mult: 1, combo01: 0, stars: 1, health01: 1, carHealth01: 1, nitro01: 1, kmh: 0, time: 0, drift: 0, bust01: 0, takedowns: 0,
+  score: 0, mult: 1, combo01: 0, stars: 1, searching: false, cash: 0, health01: 1, carHealth01: 1, nitro01: 1, kmh: 0, time: 0, drift: 0, bust01: 0, takedowns: 0,
   weapon: "pistol", rockets: 3, bombs: 2, bombsPlaced: 0, onFoot: false, canEnter: false, hint: "", air: false,
 };
 const fmt = (n: number) => n.toLocaleString("de-DE");
@@ -22,10 +23,15 @@ const LEGACY_CFG_KEY = "viceheat.config.v3";
 
 function isTouchDevice() { return typeof window !== "undefined" && (window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window); }
 function loadConfig(): GameConfig {
-  const def: GameConfig = { mode: "chase", difficulty: "easy", car: "corsaro", camera: "chase", quality: isTouchDevice() ? "low" : "high" };
+  const def: GameConfig = { mode: "open", difficulty: "easy", car: "corsaro", camera: "chase", quality: isTouchDevice() ? "low" : "high" };
   try {
     const raw = localStorage.getItem(CFG_KEY) ?? localStorage.getItem(LEGACY_CFG_KEY);
-    if (raw) { const cfg: GameConfig = { ...def, ...JSON.parse(raw) }; cfg.car = LEGACY_CAR_IDS[cfg.car] ?? cfg.car; return cfg; }
+    if (raw) {
+      const cfg: GameConfig = { ...def, ...JSON.parse(raw) };
+      cfg.car = LEGACY_CAR_IDS[cfg.car] ?? cfg.car;
+      if (!(cfg.mode in MODE_RULES)) cfg.mode = def.mode;
+      return cfg;
+    }
   } catch { /* ignore */ }
   return def;
 }
@@ -74,6 +80,7 @@ export default function App() {
       }, cfgRef.current);
     } catch (e) { console.error(e); setGlError(true); return; }
     gameRef.current = game;
+    if (import.meta.env.DEV) (window as unknown as { game?: Game }).game = game; // debugging / automated tests
     setTouchInput(game.touch);
     return () => game.destroy();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -93,7 +100,8 @@ export default function App() {
   const cycleCam = () => gameRef.current?.cycleCamera();
 
   const playing = state === "playing";
-  const free = config.mode === "free";
+  const rules = MODE_RULES[config.mode];
+  const open = config.mode === "open";
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#0b0614] font-sans text-white">
@@ -101,7 +109,7 @@ export default function App() {
       <canvas ref={ovRef} className="pointer-events-none absolute inset-0 block" />
       <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(ellipse at center, transparent 60%, rgba(5,0,15,0.6) 100%)" }} />
       <div ref={hurtRef} className="pointer-events-none absolute inset-0 opacity-0" style={{ background: "radial-gradient(ellipse at center, transparent 35%, rgba(255,20,50,0.75) 100%)" }} />
-      {((hud.onFoot ? hud.health01 : hud.carHealth01) < 0.3) && playing && !free && (
+      {((hud.onFoot ? hud.health01 : hud.carHealth01) < 0.3) && playing && rules.damage && (
         <div className="pointer-events-none absolute inset-0 animate-pulse" style={{ background: "radial-gradient(ellipse at center, transparent 50%, rgba(255,0,40,0.3) 100%)" }} />
       )}
 
@@ -113,7 +121,7 @@ export default function App() {
       )}
 
       {(playing || state === "paused") && (
-        <Hud hud={hud} isTouch={isTouch} free={free} camera={config.camera} onPause={() => gameRef.current?.pause()} onCam={cycleCam} onToggleCar={() => gameRef.current?.toggleCar()} onDetonate={() => gameRef.current?.detonate()} onWeapon={(w) => gameRef.current?.setWeapon(w)} />
+        <Hud hud={hud} isTouch={isTouch} rules={rules} camera={config.camera} onPause={() => gameRef.current?.pause()} onCam={cycleCam} onToggleCar={() => gameRef.current?.toggleCar()} onDetonate={() => gameRef.current?.detonate()} onWeapon={(w) => gameRef.current?.setWeapon(w)} />
       )}
       {playing && isTouch && touchInput && (
         <TouchControls input={touchInput} nitro01={hud.nitro01} relative={config.camera !== "top"} onFoot={hud.onFoot} weapon={hud.weapon} rockets={hud.rockets} bombs={hud.bombs} bombsPlaced={hud.bombsPlaced}
@@ -127,16 +135,16 @@ export default function App() {
       {state === "paused" && (
         <Overlay>
           <h2 className="popin font-display text-7xl tracking-wider text-white neon-text">PAUSE</h2>
-          <div className="mt-2 text-sm text-white/60">Score: {fmt(hud.score)} · {fmtTime(hud.time)}</div>
+          <div className="mt-2 text-sm text-white/60">{open ? `$${fmt(hud.cash)}` : `Score: ${fmt(hud.score)}`} · {fmtTime(hud.time)}</div>
           <div className="mt-8 flex w-72 flex-col gap-3">
             <Btn primary onClick={() => gameRef.current?.resume()}>Weiter</Btn>
             <Btn onClick={cycleCam}>Kamera: {CAM_LABEL[config.camera]}</Btn>
-            <Btn onClick={() => gameRef.current?.finish()}>Fahrt beenden</Btn>
-            <Btn onClick={start}>Neustart</Btn>
+            {!open && <Btn onClick={() => gameRef.current?.finish()}>Fahrt beenden</Btn>}
+            {!open && <Btn onClick={start}>Neustart</Btn>}
             <Btn onClick={toggleMute}>{muted ? "Ton an" : "Ton aus"}</Btn>
             <Btn onClick={toMenu}>Hauptmenü</Btn>
           </div>
-          {!isTouch && <div className="mt-6 text-xs text-white/40">P / ESC = weiter · C = Kamera · R = Neustart</div>}
+          {!isTouch && <div className="mt-6 text-xs text-white/40">P / ESC = weiter · C = Kamera{!open && " · R = Neustart"}</div>}
         </Overlay>
       )}
 
@@ -165,22 +173,26 @@ function Stars({ n, size = "text-2xl" }: { n: number; size?: string }) {
   );
 }
 
-function Hud({ hud, isTouch, free, camera, onPause, onCam, onToggleCar, onDetonate, onWeapon }: {
-  hud: HudData; isTouch: boolean; free: boolean; camera: CameraMode; onPause: () => void; onCam: () => void; onToggleCar: () => void; onDetonate: () => void; onWeapon: (w: Weapon) => void;
+function Hud({ hud, isTouch, rules, camera, onPause, onCam, onToggleCar, onDetonate, onWeapon }: {
+  hud: HudData; isTouch: boolean; rules: ModeRules; camera: CameraMode; onPause: () => void; onCam: () => void; onToggleCar: () => void; onDetonate: () => void; onWeapon: (w: Weapon) => void;
 }) {
   const ammo = (w: Weapon) => (w === "rocket" ? hud.rockets : w === "bomb" ? hud.bombs : "∞");
   return (
     <div className="pointer-events-none absolute inset-0 z-10 select-none">
       <div className="absolute left-3 top-3 sm:left-5 sm:top-4">
-        <div className="font-display text-4xl leading-none tracking-wide text-white sm:text-6xl" style={{ textShadow: "0 3px 0 rgba(0,0,0,0.6), 0 0 18px rgba(255,60,172,0.6)" }}>{fmt(hud.score)}</div>
-        <div className="mt-1 flex items-center gap-2">
+        {rules.respawn ? (
+          <div className="font-display text-4xl leading-none tracking-wide text-green-300 sm:text-6xl" style={{ textShadow: "0 3px 0 rgba(0,0,0,0.6), 0 0 18px rgba(61,255,139,0.5)" }}>${fmt(hud.cash)}</div>
+        ) : (
+          <div className="font-display text-4xl leading-none tracking-wide text-white sm:text-6xl" style={{ textShadow: "0 3px 0 rgba(0,0,0,0.6), 0 0 18px rgba(255,60,172,0.6)" }}>{fmt(hud.score)}</div>
+        )}
+        {!rules.respawn && <div className="mt-1 flex items-center gap-2">
           <div key={hud.mult} className={"popin rounded-md px-2 py-0.5 font-display text-xl tracking-wider sm:text-2xl " + (hud.mult > 1 ? "bg-pink-500 text-white shadow-[0_0_14px_rgba(255,60,172,0.9)]" : "bg-white/10 text-white/60")}>x{hud.mult}</div>
           <div className="h-1.5 w-20 overflow-hidden rounded-full bg-white/10 sm:w-28"><div className="h-full bg-gradient-to-r from-pink-500 to-yellow-300" style={{ width: `${hud.combo01 * 100}%` }} /></div>
-        </div>
-        {!free && <div className="mt-2"><Stars n={hud.stars} size={isTouch ? "text-xl" : "text-3xl"} /></div>}
+        </div>}
+        {rules.cops && <div className={"mt-2" + (hud.searching ? " animate-pulse" : "")}><Stars n={hud.stars} size={isTouch ? "text-xl" : "text-3xl"} /></div>}
         <div className="mt-2 w-36 space-y-1.5 sm:w-52">
-          {!free && <Bar label="DU" value={hud.health01} from={hud.health01 < 0.3 ? "#ff1a3a" : "#3dff8b"} to={hud.health01 < 0.3 ? "#ff6b3d" : "#9dffc8"} />}
-          {!free && !hud.onFoot && <Bar label="AUTO" value={hud.carHealth01} from={hud.carHealth01 < 0.3 ? "#ff1a3a" : "#ff3cac"} to={hud.carHealth01 < 0.3 ? "#ff6b3d" : "#ff8ad1"} />}
+          {rules.damage && <Bar label="DU" value={hud.health01} from={hud.health01 < 0.3 ? "#ff1a3a" : "#3dff8b"} to={hud.health01 < 0.3 ? "#ff6b3d" : "#9dffc8"} />}
+          {rules.damage && !hud.onFoot && <Bar label="AUTO" value={hud.carHealth01} from={hud.carHealth01 < 0.3 ? "#ff1a3a" : "#ff3cac"} to={hud.carHealth01 < 0.3 ? "#ff6b3d" : "#ff8ad1"} />}
           {!hud.onFoot && <Bar label="N2O" value={hud.nitro01} from="#2bf0ff" to="#9d4dff" />}
         </div>
       </div>
@@ -194,7 +206,7 @@ function Hud({ hud, isTouch, free, camera, onPause, onCam, onToggleCar, onDetona
           {hud.onFoot ? "🚗 EINSTEIGEN" : "🚪 AUSSTEIGEN"}
         </button>
       </div>
-      <div className="absolute left-1/2 top-16 -translate-x-1/2 text-center text-xs font-semibold tracking-widest text-white/60">{fmtTime(hud.time)}{!free && <> · {hud.takedowns} 🚓</>}</div>
+      <div className="absolute left-1/2 top-16 -translate-x-1/2 text-center text-xs font-semibold tracking-widest text-white/60">{fmtTime(hud.time)}{rules.cops && <> · {hud.takedowns} 🚓</>}</div>
       {hud.hint && <div className="popin absolute left-1/2 top-24 -translate-x-1/2 rounded-full bg-black/60 px-4 py-1.5 text-sm font-semibold text-yellow-200 backdrop-blur">{hud.hint}</div>}
       {hud.air && <div className="popin absolute left-1/2 top-[30%] -translate-x-1/2 font-display text-5xl tracking-widest text-cyan-200" style={{ textShadow: "0 0 20px rgba(43,240,255,0.8)" }}>AIR!</div>}
 
@@ -225,7 +237,7 @@ function Hud({ hud, isTouch, free, camera, onPause, onCam, onToggleCar, onDetona
           <div className="font-display text-5xl leading-none text-yellow-300" style={{ textShadow: "0 0 18px rgba(255,210,63,0.8), 0 3px 0 rgba(0,0,0,0.6)", transform: `scale(${1 + Math.min(0.5, hud.drift / 4000)})` }}>{fmt(hud.drift)}</div>
         </div>
       )}
-      {!free && hud.bust01 > 0.02 && (
+      {rules.cops && hud.bust01 > 0.02 && (
         <div className="absolute left-1/2 top-[22%] -translate-x-1/2 text-center">
           <div className="animate-pulse font-display text-3xl tracking-widest text-blue-300" style={{ textShadow: "0 0 14px rgba(60,120,255,0.9)" }}>FESTNAHME!</div>
           <div className="mx-auto mt-1 h-2 w-48 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-gradient-to-r from-blue-500 to-red-500" style={{ width: `${hud.bust01 * 100}%` }} /></div>
@@ -316,7 +328,7 @@ function StartScreen({ name, setName, scores, config, update, onStart, isTouch, 
           {tab === "setup" && (
             <div className="space-y-4">
               <Section title="Spielmodus">
-                <Choice<Mode> value={config.mode} onChange={(v) => update({ mode: v })} options={[{ v: "chase", label: "Verfolgungsjagd", sub: "Cops, Sterne, Takedowns" }, { v: "free", label: "Freie Fahrt", sub: "Keine Cops, kein Schaden" }]} />
+                <Choice<Mode> value={config.mode} onChange={(v) => update({ mode: v })} options={[{ v: "open", label: "Open World", sub: "Stadtleben, Fahndung, Respawn" }, { v: "chase", label: "Verfolgungsjagd", sub: "Cops, Sterne, Takedowns" }, { v: "free", label: "Freie Fahrt", sub: "Keine Cops, kein Schaden" }]} />
               </Section>
               <Section title="Schwierigkeit">
                 <Choice<Difficulty> value={config.difficulty} disabled={config.mode === "free"} onChange={(v) => update({ difficulty: v })} options={[{ v: "easy", label: "Leicht", sub: "Wenig Cops, Heilung" }, { v: "normal", label: "Normal", sub: "Ausgewogen" }, { v: "hard", label: "Schwer", sub: "Bis zu 9 Cops" }]} />
@@ -380,7 +392,9 @@ function StartScreen({ name, setName, scores, config, update, onStart, isTouch, 
               <div className="mt-4 border-t border-white/10 pt-3 text-xs leading-relaxed text-white/60">
                 🔫 Pistole: 3 Treffer = Cop kaputt · 🚀 Rakete: 1 Treffer · 💣 Haftbombe klebt an Autos, zünden mit G<br />
                 Säulen: <b className="text-green-300">grün</b> Cash · <b className="text-orange-300">orange</b> Raketen · <b className="text-red-300">rot</b> Bomben · <b className="text-cyan-300">blau</b> Nitro · <b>weiß</b> Reparatur<br />
-                ⛰️ Über die Highways raus in die Berge – Sprünge geben AIRTIME-Punkte. Cops folgen dir überall hin.
+                ⛰️ Über die Highways raus in die Berge – Sprünge geben AIRTIME-Punkte. Cops folgen dir überall hin.<br />
+                🌆 <b>Open World:</b> Verbrechen bringen Sterne. Bleib außer Sicht der Cops, bis die Sterne aufhören zu blinken – dann bist du entkommen.
+                Erledigt → <b className="text-red-300">Krankenhaus (+)</b>, verhaftet → <b className="text-blue-300">Polizeiwache (★)</b>, jeweils mit Geldverlust und ohne Spezialmunition.
               </div>
             </div>
           )}

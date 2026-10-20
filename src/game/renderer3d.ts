@@ -7,6 +7,7 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_MAX, MAP_SIZE, EXT, HIGHWAYS, H_SCALE, terrainH, terrainGrad, cityDist, inCity, isHighway, mulberry32, type Building, type Ramp } from "./world";
+import type { Place } from "./places";
 import type { Game, Car, Pickup, CameraMode, Quality, CarModel, Proj, Bomb, PickupType } from "./engine";
 
 const MAX_SKIDS = 900;
@@ -436,7 +437,7 @@ export class Renderer3D {
   private tmpV = new THREE.Vector3();
   private copRed = C("#ff1a3a"); private copBlue = C("#2a5bff");
 
-  constructor(canvas: HTMLCanvasElement, world: World, quality: Quality, camMode: CameraMode) {
+  constructor(canvas: HTMLCanvasElement, world: World, places: Place[], quality: Quality, camMode: CameraMode) {
     this.world = world; this.quality = quality; this.camMode = camMode;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: quality === "high", powerPreference: "high-performance" });
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -450,7 +451,7 @@ export class Renderer3D {
     pmrem.dispose();
     this.scene.fog = new THREE.Fog(0xcdbca4, 450, 3600);
     this.scene.background = new THREE.Color(0xb7cbe6);
-    this.buildLights(); this.buildSky(); this.buildGround(); this.buildTerrain(); this.buildCity(); this.buildRamps(); this.buildLamps(); this.buildShared();
+    this.buildLights(); this.buildSky(); this.buildGround(); this.buildTerrain(); this.buildCity(); this.buildRamps(); this.buildLamps(); this.buildShared(); this.buildPlaces(places);
     this.setQuality(quality);
   }
 
@@ -846,6 +847,45 @@ export class Renderer3D {
     this.scene.add(new THREE.Mesh(mergeGeometries(E)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 })));
   }
 
+  // signs and entrance markers for hospital, police station, ...
+  private buildPlaces(places: Place[]) {
+    for (const pl of places) {
+      const b = pl.bld, H = b.height * H_SCALE + 14;
+      const sign = canvasTex(512, 128, (g) => {
+        g.fillStyle = "#f4f4f6"; g.fillRect(0, 0, 512, 128);
+        g.fillStyle = pl.color; g.fillRect(0, 0, 128, 128);
+        g.fillStyle = "#ffffff"; g.font = "bold 96px Inter, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+        g.fillText(pl.icon, 64, 70);
+        g.fillStyle = "#15161b"; g.textAlign = "left";
+        let fs = 64;
+        do { g.font = `bold ${fs}px 'Bebas Neue', Impact, sans-serif`; fs -= 2; } while (fs > 20 && g.measureText(pl.name.toUpperCase()).width > 340);
+        g.fillText(pl.name.toUpperCase(), 150, 68);
+      });
+      const w = Math.min(b.h - 10, 84);
+      const panel = new THREE.Mesh(new THREE.PlaneGeometry(w, w / 4), new THREE.MeshBasicMaterial({ map: sign, toneMapped: false }));
+      panel.rotation.y = -Math.PI / 2;
+      panel.position.set(b.x - 0.8, Math.min(H - w / 8 - 4, 46), pl.y);
+      this.scene.add(panel);
+      // roof symbol
+      const col = new THREE.Color(pl.color).multiplyScalar(1.6);
+      const symMat = new THREE.MeshBasicMaterial({ color: col, toneMapped: false });
+      const cx = b.x + b.w / 2, cz = b.y + b.h / 2;
+      const sym = pl.kind === "hospital"
+        ? mergeGeometries([new THREE.BoxGeometry(10, 44, 10), new THREE.BoxGeometry(10, 10, 44).translate(0, 8, 0)])!
+        : new THREE.CylinderGeometry(20, 20, 6, 5);
+      const symMesh = new THREE.Mesh(sym, symMat);
+      symMesh.position.set(cx, H + (pl.kind === "hospital" ? 22 : 4), cz);
+      this.scene.add(symMesh);
+      // entrance ring on the sidewalk
+      const ring = new THREE.Mesh(new THREE.RingGeometry(9, 12, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8, depthWrite: false, toneMapped: false }));
+      ring.position.set(pl.x, 0.5, pl.y);
+      ring.renderOrder = 1;
+      this.scene.add(ring);
+    }
+  }
+
+  resetCamera(yaw = this.camYaw) { this.camInit = false; this.camYaw = yaw; }
+
   private buildLamps() {
     const pts: [number, number][] = [];
     for (let j = 0; j <= GRID; j++) for (let i = 0; i <= GRID; i++) { const n = this.world.nodePos(i, j), o = ROAD / 2 + 6; pts.push([n.x - o, n.y - o], [n.x + o, n.y + o]); }
@@ -1039,7 +1079,7 @@ export class Renderer3D {
         o.body.material = c.hitFlash > 0.07 ? this.flashMat : this.bodyMat;
         if (o.glow) { o.glow.visible = !g.onFoot; (o.glow.material as THREE.MeshBasicMaterial).opacity = 0.75 + Math.sin(t * 4) * 0.15 + (c.nitro ? 0.3 : 0); }
         if (o.bar) {
-          const on = c.kind === "cop" || c === g.player;
+          const on = (c.kind === "cop" && !c.calm) || c === g.player;
           const ph = Math.sin(t * 16 + c.siren) > 0;
           const ph2 = Math.sin(t * 32 + c.siren) > 0;
           o.bar.reds.color.copy(this.copRed).multiplyScalar(on ? (ph ? 4 : 0.25) : 0.3);
@@ -1176,7 +1216,7 @@ export class Renderer3D {
       const l = this.plights[li++], k = f.life / f.max;
       l.color.setRGB(1, 0.55, 0.2); l.intensity = 30 * k * (f.size / 520); l.distance = f.size * 0.9; l.position.set(f.x, f.z + 20, f.y);
     }
-    const cops = g.cars.filter((c) => c.kind === "cop" && !c.dead);
+    const cops = g.cars.filter((c) => c.kind === "cop" && !c.dead && !c.calm);
     cops.sort((a, b) => (a.x - g.fx) ** 2 + (a.y - g.fy) ** 2 - ((b.x - g.fx) ** 2 + (b.y - g.fy) ** 2));
     for (const c of cops) {
       if (li >= this.plights.length) break;
