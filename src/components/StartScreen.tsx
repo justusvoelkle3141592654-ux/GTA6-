@@ -78,7 +78,7 @@ export default function StartScreen({ name, setName, scores, config, update, onS
                 <Choice<CameraMode> value={config.camera} onChange={(v) => update({ camera: v })} options={[{ v: "chase", label: "3D Verfolger" }, { v: "fp", label: "Ego-Sicht", sub: "Im Auto sitzen" }, { v: "top", label: "Vogelperspektive" }]} />
               </Section>
               <Section title="Grafik">
-                <Choice<Quality> value={config.quality} onChange={(v) => update({ quality: v })} options={[{ v: "high", label: "Ultra", sub: "Bloom + Schatten + dichter Wald" }, { v: "low", label: "Schnell", sub: "Für Handys" }]} />
+                <Choice<Quality> value={config.quality} onChange={(v) => update({ quality: v })} options={[{ v: "low", label: "Schnell", sub: "Für Handys" }, { v: "medium", label: "Mittel", sub: "2 Schattenstufen" }, { v: "high", label: "Hoch", sub: "Spiegelungen + Bloom" }, { v: "ultra", label: "Ultra", sub: "Weite Sicht, scharfe Spiegelung" }]} />
               </Section>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                 <div className="flex-1">

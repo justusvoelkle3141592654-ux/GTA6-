@@ -20,8 +20,8 @@ function beam(len: number, h: number, d: number, x: number, z: number, y: number
 }
 
 // ---------------------------------------------------------------- terrain
-export function terrainMesh(quality: "high" | "low"): THREE.Mesh {
-  const SEG = quality === "high" ? 520 : 360;
+export function terrainMesh(quality: "low" | "medium" | "high" | "ultra"): THREE.Mesh {
+  const SEG = quality === "ultra" ? 640 : quality === "high" ? 520 : quality === "medium" ? 440 : 360;
   const geo = new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE, SEG, SEG);
   geo.rotateX(-Math.PI / 2);
   geo.translate(MAP_MIN + MAP_SIZE / 2, 0, MAP_MIN + MAP_SIZE / 2);

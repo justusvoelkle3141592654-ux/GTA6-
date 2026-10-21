@@ -7,9 +7,12 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { wrapA, clamp, canvasTex, radialTex, withColor, C, box, flat, cyl, sph } from "./meshutil";
-import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_SIZE, H_SCALE, WATER_Y, EDGE_LAND, STUNT_PARK, terrainH, terrainGrad, cityDist, inCity, coast, edgeDist, mulberry32, type Building, tunnelAt, TUNNEL } from "./world";
+import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_SIZE, H_SCALE, EDGE_LAND, STUNT_PARK, terrainH, terrainGrad, cityDist, inCity, coast, edgeDist, mulberry32, type Building, tunnelAt, TUNNEL } from "./world";
 import { terrainMesh, backdropMesh, roadsMesh, rampsMesh, coastMesh, extrasMesh, LightsMesh } from "./worldmesh";
 import { TrafficLights } from "./traffic";
+import { Atmosphere } from "./atmosphere";
+import { currentSettings } from "./settings";
+import { WaterSurface } from "./water";
 import { buildHideFields } from "./hide";
 const inStuntPark = (x: number, y: number) => x > STUNT_PARK.x0 - 60 && x < STUNT_PARK.x1 + 60 && y > STUNT_PARK.y0 - 60 && y < STUNT_PARK.y1 + 60;
 import { isCraft, isBoat, isHeli, isTwoWheel } from "./vehicles";
@@ -574,10 +577,8 @@ export class Renderer3D {
   w = 1; h = 1;
   camYaw = 0;
 
-  private moon!: THREE.DirectionalLight;
   private head!: THREE.SpotLight;
   private plights: THREE.PointLight[] = [];
-  private sky!: THREE.Mesh;
   private cityMeshes: THREE.Mesh[] = [];
   private terrain!: THREE.Mesh;
   private forest: THREE.InstancedMesh[] = [];
@@ -619,7 +620,7 @@ export class Renderer3D {
 
   constructor(canvas: HTMLCanvasElement, world: World, places: Place[], quality: Quality, camMode: CameraMode) {
     this.world = world; this.quality = quality; this.camMode = camMode;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: quality === "high", powerPreference: "high-performance" });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: quality === "high" || quality === "ultra", powerPreference: "high-performance" });
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -631,23 +632,30 @@ export class Renderer3D {
     pmrem.dispose();
     this.scene.fog = new THREE.Fog(0xcdbca4, 450, 3600);
     this.scene.background = new THREE.Color(0xb7cbe6);
-    this.buildLights(); this.buildSky(); this.buildGround(); this.buildTerrain(); this.buildCity(); this.buildRamps(); this.buildLamps(); this.buildShared(); this.buildPlaces(places); this.buildMarkers(); this.buildHeli(); this.buildSpikes();
+    this.atm = new Atmosphere(this.scene, this.camera, quality);
+    this.water = new WaterSurface(this.scene, world, quality);
+    this.buildLights(); this.buildGround(); this.buildTerrain(); this.buildCity(); this.buildRamps(); this.buildLamps(); this.buildShared(); this.buildPlaces(places); this.buildMarkers(); this.buildHeli(); this.buildSpikes();
     this.setQuality(quality);
+    this.atm.setupMaterials(this.scene);
   }
+  atm: Atmosphere;
+  private water: WaterSurface;
 
   dispose() { this.renderer.dispose(); this.composer?.dispose(); }
 
   setQuality(q: Quality) {
+    const changed = this.quality !== q;
     this.quality = q;
-    const hi = q === "high";
-    this.moon.castShadow = hi;
-    for (const m of this.cityMeshes) m.castShadow = hi && m.userData.cast;
+    const hi = q === "high" || q === "ultra";
+    for (const m of this.cityMeshes) m.castShadow = q !== "low" && m.userData.cast;
     for (const f of this.forest) f.castShadow = hi;
-    this.crowd.setShadows(hi);
-    const fog = this.scene.fog as THREE.Fog;
-    fog.far = hi ? 4600 : 3000;
-    this.camera.far = hi ? 9000 : 7000;
+    this.crowd.setShadows(q !== "low");
+    this.camera.far = q === "ultra" ? 12000 : hi ? 9000 : 7000;
     this.camera.updateProjectionMatrix();
+    if (changed && this.atm) {
+      this.atm.setQuality(q); this.atm.setupMaterials(this.scene);
+      this.scene.remove(this.water.mesh); this.water = new WaterSurface(this.scene, this.world, q);
+    }
     if (hi) {
       if (!this.composer) {
         this.composer = new EffectComposer(this.renderer);
@@ -662,7 +670,7 @@ export class Renderer3D {
   resize(w: number, h: number) {
     this.w = w; this.h = h;
     const dpr = window.devicePixelRatio || 1;
-    const pr = this.quality === "high" ? Math.min(dpr, 1.75) : Math.min(dpr, 1);
+    const pr = this.quality === "ultra" ? Math.min(dpr, 2) : this.quality === "high" ? Math.min(dpr, 1.5) : this.quality === "medium" ? Math.min(dpr, 1.25) : Math.min(dpr, 1);
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h, false);
     if (this.composer) { this.composer.setPixelRatio(pr); this.composer.setSize(w, h); }
@@ -677,44 +685,10 @@ export class Renderer3D {
 
   // ---------------------------------------------------------- build
   private buildLights() {
-    this.scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x80705c, 1.35));
-    const moon = new THREE.DirectionalLight(0xffe4bd, 4.2);
-    moon.shadow.mapSize.set(2048, 2048);
-    const sc = moon.shadow.camera;
-    sc.left = -650; sc.right = 650; sc.top = 650; sc.bottom = -650; sc.near = 10; sc.far = 2600;
-    moon.shadow.bias = -0.0006; moon.shadow.normalBias = 1.5;
-    this.scene.add(moon, moon.target);
-    this.moon = moon;
     const head = new THREE.SpotLight(0xfff0d0, 5, 750, 0.55, 0.65, 0);
     this.scene.add(head, head.target);
     this.head = head;
     for (let i = 0; i < 5; i++) { const l = new THREE.PointLight(0xff0000, 0, 260, 0); this.scene.add(l); this.plights.push(l); }
-  }
-
-  private buildSky() {
-    const g = new THREE.SphereGeometry(6500, 48, 24);
-    const pos = g.attributes.position;
-    const cols = new Float32Array(pos.count * 3);
-    const sunDir = new THREE.Vector3(-1, 0, -0.35).normalize();
-    const cFog = C("#c9bba5"), cHaze = C("#e6d6bb"), cSun = C("#ffdca8"), cMid = C("#a4c3e6"), cHi = C("#6a98d4"), cTop = C("#3f6fbf");
-    const tmp = new THREE.Color(), hz = new THREE.Color(), v = new THREE.Vector3();
-    for (let i = 0; i < pos.count; i++) {
-      v.fromBufferAttribute(pos, i).normalize();
-      const e = v.y, sun = Math.pow(Math.max(0, v.x * sunDir.x + v.z * sunDir.z), 4);
-      hz.copy(cHaze).lerp(cSun, sun);
-      if (e < -0.02) tmp.copy(cFog); else if (e < 0.05) tmp.copy(cFog).lerp(hz, (e + 0.02) / 0.07);
-      else if (e < 0.22) tmp.copy(hz).lerp(cMid, (e - 0.05) / 0.17); else if (e < 0.5) tmp.copy(cMid).lerp(cHi, (e - 0.22) / 0.28);
-      else tmp.copy(cHi).lerp(cTop, Math.min(1, (e - 0.5) / 0.5));
-      cols[i * 3] = tmp.r; cols[i * 3 + 1] = tmp.g; cols[i * 3 + 2] = tmp.b;
-    }
-    g.setAttribute("color", new THREE.BufferAttribute(cols, 3));
-    const sky = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
-    sky.renderOrder = -10;
-    const sunDisc = new THREE.Mesh(new THREE.SphereGeometry(150, 24, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 4.2, 3), fog: false }));
-    sunDisc.position.set(-5200, 2900, -1800);
-    sky.add(sunDisc);
-    this.sky = sky;
-    this.scene.add(sky);
   }
 
   private buildGround() {
@@ -727,11 +701,10 @@ export class Renderer3D {
     noise.wrapS = noise.wrapT = THREE.RepeatWrapping;
     noise.repeat.set(WORLD / 160, WORLD / 160);
     noise.anisotropy = 4;
-    const asphalt = new THREE.Mesh(new THREE.PlaneGeometry(WORLD, WORLD).rotateX(-Math.PI / 2).translate(WORLD / 2, 0, WORLD / 2), new THREE.MeshStandardMaterial({ color: 0x46464b, map: noise, roughness: 0.55, metalness: 0.15, envMapIntensity: 0.6 }));
+    this.asphaltMat = new THREE.MeshStandardMaterial({ color: 0x46464b, map: noise, roughness: 0.55, metalness: 0.15, envMapIntensity: 0.6 });
+    const asphalt = new THREE.Mesh(new THREE.PlaneGeometry(WORLD, WORLD).rotateX(-Math.PI / 2).translate(WORLD / 2, 0, WORLD / 2), this.asphaltMat);
     asphalt.receiveShadow = true;
     this.scene.add(asphalt);
-    const water = new THREE.Mesh(new THREE.PlaneGeometry(140000, 140000).rotateX(-Math.PI / 2).translate(WORLD / 2, WATER_Y, WORLD / 2), new THREE.MeshStandardMaterial({ color: 0x1d5c78, roughness: 0.08, metalness: 0.6, envMapIntensity: 1.2 }));
-    this.scene.add(water);
 
     const M: THREE.BufferGeometry[] = [];
     for (let j = 0; j <= GRID; j++) {
@@ -856,9 +829,9 @@ export class Renderer3D {
       g.globalAlpha = 1;
     });
     for (const t of [map, emi]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; }
-    const wallMat = new THREE.MeshStandardMaterial({ map, emissiveMap: emi, emissive: 0xffffff, emissiveIntensity: 0.16, vertexColors: true, roughness: 0.7, metalness: 0.05, envMapIntensity: 0.6 });
+    const wallMat = this.wallMat = new THREE.MeshStandardMaterial({ map, emissiveMap: emi, emissive: 0xffffff, emissiveIntensity: 0.16, vertexColors: true, roughness: 0.7, metalness: 0.05, envMapIntensity: 0.6 });
     const propMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.05, envMapIntensity: 0.4 });
-    const neonMat = new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color(0.5, 0.5, 0.5), toneMapped: false });
+    const neonMat = this.neonMat = new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color(0.5, 0.5, 0.5), toneMapped: false });
     const groundMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, envMapIntensity: 0.3 });
     type Layers = { wall: THREE.BufferGeometry[]; prop: THREE.BufferGeometry[]; neon: THREE.BufferGeometry[]; ground: THREE.BufferGeometry[] };
     const chunks = new Map<string, Layers>();
@@ -999,6 +972,21 @@ export class Renderer3D {
     this.scene.add(this.lightsMesh.group);
   }
   private lightsMesh: LightsMesh | null = null;
+  private wallMat: THREE.MeshStandardMaterial | null = null; private neonMat: THREE.MeshBasicMaterial | null = null;
+  private asphaltMat: THREE.MeshStandardMaterial | null = null; private lampHeadMat: THREE.MeshBasicMaterial | null = null; private lampPoolMat: THREE.MeshBasicMaterial | null = null;
+  // day / night and wet streets on the shared materials
+  private applyTime(g: Game) {
+    const s = this.atm.state, n = s.night;
+    if (this.wallMat) this.wallMat.emissiveIntensity = 0.08 + n * 0.85;
+    if (this.neonMat) this.neonMat.color.setScalar(0.35 + n * 0.9);
+    if (this.lampHeadMat) this.lampHeadMat.color.setRGB(0.5 + n * 1.3, 0.45 + n * 1.1, 0.35 + n * 0.75);
+    if (this.lampPoolMat) this.lampPoolMat.opacity = 0.02 + n * 0.3;
+    this.poolMat.opacity = 0.04 + n * 0.3; this.poolMatP.opacity = 0.1 + n * 0.4;
+    this.head.intensity = n * 30 + (s.fog + s.rain) * 6;
+    if (this.asphaltMat) { this.asphaltMat.roughness = 0.55 - s.wet * 0.42; this.asphaltMat.metalness = 0.15 + s.wet * 0.35; this.asphaltMat.color.setHex(0x46464b).multiplyScalar(1 - s.wet * 0.35); }
+    this.renderer.toneMappingExposure = 1 - n * 0.15;
+    void g;
+  }
 
   // places outside the blocks: sign on a post, plus a jetty into the bay or a helipad
   private buildSpot(pl: Place, sign: THREE.Texture) {
@@ -1086,8 +1074,9 @@ export class Renderer3D {
     for (let j = 0; j <= GRID; j++) for (let i = 0; i <= GRID; i++) { const n = this.world.nodePos(i, j), o = ROAD / 2 + 6; pts.push([n.x - o, n.y - o], [n.x + o, n.y + o]); }
     const n = pts.length;
     const pole = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1.5, 52, 6).translate(0, 26, 0), new THREE.MeshStandardMaterial({ color: 0x3d3f45, roughness: 0.5, metalness: 0.6 }), n);
-    const headM = new THREE.InstancedMesh(new THREE.BoxGeometry(7, 2.4, 7).translate(0, 52, 0), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.4, 1.0), toneMapped: false }), n);
-    const poolM = new THREE.InstancedMesh(new THREE.PlaneGeometry(240, 240).rotateX(-Math.PI / 2).translate(0, 0.45, 0), new THREE.MeshBasicMaterial({ map: radialTex("rgba(255,190,120,0.9)", "rgba(255,160,80,0)"), transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false }), n);
+    this.lampHeadMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.4, 1.0), toneMapped: false });
+    const headM = new THREE.InstancedMesh(new THREE.BoxGeometry(7, 2.4, 7).translate(0, 52, 0), this.lampHeadMat, n);
+    const poolM = new THREE.InstancedMesh(new THREE.PlaneGeometry(240, 240).rotateX(-Math.PI / 2).translate(0, 0.45, 0), this.lampPoolMat = new THREE.MeshBasicMaterial({ map: radialTex("rgba(255,190,120,0.9)", "rgba(255,160,80,0)"), transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false }), n);
     poolM.renderOrder = 1;
     const m = new THREE.Matrix4();
     pts.forEach(([x, z], i) => { m.makeTranslation(x, 0, z); pole.setMatrixAt(i, m); headM.setMatrixAt(i, m); poolM.setMatrixAt(i, m); });
@@ -1244,6 +1233,7 @@ export class Renderer3D {
       obj.bar = { reds, blues, white };
     }
     this.scene.add(group);
+    this.atm.setupMaterials(group);
     return obj;
   }
 
@@ -1428,9 +1418,6 @@ export class Renderer3D {
     this.head.position.set(p.x + ca * 22, p.z + 13, p.y + sa * 22);
     this.head.target.position.set(p.x + ca * 220, p.z - 10, p.y + sa * 220);
     this.head.target.updateMatrixWorld();
-    this.moon.position.set(g.fx - 900, g.fz + 520, g.fy - 330);
-    this.moon.target.position.set(g.fx, g.fz, g.fy);
-    this.moon.target.updateMatrixWorld();
     let li = 0;
     for (const f of g.flashes) {
       if (li >= this.plights.length) break;
@@ -1723,7 +1710,6 @@ export class Renderer3D {
     cam.rotateZ(g.shakeR);
     this.fov += (fov - this.fov) * (1 - Math.exp(-dt * 4));
     if (Math.abs(cam.fov - this.fov) > 0.01) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
-    this.sky.position.copy(cam.position);
   }
 
   render(g: Game, dt: number) {
@@ -1741,6 +1727,9 @@ export class Renderer3D {
     this.crowd.update(g.peds.list, g.state !== "menu", g.fx, g.fy);
     this.syncProps(g);
     this.lightsMesh?.update(g.traffic.lights);
+    this.atm.update(g.clock, g.weather, g.weatherT, dt, g.fx, g.fy, g.fz, currentSettings.weather);
+    this.water.update(g.t, this.atm);
+    this.applyTime(g);
     this.updateCamera(g, dt);
     const scale = this.renderer.domElement.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
     this.smoke.mat.uniforms.scale.value = scale;

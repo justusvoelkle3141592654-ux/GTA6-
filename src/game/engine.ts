@@ -26,6 +26,7 @@ import { Gangs } from "./gangs";
 import { Craft } from "./craft";
 import { HideSeek, SPOT_NAME } from "./hide";
 import { Spawner } from "./spawner";
+import type { Weather } from "./atmosphere";
 
 export type GameState = "menu" | "playing" | "paused" | "over" | "modal";
 // overlays that stop the game while open (shops, dialogs, weapon wheel)
@@ -52,7 +53,7 @@ export { Car, CARS, LEGACY_CAR_IDS } from "./vehicles";
 export type { CarDef, CarModel } from "./vehicles";
 export type Difficulty = "easy" | "normal" | "hard";
 export type CameraMode = "chase" | "fp" | "top";
-export type Quality = "high" | "low";
+export type Quality = "low" | "medium" | "high" | "ultra"; // Schnell, Mittel, Hoch, Ultra
 export { WEAPONS } from "./weapons";
 export type { Weapon } from "./weapons";
 
@@ -165,7 +166,14 @@ export class Game {
 
   // open world
   clock = 9;                    // time of day in hours (0..24)
+  weather: Weather = "sun"; weatherT = 99; private weatherNext = 14; // current weather, seconds since it changed, game hours until the next change
   get isNight() { return this.clock < 6 || this.clock >= 20; }
+  // the weather changes every 10 to 20 game hours; fog mostly in the morning at the coast
+  setWeather(w?: Weather) {
+    const r = Math.random(), morning = this.clock > 3 && this.clock < 9;
+    this.weather = w ?? (morning && r < 0.3 ? "fog" : r < 0.5 ? "sun" : r < 0.75 ? "clouds" : r < 0.95 ? "rain" : "fog");
+    this.weatherT = 0; this.weatherNext = 10 + Math.random() * 10;
+  }
   messages: { from: string; text: string; time: number }[] = []; // the phone's messages
   addMessage(from: string, text: string) { this.messages.unshift({ from, text, time: this.clock }); if (this.messages.length > 30) this.messages.pop(); }
   openJobs: (() => void) | null = null; // the UI opens the job menu
@@ -1516,7 +1524,10 @@ export class Game {
 
     if (playing && !this.ending) {
       this.time += dt;
-      this.clock = (this.clock + (dt * 24) / (Math.max(1, currentSettings.dayMinutes) * 60)) % 24;
+      const hours = (dt * 24) / (Math.max(1, currentSettings.dayMinutes) * 60);
+      this.clock = (this.clock + hours) % 24;
+      this.weatherT += dt; this.weatherNext -= hours;
+      if (this.weatherNext <= 0) this.setWeather();
       if (this.onFoot) { this.readPedInput(dt); p.throttle = 0; p.steer = 0; p.handbrake = true; p.nitro = false; }
       else this.readCarInput();
       if ((this.fireHeld || this.touch.fire || this.bind.held("fire", this.keys)) && this.fireCd <= 0) this.fire();
@@ -2199,6 +2210,7 @@ export class Game {
     ctx.clearRect(0, 0, cw, ch);
     this.drawTexts(ctx);
     if (this.player.nitro && this.state === "playing" && !this.onFoot) this.drawSpeedLines(ctx);
+    if (this.config.camera === "fp" && !this.onFoot && this.state !== "menu") this.drawWindshield(ctx);
     if (this.state === "playing" && !this.ending && this.config.camera !== "top") this.drawCrosshair(ctx);
     if (this.state !== "menu") { this.drawSeekers(ctx); this.drawMinimap(ctx); this.drawBanners(ctx); }
     if (this.fade > 0) { ctx.fillStyle = `rgba(0,0,0,${this.fade})`; ctx.fillRect(0, 0, cw, ch); }
@@ -2254,6 +2266,30 @@ export class Game {
       ctx.fillText(t.text, s.x, s.y);
     }
     ctx.globalAlpha = 1;
+  }
+
+  // first person in the rain: drops on the windshield, the wipers clear them
+  private drops: { x: number; y: number; r: number; t: number }[] = [];
+  private drawWindshield(ctx: CanvasRenderingContext2D) {
+    const rain = this.r3d.atm.state.rain, { cw, ch } = this;
+    if (rain < 0.15 && !this.drops.length) return;
+    if (rain > 0.15 && this.drops.length < 140 * rain && Math.random() < rain) this.drops.push({ x: Math.random() * cw, y: Math.random() * ch * 0.75, r: 2 + Math.random() * 5, t: 0 });
+    const ph = (this.t % 1.4) / 1.4, wa = Math.sin(ph * Math.PI * 2) * 1.1; // wiper angle
+    const px = cw / 2, py = ch * 1.05, L = ch * 1.15;
+    this.drops = this.drops.filter((d) => {
+      d.t += 1 / 60; d.y += d.r * 0.05;
+      const a = Math.atan2(d.x - px, py - d.y);
+      return Math.abs(a - wa) > 0.06 && d.t < 8;
+    });
+    for (const d of this.drops) {
+      const gr = ctx.createRadialGradient(d.x - d.r * 0.3, d.y - d.r * 0.3, 0, d.x, d.y, d.r);
+      gr.addColorStop(0, "rgba(255,255,255,0.55)"); gr.addColorStop(1, "rgba(180,200,220,0.08)");
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, TAU); ctx.fill();
+    }
+    if (rain > 0.15) {
+      ctx.strokeStyle = "rgba(10,10,14,0.85)"; ctx.lineWidth = 6; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + Math.sin(wa) * L, py - Math.cos(wa) * L); ctx.stroke();
+    }
   }
 
   private drawSpeedLines(ctx: CanvasRenderingContext2D) {
