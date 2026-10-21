@@ -117,6 +117,8 @@ export class Car {
   glass: Record<string, number> = {}; glassV = 0; // window panes: 1 cracked, 2 broken (glassV counts changes)
   bumpers = 0;             // torn off: bit 1 front, bit 2 rear
   doors = [0, 0, 0, 0];    // how far each door is open (0..1): 0 right front, 1 left front, 2 right rear, 3 left rear
+  locked = false;          // parked and locked: the player smashes the side window to get in
+  alarmT = 0;              // car alarm sounding (seconds left)
   constructor(public kind: CarKind, public model: CarModel, public color: string) {}
   get speed() { return Math.hypot(this.vx, this.vy); }
   get hl() { return MODEL_DIM[this.model].hl; }

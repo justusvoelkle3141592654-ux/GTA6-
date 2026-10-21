@@ -19,9 +19,8 @@ import { isCraft, isBoat, isHeli, isTwoWheel } from "./vehicles";
 import { CarRig, carMaterials, hasRig, topAt, type CarMats } from "./carmodel";
 import { JETTY, HELI_SPOT, type Place } from "./places";
 import { CrowdRenderer } from "./crowd3d";
+import { PlayerFigure, CrowdFigures } from "./people3d";
 import { DISTRICTS, blockDistrict } from "./districts";
-import { WEAPONS, WEAPON_DEFS, type Weapon } from "./weapons";
-import { OUTFITS } from "./economy";
 import { MAX_PEDS } from "./peds";
 import type { Game, Car, Pickup, CameraMode, Quality, CarModel, Proj, Bomb, PickupType } from "./engine";
 
@@ -390,12 +389,14 @@ interface CarObj {
   wheels: { pivot: THREE.Object3D; spin: THREE.Object3D; front: boolean; r: number; y: number }[];
   bar?: { reds: THREE.MeshBasicMaterial; blues: THREE.MeshBasicMaterial; white: THREE.MeshBasicMaterial };
   model: CarModel; color: string; wreck: boolean; pitch: number; roll: number; spinA: number; steerA: number;
-  rig?: CarRig; dentN: number; glassV: number; bumpers: number; prevV: number; brakeT: number; wipe: number; bounce: number; bounceV: number;
+  rig?: CarRig; gangDriver?: boolean; dentN: number; glassV: number; bumpers: number; prevV: number; brakeT: number; wipe: number; bounce: number; bounceV: number;
 }
 // people at the wheel of traffic cars
 const DRIVER_SKIN = ["#f1c7a5", "#d9a07c", "#b07850", "#7a4f32", "#5a3a26"];
 const DRIVER_SHIRT = ["#2b3242", "#c0392b", "#eef0f2", "#3d6e9a", "#5a7a3a", "#d4a017", "#6a4a8a", "#1d1d22"];
 const DRIVER_HAIR = ["#1b1410", "#3a2a1c", "#6a4a2a", "#b08850", "#8a8a8a", "#0d0d0d"];
+// how many people near the camera are full animated figures, per quality level
+const CROWD_RIGS: Record<string, number> = { low: 16, medium: 24, high: 32, ultra: 40 };
 let plateNo = 1000 + Math.floor(Math.random() * 7000);
 
 // ---------------------------------------------------------------- particles
@@ -436,141 +437,6 @@ class PointsLayer {
     (this.geo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     (this.geo.attributes.rgba as THREE.BufferAttribute).needsUpdate = true;
     (this.geo.attributes.size as THREE.BufferAttribute).needsUpdate = true;
-  }
-}
-
-// ---------------------------------------------------------------- player character
-class PedModel {
-  group = new THREE.Group();
-  hips = new THREE.Group();
-  legL = new THREE.Group(); legR = new THREE.Group();
-  armL = new THREE.Group(); armR = new THREE.Group();
-  torsoG = new THREE.Group();
-  guns: Record<Weapon, THREE.Mesh | null>;
-  vest: THREE.Mesh; jacket: THREE.MeshStandardMaterial; jeans: THREE.MeshStandardMaterial;
-  flashMats: THREE.MeshStandardMaterial[];
-  shadow: THREE.Mesh;
-  private flashOn = false; private outfit = -1;
-  constructor(shirtTex: THREE.Texture, shadowGeo: THREE.PlaneGeometry, shadowMat: THREE.Material) {
-    const skin = new THREE.MeshStandardMaterial({ color: 0xd9a07c, roughness: 0.6 });
-    const jacket = new THREE.MeshStandardMaterial({ map: shirtTex, roughness: 0.85 });
-    const jeans = new THREE.MeshStandardMaterial({ color: 0x36485f, roughness: 0.9 });
-    const shoeM = new THREE.MeshStandardMaterial({ color: 0xe8e8ec, roughness: 0.55 });
-    const dark = new THREE.MeshStandardMaterial({ color: 0x15161b, roughness: 0.5 });
-    const hairM = new THREE.MeshStandardMaterial({ color: 0x3b2a1e, roughness: 0.9 });
-    const gunM = new THREE.MeshStandardMaterial({ color: 0x23252c, metalness: 0.7, roughness: 0.35 });
-    const mk = (g: THREE.BufferGeometry, m: THREE.Material) => { const me = new THREE.Mesh(g, m); me.castShadow = true; return me; };
-    const cap = (r: number, len: number, y: number, mat: THREE.Material, sx = 1, sz = 1) => {
-      const g = new THREE.CapsuleGeometry(r, len, 4, 12); g.scale(sx, 1, sz); g.translate(0, y, 0); return mk(g, mat);
-    };
-    // legs (pivot at hip, y=10)
-    for (const [leg, side] of [[this.legL, -1], [this.legR, 1]] as const) {
-      leg.position.set(0, 10, side * 2.0);
-      leg.add(cap(1.85, 3.6, -2.9, jeans), cap(1.45, 3.2, -6.9, jeans));
-      leg.add(mk(new RoundedBoxGeometry(5.6, 2, 3.2, 2, 0.8).translate(0.9, -10.2, 0), shoeM));
-      leg.add(mk(new RoundedBoxGeometry(5.8, 0.6, 3.3, 2, 0.25).translate(0.9, -11.0, 0), dark));
-      this.hips.add(leg);
-    }
-    this.hips.add(mk(new RoundedBoxGeometry(4, 2.8, 7.6, 2, 1).translate(0, 10.6, 0), jeans));
-    this.hips.add(mk(new THREE.BoxGeometry(4.2, 0.7, 7.8).translate(0, 11.5, 0), dark));
-    // torso
-    this.torsoG.position.set(0, 11.5, 0);
-    this.torsoG.add(cap(3.0, 3.4, 4.7, jacket, 0.78, 1.38));
-    // head
-    const headG = new THREE.Group();
-    headG.position.set(0, 9.5, 0);
-    const headGeo = new THREE.SphereGeometry(2.3, 18, 14); headGeo.scale(0.95, 1.18, 0.88); headGeo.translate(0, 3.0, 0);
-    headG.add(mk(headGeo, skin));
-    const hairGeo = new THREE.SphereGeometry(2.42, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.52); hairGeo.scale(0.98, 1.2, 0.93); hairGeo.rotateZ(0.55); hairGeo.translate(-0.1, 3.0, 0);
-    headG.add(mk(hairGeo, hairM));
-    headG.add(mk(new THREE.SphereGeometry(0.5, 8, 6).translate(0, 3.0, 2.0), skin), mk(new THREE.SphereGeometry(0.5, 8, 6).translate(0, 3.0, -2.0), skin));
-    headG.add(mk(new THREE.BoxGeometry(0.7, 1.0, 0.7).translate(2.15, 2.7, 0), skin));
-    headG.add(mk(new RoundedBoxGeometry(1.0, 0.9, 4.1, 2, 0.35).translate(1.85, 3.5, 0), dark)); // sunglasses
-    headG.add(mk(new THREE.CylinderGeometry(1.1, 1.3, 1.6, 10).translate(0, 0.4, 0), skin)); // neck
-    this.torsoG.add(headG);
-    // arms (pivot at shoulder)
-    for (const [arm, side] of [[this.armL, -1], [this.armR, 1]] as const) {
-      arm.position.set(0, 8.2, side * 5.2);
-      arm.add(mk(new THREE.SphereGeometry(1.55, 10, 8), jacket), cap(1.4, 3.2, -2.6, jacket), cap(1.2, 3.0, -6.5, jacket), mk(new THREE.SphereGeometry(1.25, 10, 8).translate(0, -9.1, 0), skin));
-      this.torsoG.add(arm);
-    }
-    // weapons in the right hand
-    const gun = (parts: THREE.BufferGeometry[], m: THREE.Material) => mk(mergeGeometries(parts)!, m);
-    const wood = new THREE.MeshStandardMaterial({ color: 0x9a6a3a, roughness: 0.7 });
-    this.guns = {
-      fist: null,
-      bat: gun([new THREE.CylinderGeometry(0.6, 1.1, 18, 8).translate(0, -9, 0).rotateZ(-1.2).translate(4, -6, 0)], wood),
-      pistol: gun([new THREE.BoxGeometry(4.5, 1.6, 1.2).translate(2.2, -9.2, 0), new THREE.BoxGeometry(1.2, 2.8, 1.1).translate(0.6, -10.6, 0)], gunM),
-      smg: gun([new THREE.BoxGeometry(8, 2, 1.4).translate(3.5, -9.2, 0), new THREE.BoxGeometry(1.2, 4, 1).translate(3.2, -11.4, 0), new THREE.BoxGeometry(1.2, 2.6, 1.1).translate(0.4, -10.6, 0)], gunM),
-      shotgun: gun([new THREE.CylinderGeometry(0.7, 0.7, 16, 8).rotateZ(Math.PI / 2).translate(6, -8.8, 0), new THREE.BoxGeometry(6, 2.2, 1.6).translate(-1, -9.6, 0)], wood),
-      grenade: gun([new THREE.SphereGeometry(1.6, 10, 8).translate(1.4, -9.4, 0)], new THREE.MeshStandardMaterial({ color: 0x3f5a2a, roughness: 0.6 })),
-      rocket: gun([new THREE.CylinderGeometry(1.8, 1.8, 20, 10).rotateZ(Math.PI / 2).translate(2, -8.5, 0), new THREE.CylinderGeometry(2.4, 1.8, 3, 10).rotateZ(Math.PI / 2).translate(12.5, -8.5, 0), new THREE.BoxGeometry(2, 3, 1.5).translate(-2, -11, 0)], new THREE.MeshStandardMaterial({ color: 0x4a5a3a, roughness: 0.6, metalness: 0.3 })),
-      bomb: gun([new THREE.SphereGeometry(1.8, 10, 8).translate(1.4, -9.4, 0)], new THREE.MeshStandardMaterial({ color: 0x3a3a44, emissive: 0xff2040, emissiveIntensity: 0.8, roughness: 0.4, metalness: 0.5 })),
-    };
-    for (const w of WEAPONS) { const m = this.guns[w]; if (m) this.armR.add(m); }
-    // armour vest over the jacket
-    this.vest = cap(3.25, 3.0, 4.9, new THREE.MeshStandardMaterial({ color: 0x3a4a34, roughness: 0.8 }), 0.82, 1.42);
-    this.vest.visible = false;
-    this.torsoG.add(this.vest);
-    this.jacket = jacket; this.jeans = jeans;
-    this.flashMats = [skin, jacket, jeans, shoeM, dark, hairM];
-    this.group.add(this.hips, this.torsoG);
-    this.shadow = new THREE.Mesh(shadowGeo, shadowMat);
-    this.shadow.scale.set(0.35, 1, 0.5);
-    this.shadow.renderOrder = 1;
-    this.group.add(this.shadow);
-    this.group.visible = false;
-  }
-  update(g: Game, dt: number) {
-    const pd = g.ped;
-    const vis = g.onFoot && g.state !== "menu" && !g.hide.hiddenIn;
-    this.group.visible = vis;
-    if (!vis) return;
-    this.group.position.set(pd.x, pd.z, pd.y);
-    const sp = Math.hypot(pd.vx, pd.vy);
-    const w = pd.walk;
-    const amp = clamp(sp / 180, 0, 1.1) * 0.8;
-    const bob = Math.abs(Math.sin(w * 2)) * amp * 0.9;
-    this.hips.position.y = bob;
-    this.torsoG.position.y = 11.5 + bob;
-    this.legL.rotation.z = Math.sin(w) * amp;
-    this.legR.rotation.z = -Math.sin(w) * amp;
-    const wpn = g.weapon, kind = WEAPON_DEFS[wpn].kind;
-    const twoHand = wpn === "pistol" || wpn === "smg" || wpn === "shotgun";
-    const aiming = pd.shootT > 0 || wpn === "rocket";
-    if (kind === "melee" && pd.shootT > 0) {
-      // swing / punch: arm goes up and comes down
-      const k = 1 - pd.shootT / 0.4;
-      this.armR.rotation.z = (wpn === "bat" ? 2.2 : 1.6) * Math.sin(k * Math.PI) - 0.2;
-      this.armL.rotation.z = -Math.sin(w) * amp; this.armL.rotation.y = 0;
-    } else if (aiming) {
-      const t = Math.min(1, pd.shootT * 4 + (wpn === "rocket" ? 1 : 0));
-      const kick = pd.shootT > 0.3 ? (pd.shootT - 0.3) * 4 : 0;
-      this.armR.rotation.z = -(Math.PI / 2 - 0.1) * t + kick * 0.6;
-      this.armL.rotation.z = twoHand ? -(Math.PI / 2 - 0.4) * t : -Math.sin(w) * amp;
-      this.armL.rotation.y = twoHand ? 0.5 * t : 0;
-    } else {
-      this.armR.rotation.z = -Math.sin(w) * amp * 0.8; this.armL.rotation.z = Math.sin(w) * amp * 0.8; this.armL.rotation.y = 0;
-    }
-    for (const k of WEAPONS) { const m = this.guns[k]; if (m) m.visible = k === wpn; }
-    this.vest.visible = g.ped.armor > 0;
-    if (this.outfit !== g.outfit) {
-      this.outfit = g.outfit;
-      const o = OUTFITS[g.outfit] ?? OUTFITS[0];
-      this.jacket.color.set(o.shirt); this.jeans.color.set(o.pants);
-    }
-    this.torsoG.rotation.x = Math.sin(w) * amp * 0.08;
-    const lean = clamp(sp / 250, 0, 1) * 0.12;
-    this.torsoG.rotation.z = lean;
-    if (pd.dead) {
-      this.group.rotation.set(0, -pd.a, 0);
-      this.group.rotation.x = Math.min(Math.PI / 2, (this.group.rotation.x || 0) + dt * 4);
-      this.group.position.y = pd.z + 1;
-    } else {
-      this.group.rotation.set(0, -pd.a, 0);
-    }
-    const flash = pd.hitFlash > 0.2;
-    if (flash !== this.flashOn) { this.flashOn = flash; for (const m of this.flashMats) m.emissive.setScalar(flash ? 0.6 : 0); }
   }
 }
 
@@ -619,7 +485,8 @@ export class Renderer3D {
   private rings: THREE.Mesh[] = [];
   private skidGeo = new THREE.BufferGeometry(); private skidPos = new Float32Array(MAX_SKIDS * 18); private skidSeen = 0;
   private arrow!: THREE.Mesh;
-  private ped!: PedModel;
+  private ped!: PlayerFigure;
+  private people!: CrowdFigures;
   private crowd!: CrowdRenderer;
   private camPos = new THREE.Vector3(); private camLook = new THREE.Vector3(); private camInit = false; private orbit = 0; private fov = 62;
   private tmpV = new THREE.Vector3();
@@ -657,6 +524,7 @@ export class Renderer3D {
     for (const m of this.cityMeshes) m.castShadow = q !== "low" && m.userData.cast;
     for (const f of this.forest) f.castShadow = hi;
     this.crowd.setShadows(q !== "low");
+    this.people?.setMax(CROWD_RIGS[q]);
     this.camera.far = q === "ultra" ? 12000 : hi ? 9000 : 7000;
     this.camera.updateProjectionMatrix();
     if (changed && this.atm) {
@@ -1175,15 +1043,9 @@ export class Renderer3D {
     this.arrow = new THREE.Mesh(new THREE.ConeGeometry(6, 18, 8).rotateZ(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.5, 2.4, 1.1), toneMapped: false, transparent: true, opacity: 0.9 }));
     this.scene.add(this.arrow);
 
-    // player character
-    const shirtTex = canvasTex(128, 128, (g) => {
-      // neutral fabric; the outfit colour tints it
-      g.fillStyle = "#ffffff"; g.fillRect(0, 0, 128, 128);
-      const rr = mulberry32(5);
-      for (let i = 0; i < 1200; i++) { g.fillStyle = rr() < 0.5 ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.12)"; g.fillRect(rr() * 128, rr() * 128, 2, 2); }
-    });
-    this.ped = new PedModel(shirtTex, this.shadowGeo, this.shadowMat);
-    this.scene.add(this.ped.group);
+    // player character and the people close to the camera: skinned and animated (people3d.ts)
+    this.ped = new PlayerFigure(this.scene, this.shadowGeo, this.shadowMat);
+    this.people = new CrowdFigures(this.scene, CROWD_RIGS[this.quality], this.quality !== "low", (o) => this.atm.setupMaterials(o));
     this.crowd = new CrowdRenderer(this.scene, MAX_PEDS, this.quality === "high", this.shadowGeo, this.shadowMat);
   }
 
@@ -1335,7 +1197,7 @@ export class Renderer3D {
       } else if (isTwoWheel(c.model)) {
         // lean into the curve; the rider is only there when somebody rides it
         o.tilt.rotation.x = clamp(-c.av * Math.min(1, c.speed / 250) * 0.22, -0.55, 0.55);
-        o.glass.visible = c === g.player ? !g.onFoot : c.kind !== "civ" || c.driver;
+        o.glass.visible = c === g.player ? false : c.kind !== "civ" || c.driver; // the player rides as the full figure
       } else o.tilt.rotation.x = clamp(-c.vR / 900, -0.09, 0.09);
       if (!isCraft(c.model)) o.tilt.rotation.z = c.dead ? 0 : c.throttle > 0 ? 0.025 * c.throttle : c.throttle < 0 && c.vF > 50 ? -0.04 : 0;
       o.pool.visible = !c.air && !c.dead && !isBoat(c.model);
@@ -1395,8 +1257,9 @@ export class Renderer3D {
     if (c.bumpers & 2 && !(o.bumpers & 2)) { rig.dropBumper(false); o.bumpers |= 2; }
     // who sits inside: traffic and police drivers, the player (not in first person)
     const isP = c === g.player;
-    rig.driver.visible = rig.lod < 2 && (isP ? !g.onFoot && this.camMode !== "fp" : c.kind === "cop" || (c.kind === "civ" && (c.driver || (!c.parked && c.speed > 5))));
-    if (isP && rig.driver.visible) { const of = OUTFITS[g.outfit] ?? OUTFITS[0]; rig.setDriver("#d9a07c", of.shirt, "#1b1410"); }
+    // the player sits there as the full figure (PlayerFigure); traffic and police drivers are simple figures
+    rig.driver.visible = rig.lod < 2 && !isP && (c.kind === "cop" || (c.kind === "civ" && (c.driver || (!c.parked && c.speed > 5))));
+    if (rig.driver.visible && c.faction && !o.gangDriver) { o.gangDriver = true; rig.setDriver("#a86b45", c.faction === "halcones" ? "#c0392b" : "#8e44ad", "#16100c"); }
     // lights: dipped beam at night and in bad weather, brake lights when slowing down, reversing light, indicators, hazards
     const occupied = isP ? !g.onFoot : c.kind === "cop" || !c.parked;
     const lightsOn = occupied && (st.day < 0.55 || st.rain > 0.3 || st.fog > 0.3);
@@ -1409,7 +1272,7 @@ export class Renderer3D {
     rig.lights.tail.material = lightsOn ? m.tailOn : m.tailDim;
     rig.lights.brake.material = o.brakeT > 0 ? m.brakeOn : m.offLens;
     rig.lights.rev.material = occupied && c.vF < -8 && c.throttle < 0 ? m.revOn : m.headOff;
-    const blink = c.wrecked && c.kind === "civ" ? 2 : c.blink, on = Math.floor(t * 2.6) % 2 === 0;
+    const blink = c.alarmT > 0 || (c.wrecked && c.kind === "civ") ? 2 : c.blink, on = Math.floor(t * 2.6) % 2 === 0;
     rig.lights.indL.material = on && (blink === -1 || blink === 2) ? m.indOn : m.offLens;
     rig.lights.indR.material = on && (blink === 1 || blink === 2) ? m.indOn : m.offLens;
     // wipers in the rain
@@ -1430,6 +1293,19 @@ export class Renderer3D {
     o.bounce += o.bounceV * dt;
     rig.tilt.position.y = clamp(o.bounce, -1.6, 1.2) * ground;
     for (const w of o.wheels) w.pivot.position.y = w.y - (c.flat ? w.r * 0.22 : 0) - (c.air ? 0.8 : 0);
+  }
+
+  // where the player figure sits in the current vehicle (null: not shown inside, e.g. boats and helicopters)
+  private seatOf(g: Game) {
+    if (g.onFoot) return null;
+    const p = g.player, o = this.carObjs.get(p);
+    if (!o) return null;
+    if (o.rig) return { host: o.tilt, seat: o.rig.geo.seat, ride: false, steer: p.steer };
+    if (isTwoWheel(p.model)) {
+      const seat: [number, number, number] = p.model === "bicycle" ? [-2.5, 13.4, 0] : p.model === "scooter" ? [-5, 12.3, 0] : [-5, 17.4, 0];
+      return { host: o.tilt, seat, ride: true, steer: p.steer };
+    }
+    return null;
   }
 
   private syncPickups(g: Game) {
@@ -1853,8 +1729,9 @@ export class Renderer3D {
     this.syncMarkers(g);
     this.syncHeli(g);
     this.syncSpikes(g);
-    this.ped.update(g, dt);
-    this.crowd.update(g.peds.list, g.state !== "menu", g.fx, g.fy);
+    this.ped.update(g, dt, this.seatOf(g), this.camMode === "fp");
+    this.people.update(g.peds.list, g.state !== "menu", this.camPos.x, this.camPos.z, g.fx, g.fy, dt);
+    this.crowd.update(g.peds.list, g.state !== "menu", g.fx, g.fy, this.people.drawn);
     this.syncProps(g);
     this.lightsMesh?.update(g.traffic.lights);
     this.atm.update(g.clock, g.weather, g.weatherT, dt, g.fx, g.fy, g.fz, currentSettings.weather);

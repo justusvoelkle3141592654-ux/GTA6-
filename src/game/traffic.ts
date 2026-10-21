@@ -323,7 +323,7 @@ export class Traffic {
       if (n >= limit) break;
       if (this.occupied(cars, sp)) continue;
       const c = new Car("civ", sp.model, sp.color);
-      c.x = sp.x; c.y = sp.y; c.a = sp.a; c.parked = true; c.handbrake = true; c.spotId = sp.id;
+      c.x = sp.x; c.y = sp.y; c.a = sp.a; c.parked = true; c.handbrake = true; c.spotId = sp.id; c.locked = Math.random() < 0.4;
       c.hp = c.maxHp = MODEL_STATS[sp.model].hp; c.mass = MODEL_STATS[sp.model].mass;
       cars.push(c);
       n++;

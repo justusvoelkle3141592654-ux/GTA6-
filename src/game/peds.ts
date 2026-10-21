@@ -31,6 +31,7 @@ export interface Civilian {
   tag: string;                    // mission marker
   id: number;                     // index in the pool
   target: number;                 // ped it fights (-1: the player)
+  getUp: number;                  // knocked down but not hurt: stands up after this many seconds (0: stays down)
 }
 
 // what the pedestrian system needs from the game
@@ -60,7 +61,7 @@ const HOSTILE_EXTRA = 8;                 // armed peds may exceed the normal lim
 const ATTACK_RANGE = 230, ATTACK_KEEP = 120, ENEMY_DMG = { cop: 7, swat: 10, army: 12, gang: 6 };
 const INSET = 12;                        // sidewalk path: distance from the block edge (buildings start at 18)
 const SPAWN_MIN = 300, SPAWN_MAX = 950, DESPAWN = 1150;
-const WALK_V: [number, number] = [26, 36], FLEE_V: [number, number] = [120, 150];
+const WALK_V: [number, number] = [14, 19], FLEE_V: [number, number] = [75, 95]; // 1.4–1.9 m/s walking, running away
 const CROSS_CHANCE = 0.3, MAX_WAIT = 5;
 const DOWN_TIME = 10;                    // knocked-down peds disappear after this
 const PED_R = 5;
@@ -96,7 +97,7 @@ function newCiv(id: number): Civilian {
     bx: 0, by: 0, corner: 0, dir: 1, cross: false, offPath: false, tx: 0, ty: 0,
     speed: 30, walk: 0, look: 0, scale: 1, threatX: 0, threatY: 0,
     role: "civ", faction: null, hp: 30, maxHp: 30, armed: false, shootT: 0, shirt: "", pants: "", tag: "",
-    id, target: -1,
+    id, target: -1, getUp: 0,
   };
 }
 
@@ -131,7 +132,7 @@ export class PedSystem {
     c.state = "walk"; c.t = 0; c.dur = 0; c.cross = false; c.offPath = false;
     c.speed = rnd(WALK_V[0], WALK_V[1]); c.walk = Math.random() * 10;
     c.look = Math.floor(Math.random() * 1e6); c.scale = rnd(0.9, 1.06);
-    c.role = "civ"; c.faction = null; c.hp = c.maxHp = 30; c.armed = false; c.shootT = 0; c.shirt = ""; c.pants = ""; c.tag = ""; c.target = -1;
+    c.role = "civ"; c.faction = null; c.hp = c.maxHp = 30; c.armed = false; c.shootT = 0; c.shirt = ""; c.pants = ""; c.tag = ""; c.target = -1; c.getUp = 0;
   }
 
   // police on foot, gang members, mission peds
@@ -206,13 +207,28 @@ export class PedSystem {
   }
 
   // a person pulled out of a car: runs away from the car, then back to the sidewalk
-  spawnAt(x: number, y: number, threatX: number, threatY: number) {
+  // somebody gets out of a car (pulled out by the player: falls, gets up and runs; fight: a gang member or cop who hits back)
+  spawnAt(x: number, y: number, threatX: number, threatY: number, pulled = false, fight: { role: PedRole; faction: FactionId | null } | null = null) {
     const c = this.free() ?? this.list.find((o) => o.active && o.state !== "down") ?? null;
-    if (!c) return;
+    if (!c) return null;
     this.init(c, x, y);
     c.bx = clamp(Math.floor((x - ROAD) / BLOCK), 0, GRID - 1); c.by = clamp(Math.floor((y - ROAD) / BLOCK), 0, GRID - 1);
     c.dir = 1; c.corner = 0;
+    c.threatX = threatX; c.threatY = threatY;
+    if (fight) {
+      c.role = fight.role; c.faction = fight.faction; c.hp = c.maxHp = 60;
+      if (fight.faction) { const col = fight.faction === "halcones" ? "#c0392b" : "#8e44ad"; c.shirt = col; c.pants = "#1c1c22"; }
+      c.state = "attack"; c.target = -1; c.speed = 115;
+      return c;
+    }
+    if (pulled) {
+      const dx = x - threatX, dy = y - threatY, d = Math.hypot(dx, dy) || 1;
+      this.knockDown(c, (dx / d) * 60, (dy / d) * 60, 40);
+      c.getUp = 1.6;
+      return c;
+    }
     this.scare(c, threatX, threatY);
+    return c;
   }
 
   private targetCorner(c: Civilian) { cornerPos(c.bx, c.by, c.corner, P); c.tx = P.x; c.ty = P.y; }
@@ -411,7 +427,12 @@ export class PedSystem {
       const dist = Math.hypot(c.x - fx, c.y - fy);
       const far = c.tag ? Infinity : c.armed ? DESPAWN + 400 : DESPAWN; // mission peds stay
       if ((c.state === "down" && c.t > DOWN_TIME && !c.tag) || (dist > far && c.state !== "down")) { c.active = false; continue; }
-      if (c.state === "down") { this.fall(c, dt); continue; }
+      if (c.state === "down") {
+        this.fall(c, dt);
+        // not hurt badly: stands up again and runs off
+        if (c.getUp > 0 && c.t > c.getUp && c.hp > 0) { c.getUp = 0; c.state = "walk"; this.scare(c, c.threatX, c.threatY); }
+        continue;
+      }
       const cop = isPolice(c.role);
       if (cop && c.state === "attack" && h.stars === 0 && c.target < 0) { c.state = "walk"; c.speed = rnd(WALK_V[0], WALK_V[1]); this.targetSidewalk(c); }
       else if (cop && c.state !== "attack" && h.stars > 0 && dist < 500) { c.state = "attack"; c.t = 0; }

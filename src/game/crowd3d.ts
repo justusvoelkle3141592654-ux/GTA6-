@@ -3,7 +3,9 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { mulberry32 } from "./world";
 import type { Civilian } from "./peds";
 
-// pedestrians: one InstancedMesh per body part, colours per instance
+// pedestrians far from the camera (the near ones are full figures, people3d.ts): one InstancedMesh per body part,
+// colours per instance, under 600 triangles per person
+const FAR_SCALE = 0.68; // the same height as the full figures (about 1.75 m)
 const SKIN = ["#f1c7a5", "#e0a982", "#c68a62", "#a86b45", "#7d4a2c", "#5a3420"];
 const SHIRT = ["#e8e8ee", "#ff6f91", "#2bb3ff", "#ffd23f", "#3dd68c", "#ff8a3d", "#9b6bff", "#1f2a44", "#c0392b", "#16a085", "#f5f0e1", "#ff3cac"];
 const PANTS = ["#2c3e57", "#3b3b44", "#c9b48c", "#1c1c22", "#5b6e8c", "#e6e1d6"];
@@ -18,22 +20,19 @@ function tint(g: THREE.BufferGeometry, v: number) {
   g.setAttribute("color", new THREE.BufferAttribute(c, 3));
   return g;
 }
-const cap = (r: number, len: number, y: number, sx = 1, sz = 1) => { const g = new THREE.CapsuleGeometry(r, len, 3, 8); g.scale(sx, 1, sz); g.translate(0, y, 0); return g; };
+const cap = (r: number, len: number, y: number, sx = 1, sz = 1) => { const g = new THREE.CapsuleGeometry(r, len, 2, 6); g.scale(sx, 1, sz); g.translate(0, y, 0); return g; };
 
 function buildGeos(): Record<Part, THREE.BufferGeometry> {
   const leg = mergeGeometries([tint(cap(1.75, 6.4, -4.9), 1), tint(new THREE.BoxGeometry(5.4, 2, 3.1).translate(0.9, -10.3, 0), 0.22)])!;
   const head = mergeGeometries([
-    tint(new THREE.SphereGeometry(2.3, 12, 10).scale(0.95, 1.18, 0.88).translate(0, 3.0, 0), 1),
-    tint(new THREE.CylinderGeometry(1.1, 1.3, 1.6, 8).translate(0, 0.4, 0), 1),
-    tint(new THREE.BoxGeometry(0.7, 1, 0.7).translate(2.15, 2.7, 0), 1),
+    tint(new THREE.SphereGeometry(2.3, 8, 6).scale(0.95, 1.18, 0.88).translate(0, 3.0, 0), 1),
+    tint(new THREE.CylinderGeometry(1.1, 1.3, 1.6, 5, 1, true).translate(0, 0.4, 0), 1),
   ])!;
-  const hair = tint(new THREE.SphereGeometry(2.42, 12, 6, 0, Math.PI * 2, 0, Math.PI * 0.5).scale(0.98, 1.2, 0.93).rotateZ(0.5).translate(-0.1, 3.0, 0), 1);
+  const hair = tint(new THREE.SphereGeometry(2.42, 8, 3, 0, Math.PI * 2, 0, Math.PI * 0.5).scale(0.98, 1.2, 0.93).rotateZ(0.5).translate(-0.1, 3.0, 0), 1);
   const torso = mergeGeometries([
     tint(cap(3.0, 3.4, 4.7, 0.78, 1.38), 1),
-    tint(new THREE.SphereGeometry(1.6, 8, 6).translate(0, 8.2, 5.2), 1),
-    tint(new THREE.SphereGeometry(1.6, 8, 6).translate(0, 8.2, -5.2), 1),
   ])!;
-  const arm = mergeGeometries([tint(cap(1.2, 5.6, -4.2), 1), tint(new THREE.SphereGeometry(1.2, 8, 6).translate(0, -8.6, 0), 0.92)])!;
+  const arm = mergeGeometries([tint(cap(1.2, 5.6, -4.2), 1), tint(new THREE.SphereGeometry(1.2, 5, 3).translate(0, -8.6, 0), 0.92)])!;
   const hips = tint(new THREE.BoxGeometry(4, 2.8, 7.6).translate(0, 10.6, 0), 1);
   return { legL: leg, legR: leg, hips, torso, head, hair, armL: arm, armR: arm };
 }
@@ -84,12 +83,13 @@ export class CrowdRenderer {
   }
 
   // px, py: the player (people hiding in hide and seek only show up close to you)
-  update(list: readonly Civilian[], visible: boolean, px = 0, py = 0) {
+  // skip: peds drawn as full figures (people3d.ts) — here only the far ones
+  update(list: readonly Civilian[], visible: boolean, px = 0, py = 0, skip?: ReadonlySet<number>) {
     const M = this.meshes;
     let colors = false;
     for (let i = 0; i < this.max; i++) {
       const c = list[i];
-      if (!visible || !c || !c.active || (c.tag === "hiding" && Math.hypot(c.x - px, c.y - py) > 45)) {
+      if (!visible || !c || !c.active || skip?.has(c.id) || (c.tag === "hiding" && Math.hypot(c.x - px, c.y - py) > 45)) {
         for (const p of PARTS) M[p].setMatrixAt(i, _zero);
         this.shadow.setMatrixAt(i, _zero);
         continue;
@@ -102,7 +102,7 @@ export class CrowdRenderer {
       let fall = 0, lift = 0;
       if (c.state === "down") { fall = Math.min(1, c.t / 0.35) * (Math.PI / 2); lift = 2.2 * Math.min(1, c.t / 0.35); }
       _e.set(0, -c.a, fall); _q.setFromEuler(_e);
-      _base.compose(_p.set(c.x, c.z + lift, c.y), _q, _s.set(c.scale, c.scale, c.scale));
+      _base.compose(_p.set(c.x, c.z + lift, c.y), _q, _s.set(c.scale * FAR_SCALE, c.scale * FAR_SCALE, c.scale * FAR_SCALE));
       const cower = c.state === "cower";
       const aim = c.state === "attack" && c.armed; // arms forward like holding a gun
       const hipY = cower ? -3.5 : bob;

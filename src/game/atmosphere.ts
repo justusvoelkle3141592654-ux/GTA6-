@@ -129,14 +129,18 @@ export class Atmosphere {
   // materials have to know about the cascades (called for every new lit material)
   setupMaterials(root: THREE.Object3D) {
     const csm = this.csm;
-    if (!csm) return;
     root.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
       if (!m) return;
       for (const mat of Array.isArray(m) ? m : [m]) {
+        // a shader hook of the material itself (people: palette colours) runs too; CSM.dispose() deletes hooks
+        const own = mat.userData.ownCompile as THREE.Material["onBeforeCompile"] | undefined;
+        if (!csm) { if (own && mat.onBeforeCompile !== own) { mat.onBeforeCompile = own; mat.needsUpdate = true; } continue; }
         if (this.seen.has(mat) || !(mat instanceof THREE.MeshStandardMaterial)) continue;
         this.seen.add(mat);
         csm.setupMaterial(mat);
+        if (own) { const cs = mat.onBeforeCompile; mat.onBeforeCompile = (sh, r) => { cs.call(mat, sh, r); own.call(mat, sh, r); }; }
+        mat.needsUpdate = true;
       }
     });
   }

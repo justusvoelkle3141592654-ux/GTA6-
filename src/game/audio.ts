@@ -242,6 +242,18 @@ export class Sfx {
     this.tone(220, 0.08, "triangle", 0.12, 0, 120);
   }
 
+  // a window breaks: crack, then shards falling
+  glass() {
+    this.noise(0.12, 5200, 0.5, "highpass", 2500);
+    for (let i = 0; i < 6; i++) this.tone(2400 + Math.random() * 3000, 0.05, "triangle", 0.05, 0.08 + i * 0.05);
+  }
+
+  // car alarm: two tone horn
+  alarm() {
+    this.tone(880, 0.22, "square", 0.07, 0, 700);
+    this.tone(660, 0.22, "square", 0.07, 0.25, 520);
+  }
+
   land() {
     this.noise(0.25, 300, 0.4, "lowpass", 80);
   }

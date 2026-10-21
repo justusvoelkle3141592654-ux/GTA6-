@@ -6,7 +6,9 @@ import { Wanted, CRIMES, type Crime } from "./wanted";
 import { buildPlaces, onJetty, respawnCost, RESPAWN_RULES, type Place } from "./places";
 import { PedSystem, PED_LIMIT, isPolice, type Civilian, type Team } from "./peds";
 import { Car, CARS, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, hitCar, copyBody, repairBody, type CarDef, type FactionId } from "./vehicles";
-import { Inventory, WEAPONS, type Weapon } from "./weapons";
+import { Inventory, WEAPONS, WEAPON_DEFS, type Weapon } from "./weapons";
+import { SHAPES, hasRig } from "./carmodel";
+import type { ActKind } from "./people3d";
 import { AUTOSAVE_EVERY, SAVE_VERSION, emptyProgress, emptyStats, writeSave, type Progress, type SaveData, type SaveResult, type SaveStats } from "./save";
 import { Traffic, PARKED_LIMIT } from "./traffic";
 import { DISTRICTS, districtAt, type DistrictId } from "./districts";
@@ -1133,12 +1135,124 @@ export class Game {
     if (!this.onFoot) {
       const p = this.player;
       if (isHeli(p.model) && p.z > this.groundAt(p.x, p.y) + 6) { this.setHint("Erst landen – dann aussteigen", 1.4); return; }
-      if (p.speed > 220) { this.setHint("Zu schnell zum Aussteigen – erst bremsen!", 1.2); return; }
-      this.exitCar();
+      this.exitCar(true);
     } else {
+      if (this.act || this.approach) return;
       const c = this.nearestEnterable();
-      if (c) this.enterCar(c);
-      else this.setHint("Kein Auto in der Nähe", 1);
+      if (!c) { this.setHint("Kein Auto in der Nähe", 1); return; }
+      if (!hasRig(c.model) || !this.rules.city) { this.enterCar(c); return; } // bikes, boats, helicopters: straight on
+      if (c.speed > 90) { this.setHint("Zu schnell – das Auto muss erst halten", 1.2); return; }
+      this.startEnter(c);
+    }
+  }
+
+  // ---------- getting in and out with animations (door, smashed window, pulling the driver out, rolling out) ----------
+  act: { kind: ActKind; id: number; t: number; dur: number; car: Car | null; fired: boolean; jacked: boolean } | null = null;
+  private actId = 0;
+  private approach: { car: Car; kind: ActKind } | null = null; // walking to the driver's door first
+  private doorClose: { car: Car; t: number; near: boolean }[] = [];
+
+  // where you stand at the driver's door (left front)
+  private doorPoint(c: Car) {
+    const lx = (SHAPES[c.model]?.seatX ?? 0) + 2, lz = -(c.hw + 5), ca = Math.cos(c.a), sa = Math.sin(c.a);
+    return { x: c.x + lx * ca - lz * sa, y: c.y + lx * sa + lz * ca };
+  }
+  private startEnter(c: Car) {
+    const occupied = !c.dead && ((c.kind === "civ" && c.driver && !c.parked) || (c.kind === "cop" && !c.parked && !c.roadblock));
+    const kind: ActKind = occupied ? "jack" : c.locked && !c.owned ? (WEAPON_DEFS[this.weapon].kind === "gun" ? "butt" : "smash") : "open";
+    this.approach = { car: c, kind };
+  }
+  private beginAct(kind: ActKind, c: Car | null, dur: number) {
+    this.act = { kind, id: ++this.actId, t: 0, dur, car: c, fired: false, jacked: this.act?.jacked ?? false };
+  }
+  // movement while an action runs: walk to the door, stand at it, or roll; moving the stick cancels getting in
+  private steerAct(dt: number, moved: boolean): boolean {
+    const pd = this.ped;
+    if (this.approach) {
+      const a = this.approach, c = a.car;
+      if (moved || c.dead || !this.cars.includes(c) || Math.hypot(c.x - pd.x, c.y - pd.y) > 160) { this.approach = null; return false; }
+      const dp = this.doorPoint(c), dx = dp.x - pd.x, dy = dp.y - pd.y, d = Math.hypot(dx, dy);
+      if (d < 5 || this.pedBlocked(pd.x + (dx / d) * 6, pd.y + (dy / d) * 6)) {
+        this.approach = null;
+        this.beginAct(a.kind, c, a.kind === "open" ? 0.6 : a.kind === "jack" ? 0.9 : 0.8);
+        this.act!.jacked = false;
+      } else {
+        const v = Math.min(165, d * 6);
+        pd.vx = (dx / d) * v; pd.vy = (dy / d) * v; pd.a = Math.atan2(dy, dx); pd.moving = true;
+        return true;
+      }
+    }
+    const A = this.act;
+    if (!A) return false;
+    if (moved && A.car && A.t > 0.15 && (A.kind === "open" || A.kind === "smash" || A.kind === "butt" || A.kind === "jack")) {
+      A.car.doors[1] = 0; this.act = null; return false;
+    }
+    if (A.kind === "roll") { const k = Math.max(0, 1 - dt * 2.5); pd.vx *= k; pd.vy *= k; }
+    else { pd.vx = 0; pd.vy = 0; }
+    pd.moving = false;
+    if (A.car && A.kind !== "roll" && A.kind !== "getout") pd.a = A.car.a + Math.PI / 2; // facing the car
+    return true;
+  }
+  private stepAct(dt: number) {
+    const A = this.act!, c = A.car, pd = this.ped;
+    if (pd.dead || (c && c !== this.player && !this.cars.includes(c))) { this.act = null; return; }
+    A.t += dt;
+    if (c && A.kind !== "roll" && A.kind !== "getout") {
+      // the car stands still meanwhile; you stay at its door (getting in: you move into the seat)
+      c.vx *= 0.8; c.vy *= 0.8; c.av = 0; c.throttle = 0;
+      const dp = this.doorPoint(c);
+      if (A.kind === "getin") { const k = Math.min(1, A.t / A.dur); pd.x = dp.x + (c.x - dp.x) * k * 0.6; pd.y = dp.y + (c.y - dp.y) * k * 0.6; }
+      else { pd.x = dp.x; pd.y = dp.y; }
+    }
+    if (!c) { if (A.t >= A.dur) this.act = null; return; }
+    switch (A.kind) {
+      case "open": if (A.t > 0.22) c.doors[1] = 1; break;
+      case "smash": case "butt":
+        if (!A.fired && A.t > 0.42) {
+          // the side window shatters, the alarm goes off
+          A.fired = true;
+          c.glass.door1 = 2; c.glassV++;
+          sfx.glass();
+          const dp = this.doorPoint(c);
+          for (let i = 0; i < 10; i++) this.emit((dp.x + c.x) / 2, (dp.y + c.y) / 2, c.z + 10, rnd(-40, 40), rnd(-40, 40), rnd(10, 50), rnd(0.4, 0.8), rnd(1, 2), 0, "#cfe6f2", 0, 1);
+          c.alarmT = 10;
+          this.peds.alarm(c.x, c.y, 260, "shot");
+        }
+        if (A.t > 0.66) c.doors[1] = 1;
+        break;
+      case "jack":
+        if (A.t > 0.2) c.doors[1] = 1;
+        if (!A.fired && A.t > 0.45) {
+          // the driver is pulled out: falls, gets up and runs; gang members and police sometimes fight back
+          A.fired = true; A.jacked = true;
+          const dp = this.doorPoint(c), ca = Math.cos(c.a), sa = Math.sin(c.a);
+          const ox = dp.x + ca * 10, oy = dp.y + sa * 10;
+          const fight = c.kind === "cop" ? { role: "cop" as const, faction: null } : c.faction && Math.random() < 0.35 ? { role: "gang" as const, faction: c.faction } : null;
+          if (this.rules.city) this.peds.spawnAt(ox, oy, pd.x, pd.y, !fight, fight);
+          c.driver = false;
+          sfx.punch();
+        }
+        break;
+      case "getout": break;
+    }
+    if (A.t < A.dur) return;
+    if (A.kind === "open" || A.kind === "smash" || A.kind === "butt" || A.kind === "jack") this.beginAct("getin", c, 0.55);
+    else if (A.kind === "getin") {
+      const jacked = A.jacked;
+      this.act = null;
+      this.enterCar(c, jacked);
+      this.player.doors[1] = 1;
+      this.doorClose.push({ car: this.player, t: 0.35, near: false });
+    } else this.act = null;
+  }
+  private stepDoors(dt: number) {
+    for (let i = this.doorClose.length - 1; i >= 0; i--) {
+      const d = this.doorClose[i];
+      d.t -= dt;
+      if (d.t > 0) continue;
+      // walked away quickly: the door stays open
+      if (!d.near || Math.hypot(this.ped.x - d.car.x, this.ped.y - d.car.y) < 45) d.car.doors[1] = 0;
+      this.doorClose.splice(i, 1);
     }
   }
 
@@ -1152,15 +1266,34 @@ export class Game {
     return best;
   }
 
-  private exitCar() {
+  // anim: with the animations (door, rolling out of a moving car); without: you just stand next to it
+  private exitCar(anim = false) {
     const p = this.player;
     const ca = Math.cos(p.a), sa = Math.sin(p.a);
-    let x = p.x + sa * 30, y = p.y - ca * 30;
-    if (this.world.isSolid(x, y, 8)) { x = p.x - sa * 30; y = p.y + ca * 30; }
-    const pd = this.ped;
-    pd.x = x; pd.y = y; pd.z = Math.max(terrainH(x, y), isHeli(p.model) ? p.z : -Infinity); pd.a = p.a; pd.vx = p.vx * 0.3; pd.vy = p.vy * 0.3; pd.dead = false;
+    const side = p.hw + 10;
+    let x = p.x + sa * side, y = p.y - ca * side; // driver's side (left)
+    if (this.world.isSolid(x, y, 8)) { x = p.x - sa * side; y = p.y + ca * side; }
+    const pd = this.ped, speed = p.speed;
+    const rig = hasRig(p.model) && anim && !isCraft(p.model) && this.rules.city;
+    if (rig && speed < 160) { const dp = this.doorPoint(p); if (!this.world.isSolid(dp.x, dp.y, 6)) { x = dp.x; y = dp.y; } }
+    pd.x = x; pd.y = y; pd.z = Math.max(this.groundH(x, y, p.z + 10), isHeli(p.model) ? p.z : -Infinity); pd.a = p.a; pd.vx = p.vx * 0.3; pd.vy = p.vy * 0.3; pd.dead = false;
     this.onFoot = true;
     p.throttle = 0; p.steer = 0; p.handbrake = true; p.nitro = false;
+    this.approach = null; this.act = null;
+    if (rig && speed > 167) {
+      // faster than 60 km/h: roll out, the car rolls on; hurts only above 120 km/h
+      const ox = x - p.x, oy = y - p.y, d = Math.hypot(ox, oy) || 1;
+      pd.vx = p.vx * 0.55 + (ox / d) * 60; pd.vy = p.vy * 0.55 + (oy / d) * 60;
+      pd.a = Math.atan2(pd.vy, pd.vx);
+      p.handbrake = false;
+      this.beginAct("roll", p, 0.9);
+      if (speed > 333) this.damagePed((speed - 333) * 0.06);
+      this.shake(0.2);
+    } else if (rig && !isWater(x, y)) {
+      p.doors[1] = 1;
+      this.beginAct("getout", p, 0.7);
+      this.doorClose.push({ car: p, t: 1.5, near: true });
+    }
     sfx.door();
     this.setHint("E / 🚗 zum Einsteigen", 2);
   }
@@ -1181,7 +1314,7 @@ export class Game {
     this.enterCar(c);
   }
 
-  private enterCar(c: Car) {
+  private enterCar(c: Car, pulledOut = false) {
     const p = this.player;
     if (c !== p) {
       if (this.playerCarStored) { this.cars.push(p); this.playerCarStored = false; } // own car is in the garage: nothing to leave behind
@@ -1197,14 +1330,14 @@ export class Game {
       p.keep = c.keep;
       // take the new one; whoever sits inside gets pulled out
       const wasCop = c.kind === "cop";
-      const jacked = c.kind === "civ" && c.driver && !c.dead;
-      if (jacked && this.rules.city) {
+      const jacked = pulledOut || (c.kind === "civ" && c.driver && !c.dead);
+      if (jacked && !pulledOut && this.rules.city) {
         const ca = Math.cos(c.a), sa = Math.sin(c.a);
         let dx = c.x + sa * 26, dy = c.y - ca * 26;
         if (this.world.isSolid(dx, dy, 6)) { dx = c.x - sa * 26; dy = c.y + ca * 26; }
         this.peds.spawnAt(dx, dy, this.ped.x, this.ped.y);
       }
-      const parkedTheft = c.kind === "civ" && !c.driver;
+      const parkedTheft = c.kind === "civ" && !c.driver && !pulledOut;
       const own = c.owned && this.rules.city; // back into your own car: no crime
       this.traffic.release(c);
       p.x = c.x; p.y = c.y; p.z = c.z; p.a = c.a; p.vx = c.vx; p.vy = c.vy; p.av = 0; p.vz = 0; p.air = false;
@@ -1378,6 +1511,7 @@ export class Game {
         dx = fxv * -jy + rxv * jx; dy = fyv * -jy + ryv * jx;
       }
     }
+    if ((this.act || this.approach) && this.steerAct(dt, m > 0.15)) return;
     const L = Math.hypot(dx, dy);
     const spd = pd.swim ? 75 : pd.sprint ? 250 : 165;
     const tvx = L > 0 ? (dx / L) * spd * Math.min(1, m / 0.8) : 0, tvy = L > 0 ? (dy / L) * spd * Math.min(1, m / 0.8) : 0;
@@ -1398,6 +1532,8 @@ export class Game {
     const pd = this.ped;
     const w = this.world;
     if (this.fall?.fade) return;
+    if (this.act) this.stepAct(dt);
+    this.stepDoors(dt);
     const nx = pd.x + pd.vx * dt, ny = pd.y + pd.vy * dt;
     if (!this.pedBlocked(nx, pd.y)) pd.x = nx; else pd.vx = 0;
     if (!this.pedBlocked(pd.x, ny)) pd.y = ny; else pd.vy = 0;
@@ -1605,6 +1741,7 @@ export class Game {
 
     for (const c of this.cars) {
       c.hitFlash = Math.max(0, c.hitFlash - dt);
+      if (c.alarmT > 0) { c.alarmT -= dt; if (Math.floor(c.alarmT * 2.2) !== Math.floor((c.alarmT + dt) * 2.2) && Math.hypot(c.x - this.fx, c.y - this.fy) < 700) sfx.alarm(); }
       c.nearCd = Math.max(0, c.nearCd - dt);
       this.carEffects(c, dt);
       if (c.dead) c.deadT += dt;
