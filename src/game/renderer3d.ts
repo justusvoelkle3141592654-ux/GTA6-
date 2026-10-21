@@ -1028,7 +1028,7 @@ export class Renderer3D {
       const x0 = JETTY.x1 + 10, x1 = JETTY.x0, len = x0 - x1;
       P.push(box(len, 2, JETTY.hw * 2, (x0 + x1) / 2, 1.5, JETTY.y, "#8a6a4a"));
       for (let x = x1 + 6; x < x0; x += 22) for (const dz of [-12, 12]) P.push(cyl(1.4, 1.4, 14, x, -4, JETTY.y + dz, "#5c4632", 6));
-    } else {
+    } else if (pl.kind === "heliport") {
       // helipad: round slab with a big H
       const hx = HELI_SPOT.x, hy = HELI_SPOT.y, hz = terrainH(hx, hy);
       P.push(cyl(64, 66, 4, hx, hz + 1, hy, "#3a3d45", 32), box(10, 1, 44, hx - 12, hz + 3.3, hy, "#ffd23f"), box(10, 1, 44, hx + 12, hz + 3.3, hy, "#ffd23f"), box(14, 1, 9, hx, hz + 3.3, hy, "#ffd23f"));

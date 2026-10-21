@@ -5,7 +5,7 @@ import { DISTRICTS, blockDistrict } from "./districts";
 export type CivState = "walk" | "wait" | "flee" | "cower" | "down" | "attack" | "idle";
 export type AlarmKind = "shot" | "blast";
 // civ: passer-by; cop/swat: police on foot; gang: gang member; fare: taxi customer; target: mission target
-export type PedRole = "civ" | "cop" | "swat" | "army" | "gang" | "fare" | "target";
+export type PedRole = "civ" | "cop" | "swat" | "army" | "gang" | "fare" | "target" | "seeker";
 // police on foot (army: soldiers at the top wanted level)
 export const isPolice = (r: PedRole) => r === "cop" || r === "swat" || r === "army";
 // who fired a shot: the player, the police or a gang (gangs and police fight each other)
@@ -234,8 +234,8 @@ export class PedSystem {
   }
 
   private scare(c: Civilian, x: number, y: number) {
-    if (c.state === "down" || c.state === "attack" || isPolice(c.role) || c.tag === "fare") return;
-    if (c.role === "gang") { c.state = "attack"; c.t = 0; return; } // gangs fight back
+    if (c.state === "down" || c.state === "attack" || isPolice(c.role) || c.tag === "fare" || c.role === "seeker") return;
+    if (c.role === "gang") return; // gangs do not run away (they fight back when hurt, see damage)
     c.threatX = x; c.threatY = y;
     const wasFleeing = c.state === "flee";
     c.state = "flee"; c.t = 0; c.dur = rnd(5, 8);
@@ -263,7 +263,7 @@ export class PedSystem {
   // gunshots and explosions scare everybody around
   alarm(x: number, y: number, radius: number, kind: AlarmKind) {
     for (const c of this.list) {
-      if (!c.active || c.state === "down" || c.armed) continue; // police and gangs do not run
+      if (!c.active || c.state === "down" || c.armed || c.role === "seeker") continue; // police and gangs do not run, the hide-and-seek game goes on
       const d = Math.hypot(c.x - x, c.y - y);
       if (d > radius) continue;
       if (kind === "shot" && d < 160 && c.state !== "flee" && Math.random() < 0.35) { c.state = "cower"; c.t = 0; c.dur = rnd(2.5, 4.5); c.threatX = x; c.threatY = y; }
@@ -400,6 +400,8 @@ export class PedSystem {
       else if (cop && c.state !== "attack" && h.stars > 0 && dist < 500) { c.state = "attack"; c.t = 0; }
       if (c.role === "gang" && c.state === "idle" && c.faction && h.gangHostile(c.faction) && dist < 320) { c.state = "attack"; c.t = 0; }
       if (c.target >= 0) { const o = this.list[c.target]; if (!o.active || o.state === "down") c.target = -1; }
+      // a gang member that is not angry at you (any more) calms down
+      if (c.role === "gang" && c.state === "attack" && c.target < 0 && c.faction && !h.gangHostile(c.faction) && c.t > 4) { c.state = "idle"; c.t = 0; }
       // gangs shoot at police in their turf (checked about once a second)
       if (c.role === "gang" && c.target < 0 && (c.state === "idle" || c.state === "attack") && Math.random() < dt) {
         const o = this.findOpponent(c);
@@ -542,7 +544,7 @@ export class PedSystem {
       const lx = dx * ca + dy * sa, ly = -dx * sa + dy * ca;
       if (Math.abs(lx) > CAR_HALF_L + PED_R || Math.abs(ly) > CAR_HALF_W + PED_R) continue;
       const sp = car.speed;
-      if (sp > 60 && !car.dead) {
+      if (sp > 60 && !car.dead && (c.role !== "seeker" || (car.kind === "player" && !h.onFoot))) { // traffic never runs over the hide-and-seek players
         const s = sp * 0.7;
         const side = ly >= 0 ? 1 : -1;
         this.knockDown(c, car.vx * 0.7 - sa * side * 40, car.vy * 0.7 + ca * side * 40, 60 + s * 0.35);

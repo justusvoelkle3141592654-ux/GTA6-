@@ -25,6 +25,9 @@ export class Gangs {
     this.aggro[f] = ANGRY_TIME;
   }
 
+  // you hurt one of them (not knocked out): the gang is angry, reputation stays
+  provoked(f: FactionId) { this.aggro[f] = Math.max(this.aggro[f], ANGRY_TIME * 0.5); }
+
   update(dt: number) {
     this.aggro.halcones = Math.max(0, this.aggro.halcones - dt);
     this.aggro.kings = Math.max(0, this.aggro.kings - dt);

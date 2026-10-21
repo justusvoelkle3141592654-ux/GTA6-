@@ -95,7 +95,7 @@ export class Jobs {
     const g = this.g;
     if (this.active) { this.stop("Job beendet"); return; }
     if (g.onFoot || g.playerCarStored) { g.hintMsg("Jobs startest du im passenden Auto (Taxi, Lieferwagen, Streifenwagen)"); return; }
-    if (g.missions.active || this.race) { g.hintMsg("Erst die laufende Mission beenden"); return; }
+    if (g.missions.active || this.race || g.hide.active) { g.hintMsg("Erst die laufende Mission beenden"); return; }
     const kind = jobFor(g.player.model);
     if (!kind) { g.hintMsg("In diesem Auto gibt's keinen Job – Taxi, Lieferwagen/LKW oder Streifenwagen"); return; }
     if (kind === "bounty" && g.wanted.stars > 0) { g.hintMsg("Mit Fahndung gibt dir die Zentrale keine Einsätze"); return; }

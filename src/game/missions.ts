@@ -175,7 +175,7 @@ export class Missions {
   talk(giver: string): boolean {
     const g = this.g;
     if (this.active) { g.say([{ speaker: "Kai", text: "Erst den laufenden Auftrag erledigen.", color: KAI }], null); return true; }
-    if (g.jobs.active) { g.say([{ speaker: "Kai", text: "Erst den Job zu Ende bringen.", color: KAI }], null); return true; }
+    if (g.jobs.active || g.hide.active) { g.say([{ speaker: "Kai", text: "Erst den Job zu Ende bringen.", color: KAI }], null); return true; }
     const m = this.available(giver);
     const pl = g.places.find((p) => p.id === giver);
     if (!m) {

@@ -24,6 +24,7 @@ import { Police } from "./police";
 import { Shops } from "./shops";
 import { Gangs } from "./gangs";
 import { Craft } from "./craft";
+import { HideSeek, HIDE_RADIUS } from "./hide";
 
 export type GameState = "menu" | "playing" | "paused" | "over" | "modal";
 // overlays that stop the game while open (shops, dialogs, weapon wheel)
@@ -131,6 +132,7 @@ export class Game {
   shops: Shops = new Shops(this);
   gangs: Gangs = new Gangs(this);
   craft: Craft = new Craft(this);
+  hide: HideSeek = new HideSeek(this);
   state: GameState = "menu";
   dpr = 1; cw = 0; ch = 0; mobile = false;
 
@@ -664,6 +666,7 @@ export class Game {
     const rule = RESPAWN_RULES[reason];
     if (reason === "dead") this.stats.deaths++; else this.stats.arrests++;
     this.missions.fail(reason === "dead" ? "Du wurdest erledigt" : "Du wurdest verhaftet");
+    this.hide.stop(reason === "dead" ? "Erledigt" : "Verhaftet");
     this.police.reset(); this.pendingHeat = 0; this.pendingT = 0;
     for (const c of this.peds.list) if (c.active && isPolice(c.role)) c.active = false;
     this.jobs.stop(reason === "dead" ? "Erledigt" : "Verhaftet");
@@ -781,7 +784,7 @@ export class Game {
       pd.a = Math.atan2(c.y - pd.y, c.x - pd.x);
       sfx.punch(); this.shake(0.08);
       if (this.peds.damage(c, d.dmg, pd.x, pd.y, d.id === "bat" ? 220 : 120)) this.onPedDown(c);
-      else if (c.tag !== "suspect") this.crime("shot");
+      else { if (c.tag !== "suspect") this.crime("shot"); if (c.faction) this.gangs.provoked(c.faction); }
       return;
     }
     for (const car of this.cars) {
@@ -912,7 +915,7 @@ export class Game {
           if (!cv) continue;
           if (q.kind === "bullet") {
             if (this.peds.damage(cv, q.dmg, q.px, q.py, 90)) this.onPedDown(cv);
-            else { this.crime("shot"); this.peds.alarm(cv.x, cv.y, 400, "blast"); }
+            else { if (cv.tag !== "suspect") this.crime("shot"); if (cv.faction) this.gangs.provoked(cv.faction); this.peds.alarm(cv.x, cv.y, 400, "blast"); }
           } else this.explode(cv.x, cv.y, 1.1, 4);
           remove = true;
         }
@@ -998,6 +1001,7 @@ export class Game {
     const pl = this.nearPlace;
     if (!pl || !this.onFoot) return false;
     if (pl.kind === "contact") return this.onContact?.(pl) ?? false;
+    if (pl.kind === "park") { this.hide.start(pl); return true; }
     this.openModal({ kind: "shop", place: pl });
     return true;
   }
@@ -1168,6 +1172,7 @@ export class Game {
   private updateNav(dt: number) {
     let goal: { x: number; y: number; color: string } | null = null;
     for (const list of [this.missions.markers, this.jobs.markers]) {
+      if (this.hide.active) break; // no GPS route during hide and seek
       for (const m of list) if (m.kind !== "contact" && !(m.kind === "race" && m.label === "R")) { goal = m; break; }
       if (goal) break;
     }
@@ -1366,7 +1371,7 @@ export class Game {
     if (playing) this.updateProjs(dt);
     if (playing && !this.ending) {
       this.updatePlaces();
-      if (this.rules.city) { this.missions.update(dt); this.jobs.update(dt); this.updateNav(dt); this.tips.update(dt); }
+      if (this.rules.city) { this.missions.update(dt); this.jobs.update(dt); this.hide.update(dt); this.updateNav(dt); this.tips.update(dt); }
       const dId = districtAt(this.fx, this.fy);
       if (dId !== this.district) { this.district = dId; this.districtT = 2.5; }
     }
@@ -1969,7 +1974,10 @@ export class Game {
         ctx.fillStyle = "#fff"; ctx.fillText(pl.icon, cxm + dx, cym + dy + 0.5);
       }
       // mission / job markers stay on the edge when far away
-      for (const list of [this.missions.markers, this.jobs.markers]) for (const mk of list) {
+      // hide and seek: playing field
+      const hs = this.hide.active;
+      if (hs) { ctx.strokeStyle = "rgba(61,255,139,0.8)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cxm + (hs.x - fx) * m, cym + (hs.y - fy) * m, HIDE_RADIUS * m, 0, TAU); ctx.stroke(); }
+      for (const list of [this.missions.markers, this.jobs.markers, this.hide.markers]) for (const mk of list) {
         let dx = (mk.x - fx) * m, dy = (mk.y - fy) * m;
         const d = Math.hypot(dx, dy);
         if (d > size / 2 - 7) { dx *= (size / 2 - 7) / d; dy *= (size / 2 - 7) / d; }

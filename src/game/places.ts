@@ -1,7 +1,7 @@
 import { BLOCK, ROAD, GRID, WORLD, HELIPAD, type Building, type World } from "./world";
 import type { EndReason } from "./engine";
 
-export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport";
+export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport" | "park";
 export type PlaceAccess = "foot" | "car" | "both" | "none";
 
 export interface PlaceDef {
@@ -11,6 +11,7 @@ export interface PlaceDef {
   access: PlaceAccess;   // how it is entered
   robbable?: boolean;
   at?: [number, number, number]; // fixed spot outside the city blocks (x, y, facing); vehicles wait next to it
+  inPark?: boolean;              // entrance at the west edge of the nearest park (cx, cy: middle of the park)
 }
 // boat jetty on the beach (between the middle and the southern causeway) and helipad east of the harbour
 export const DOCK_SPOT = { x: -340, y: 3455, a: Math.PI };
@@ -33,6 +34,8 @@ export const PLACE_DEFS: PlaceDef[] = [
   { id: "marisol", kind: "contact", name: "Café Marisol", color: "#ff5ad1", icon: "M", near: [1, 7], access: "foot" },
   { id: "dock", kind: "contact", name: "Kai 9", color: "#ff5ad1", icon: "D", near: [9, 8], access: "foot" },
   // vehicles: a speedboat at the jetty, a helicopter on the pad (always there again when you come back)
+  // hide and seek in the park
+  { id: "hide", kind: "park", name: "Versteckspiel im Park", color: "#3dff8b", icon: "V", near: [6, 7], access: "foot", inPark: true },
   { id: "jetty", kind: "dock", name: "Bootssteg", color: "#2bb3ff", icon: "B", near: [0, 6], access: "none", at: [-196, 3455, Math.PI] },
   { id: "helipad", kind: "heliport", name: "Heliport", color: "#ffd23f", icon: "F", near: [10, 3], access: "none", at: [WORLD + 440, 1900, Math.PI] },
 ];
@@ -60,6 +63,13 @@ export function buildPlaces(world: World): Place[] {
   const ok = (bx: number) => { const w = westFacing(bx); return (b: Building) => w(b) && !world.ramps.some((r) => r.bld === b); };
   for (const def of PLACE_DEFS) {
     if (def.at) { const [x, y, a] = def.at; out.push({ ...def, x, y, a, cx: x, cy: y, bld: null }); continue; }
+    if (def.inPark) {
+      let pk = world.blocks[0], pd = Infinity;
+      for (const b of world.blocks) { const d = Math.hypot(b.bx - def.near[0], b.by - def.near[1]); if (b.kind === "park" && d < pd) { pd = d; pk = b; } }
+      const x0 = pk.bx * BLOCK + ROAD, y0 = pk.by * BLOCK + ROAD, half = (BLOCK - ROAD) / 2;
+      out.push({ ...def, x: x0 + 10, y: y0 + half, a: Math.PI, cx: x0 + half, cy: y0 + half, bld: null });
+      continue;
+    }
     let best = -1, bd = Infinity;
     for (let i = 0; i < world.blocks.length; i++) {
       const b = world.blocks[i];
