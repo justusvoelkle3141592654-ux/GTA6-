@@ -71,6 +71,8 @@ export function seaDist(x: number, y: number): number {
   return d;
 }
 export const isWater = (x: number, y: number) => seaDist(x, y) > 0;
+// flat ground for the helipad east of the harbour
+export const HELIPAD = { x: WORLD + 520, y: 1900, r: 170 };
 
 export function terrainH(x: number, y: number): number {
   const d = cityDist(x, y);
@@ -85,7 +87,8 @@ export function terrainH(x: number, y: number): number {
   const mnt = sstep(1700, 3600, d) * (0.4 + 0.6 * vnoise(x / 1900 + 1.3, y / 1900 + 9.1)) * 560;
   const ridge = sstep(1900, 3400, d) * Math.pow(vnoise(x / 700 + 4.4, y / 700 + 2.9), 2) * 340;
   const edge = 1 - sstep(EXT - 1000, EXT - 320, d);
-  return (hills * ramp + mnt + ridge) * edge * shore;
+  const pad = Math.hypot(x - HELIPAD.x, y - HELIPAD.y);
+  return (hills * ramp + mnt + ridge) * edge * shore * (pad < HELIPAD.r ? sstep(HELIPAD.r * 0.55, HELIPAD.r, pad) : 1);
 }
 export function terrainGrad(x: number, y: number, e = 6) {
   return { x: (terrainH(x + e, y) - terrainH(x - e, y)) / (2 * e), y: (terrainH(x, y + e) - terrainH(x, y - e)) / (2 * e) };

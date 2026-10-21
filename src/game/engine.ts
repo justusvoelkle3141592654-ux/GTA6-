@@ -71,6 +71,8 @@ export interface HudData {
   radio: string;          // station name while driving ("" = off)
   objective: string; objTimer: number; // mission text and seconds left (-1 = no timer)
   job: string;            // "starten" / "beenden" when the job key does something
+  alt: number;            // flying: metres above the ground (-1 = not in the helicopter)
+  swim: boolean;          // swimming in the bay
 }
 export type EndReason = "dead" | "arrested";
 export const END_LABEL: Record<EndReason, string> = { dead: "ERLEDIGT", arrested: "VERHAFTET" };
@@ -1094,6 +1096,8 @@ export class Game {
     this.onFoot = false;
     p.handbrake = false; p.parked = false;
     sfx.door();
+    if (p.model === "heli") this.setHint(this.mobile ? "Hubschrauber: HOCH / RUNTER zum Steigen und Sinken, Stick zum Fliegen" : "Hubschrauber: Leertaste steigen · Shift sinken · W/S vor/zurück · A/D drehen", 5);
+    else if (p.model === "boat") this.setHint("Speedboot: fährt nur auf dem Wasser – Nitro geht auch hier", 3);
   }
 
   // ---------- loop ----------
@@ -1139,13 +1143,15 @@ export class Game {
       kmh: Math.round(this.fspeed * 0.36), time: this.time, drift: Math.round(this.driftPts), bust01: this.bust, takedowns: this.takedowns,
       weapon: inv.current, ammo: inv.loaded(), reserve: inv.reserve(), reloading: inv.reloadT > 0, owned: inv.owned,
       bombsPlaced: this.bombs.length, onFoot: this.onFoot,
-      canEnter: this.onFoot && !!this.nearestEnterable(), hint: this.hintT > 0 ? this.hint : "", air: !this.onFoot && p.air && p.airT > 0.25,
+      canEnter: this.onFoot && !!this.nearestEnterable(), hint: this.hintT > 0 ? this.hint : "", air: !this.onFoot && p.air && p.airT > 0.25 && !isCraft(p.model),
       armor01: this.ped.armor / MAX_ARMOR,
       district: this.rules.city ? dist.name : "", districtColor: this.districtT > 0 ? dist.color : "",
       place: this.nearPlace && this.nearPlace.kind !== "contact" ? this.nearPlace.name : this.nearPlace ? this.contactLabel(this.nearPlace) : "",
       radio: !this.onFoot && st ? st.name : "",
       objective: this.objective, objTimer: this.objTimer,
       job: this.jobs.active ? "beenden" : !this.onFoot && this.rules.city && !this.missions.active && jobFor(p.model) ? "starten" : "",
+      alt: !this.onFoot && p.model === "heli" && !p.dead ? Math.max(0, Math.round((p.z - this.groundAt(p.x, p.y)) * 0.1)) : -1,
+      swim: this.onFoot && this.ped.swim,
     };
   }
   // mission system sets these
@@ -1455,7 +1461,8 @@ export class Game {
       if (rules.cops && this.wanted.stars > 0) {
         let close = this.onFoot ? this.peds.copsNear(fx, fy, 30) : 0; // police on foot grabs you
         for (const c of this.cars) if (c.kind === "cop" && !c.calm && !c.dead && Math.hypot(c.x - fx, c.y - fy) < 85) close++;
-        if (close > 0 && this.fspeed < 60) this.bust += dt * (0.3 + close * 0.1) * D.bust * (this.onFoot ? 1.6 : 1);
+        const reachable = this.onFoot || !(this.player.model === "heli" && this.player.air); // nobody cuffs you in the air
+        if (close > 0 && this.fspeed < 60 && reachable) this.bust += dt * (0.3 + close * 0.1) * D.bust * (this.onFoot ? 1.6 : 1);
         else this.bust = Math.max(0, this.bust - dt * 0.8);
         if (this.bust >= 1) { this.bust = 1; this.endRun("arrested"); }
       }

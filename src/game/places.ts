@@ -1,4 +1,4 @@
-import { BLOCK, ROAD, GRID, WORLD, type Building, type World } from "./world";
+import { BLOCK, ROAD, GRID, WORLD, HELIPAD, type Building, type World } from "./world";
 import type { EndReason } from "./engine";
 
 export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport";
@@ -14,7 +14,7 @@ export interface PlaceDef {
 }
 // boat jetty on the beach (between the middle and the southern causeway) and helipad east of the harbour
 export const DOCK_SPOT = { x: -340, y: 3455, a: Math.PI };
-export const HELI_SPOT = { x: WORLD + 520, y: 1900, a: Math.PI };
+export const HELI_SPOT = { x: HELIPAD.x, y: HELIPAD.y, a: Math.PI };
 // the wooden jetty you can walk on (from the beach out to the boat)
 export const JETTY = { x0: DOCK_SPOT.x - 40, x1: -186, y: DOCK_SPOT.y - 26, hw: 15 };
 export const onJetty = (x: number, y: number) => x > JETTY.x0 && x < JETTY.x1 && Math.abs(y - JETTY.y) < JETTY.hw;

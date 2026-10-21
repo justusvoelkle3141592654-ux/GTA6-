@@ -824,7 +824,7 @@ export class Renderer3D {
     while (placed < treeN && guard++ < treeN * 12) {
       const x = MAP_MIN + 400 + rr() * (MAP_SIZE - 800), z = MAP_MIN + 400 + rr() * (MAP_SIZE - 800);
       const d = cityDist(x, z);
-      if (d < 320 || d > EXT - 420 || seaDist(x, z) > -260) continue;
+      if (d < 320 || d > EXT - 420 || seaDist(x, z) > -260 || Math.hypot(x - HELI_SPOT.x, z - HELI_SPOT.y) < 230) continue;
       if (isHighway(x, z) || Math.min(...HIGHWAYS.map((i) => Math.abs(x - (i * BLOCK + ROAD / 2)))) < 110 || Math.min(...HIGHWAYS.map((i) => Math.abs(z - (i * BLOCK + ROAD / 2)))) < 110) continue;
       const h = terrainH(x, z);
       const g = terrainGrad(x, z, 10);
@@ -838,7 +838,7 @@ export class Renderer3D {
     while (placed < rockN && guard++ < rockN * 12) {
       const x = MAP_MIN + 400 + rr() * (MAP_SIZE - 800), z = MAP_MIN + 400 + rr() * (MAP_SIZE - 800);
       const d = cityDist(x, z);
-      if (d < 420 || d > EXT - 420 || isHighway(x, z) || seaDist(x, z) > -120) continue;
+      if (d < 420 || d > EXT - 420 || isHighway(x, z) || seaDist(x, z) > -120 || Math.hypot(x - HELI_SPOT.x, z - HELI_SPOT.y) < 230) continue;
       const h = terrainH(x, z);
       const g = terrainGrad(x, z, 10);
       if (h < 120 && Math.hypot(g.x, g.y) < 0.2 && rr() < 0.7) continue;
@@ -1663,12 +1663,13 @@ export class Renderer3D {
         let desired = p.a;
         if (p.vF > 60) desired = p.a + wrapA(Math.atan2(p.vy, p.vx) - p.a) * 0.55;
         this.camYaw += wrapA(desired - this.camYaw) * (1 - Math.exp(-dt * 5));
-        const full = 112 + sp * 0.07;
+        const fly = p.model === "heli";
+        const full = 112 + sp * 0.07 + (fly ? 70 : 0);
         let dist = full;
         const cx = Math.cos(this.camYaw), cy = Math.sin(this.camYaw);
         for (let s = 0.12; s <= 1.0001; s += 0.08) if (this.world.isSolid(p.x - cx * full * s, p.y - cy * full * s, 6)) { dist = Math.max(36, full * s - 12); break; }
         const behindH = terrainH(p.x - cx * dist, p.y - cy * dist);
-        const h = (46 + sp * 0.025) * (0.55 + 0.45 * (dist / full)) + (g.ending ? 40 : 0);
+        const h = (46 + sp * 0.025 + (fly ? 45 : 0)) * (0.55 + 0.45 * (dist / full)) + (g.ending ? 40 : 0);
         tgt.set(p.x - cx * dist, Math.max(p.z + h, behindH + 22), p.y - cy * dist);
         lx = p.x + cx * 70; ly = p.z + 12; lz = p.y + cy * 70;
         fov = 62 + clamp(sp / 700, 0, 1) * 14 + (p.nitro ? 8 : 0);

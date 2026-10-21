@@ -7,6 +7,7 @@ interface Props {
   nitro01: number;
   relative?: boolean;
   onFoot: boolean;
+  flying?: boolean; // helicopter: DRIFT = climb, NITRO = descend
   weapon: Weapon;
   ammo: string;
   bombsPlaced: number;
@@ -18,7 +19,7 @@ interface Props {
 const RADIUS = 60;
 const LONG_PRESS = 420; // ms: holding the weapon button opens the wheel
 
-export default function TouchControls({ input, nitro01, relative = false, onFoot, weapon, ammo, bombsPlaced, onCycleWeapon, onWheel, onDetonate }: Props) {
+export default function TouchControls({ input, nitro01, relative = false, onFoot, flying = false, weapon, ammo, bombsPlaced, onCycleWeapon, onWheel, onDetonate }: Props) {
   const pressT = useRef<number | null>(null);
   const weaponDown = (e: React.PointerEvent) => {
     e.stopPropagation();
@@ -91,11 +92,11 @@ export default function TouchControls({ input, nitro01, relative = false, onFoot
             <span className="text-2xl leading-none">{wIcon(weapon)}</span>
             <span className="mt-0.5 font-display text-xs tracking-wider text-white/80">{ammo}</span>
           </button>
-          {!onFoot && btn("DRIFT", drift, setDrift, "drift", "#ff3cac", "h-16 w-16")}
+          {!onFoot && btn(flying ? "HOCH" : "DRIFT", drift, setDrift, "drift", "#ff3cac", "h-16 w-16")}
         </div>
         <div className="flex flex-col items-center gap-3">
-          {btn(onFoot ? "SPRINT" : "NITRO", nitro, setNitro, "nitro", "#2bf0ff", "h-16 w-16",
-            !onFoot ? (
+          {btn(onFoot ? "SPRINT" : flying ? "RUNTER" : "NITRO", nitro, setNitro, "nitro", "#2bf0ff", "h-16 w-16",
+            !onFoot && !flying ? (
               <svg className="absolute inset-0 -rotate-90" viewBox="0 0 80 80">
                 <circle cx="40" cy="40" r="36" fill="none" stroke="#2bf0ff" strokeWidth="4" strokeDasharray={`${nitro01 * 226} 226`} opacity="0.9" />
               </svg>
