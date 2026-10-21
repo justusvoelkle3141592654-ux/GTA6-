@@ -40,6 +40,13 @@ export const MODEL_STATS: Record<CarModel, ModelStats> = {
   heli: { maxV: 480, acc: 380, grip: 2, hp: 200, mass: 1.5, price: 12000 },
 };
 
+// half length / half width of each model (collision boxes match the drawn models)
+export const MODEL_DIM: Record<CarModel, { hl: number; hw: number }> = {
+  sport: { hl: 24, hw: 12 }, super: { hl: 25, hw: 12.5 }, muscle: { hl: 25, hw: 12.5 }, suv: { hl: 25, hw: 13 }, sedan: { hl: 24, hw: 12 },
+  van: { hl: 26, hw: 12.5 }, police: { hl: 25, hw: 12.5 }, taxi: { hl: 24, hw: 12 }, bike: { hl: 17, hw: 4.5 }, truck: { hl: 33, hw: 13.5 },
+  bus: { hl: 41, hw: 14 }, swat: { hl: 27, hw: 13 }, armor: { hl: 31, hw: 14.5 }, boat: { hl: 28, hw: 11 }, heli: { hl: 30, hw: 12 },
+};
+
 export type CarKind = "player" | "cop" | "civ";
 export type FactionId = "halcones" | "kings";
 
@@ -63,6 +70,9 @@ export class Car {
   flat = false;   // tyres burst by a spike strip (slow and slippery until repaired)
   wetT = 0;       // seconds a car has been in the water (it sinks)
   rotor = 0;      // helicopter rotor angle
+  onRamp = -1;    // ramp the car drives on (entered over its low edge), -1: none
+  croad = -1; cp = 0; cdir = 1; // highway traffic: road id, point index, direction (1 away from the city)
+  route2: Float32Array | null = null; routeN = 0; routeT = 0; // police: street route to the target
   dead = false; deadT = 0; wrecked = false; wreckT = 0; parked = false;
   throttle = 0; steer = 0; handbrake = false; nitro = false;
   wpI = 0; wpJ = 0; prevI = -1; prevJ = -1; hasWp = false;
@@ -71,4 +81,6 @@ export class Car {
   siren = Math.random() * 10; cruise = 170; smokeT = 0; shootT = 0;
   constructor(public kind: CarKind, public model: CarModel, public color: string) {}
   get speed() { return Math.hypot(this.vx, this.vy); }
+  get hl() { return MODEL_DIM[this.model].hl; }
+  get hw() { return MODEL_DIM[this.model].hw; }
 }

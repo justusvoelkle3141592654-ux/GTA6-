@@ -52,14 +52,15 @@ export class Craft {
     const wet = isWater(c.x, c.y);
     const ca = Math.cos(c.a), sa = Math.sin(c.a);
     let vF = c.vx * ca + c.vy * sa, vR = -c.vx * sa + c.vy * ca;
-    const t = wet ? c.throttle : c.throttle * 0.35; // beached: you can only wiggle back into the water
+    // on land a boat has no drive: it runs aground and stops (push it back into the water on foot)
+    const t = wet ? c.throttle : 0;
     if (t > 0 && vF < maxV) vF += acc * t * dt;
     else if (t < 0) vF += (vF > 0 ? -700 : -acc * 0.45) * -t * dt;
-    vF -= vF * (wet ? 0.35 : 4) * dt;
+    vF -= vF * (wet ? 0.35 : 9) * dt;
     if (vF < -maxV * 0.35) vF = -maxV * 0.35;
-    vR *= Math.exp(-(c.handbrake ? 0.7 : wet ? 2.4 : 6) * dt);
+    vR *= Math.exp(-(c.handbrake ? 0.7 : wet ? 2.4 : 12) * dt);
     const sp = Math.abs(vF), dir = vF >= -5 ? 1 : -1;
-    c.av += (c.steer * 2.1 * Math.max(0.35, Math.min(1, sp / 140)) * dir * (c.handbrake ? 1.4 : 1) - c.av) * Math.min(1, dt * 6); // turns slowly even when almost standing
+    c.av += ((wet ? c.steer : 0) * 2.1 * Math.max(0.35, Math.min(1, sp / 140)) * dir * (c.handbrake ? 1.4 : 1) - c.av) * Math.min(1, dt * 6); // turns slowly even when almost standing
     c.a += c.av * dt;
     c.vx = ca * vF - sa * vR; c.vy = sa * vF + ca * vR;
     c.x += c.vx * dt; c.y += c.vy * dt;
@@ -68,7 +69,7 @@ export class Craft {
     c.z += (z - c.z) * Math.min(1, dt * 6);
     c.air = false; c.vz = 0;
     // wake behind the boat
-    if (wet && sp > 90 && Math.random() < 0.7) g.spray(c.x - ca * 26, c.y - sa * 26, WATER_Y + 1, -ca * sp * 0.2, -sa * sp * 0.2);
+    if (wet && sp > 90 && Math.random() < 42 * dt) g.spray(c.x - ca * 26, c.y - sa * 26, WATER_Y + 1, -ca * sp * 0.2, -sa * sp * 0.2);
   }
 
   // police boat: straight at you
@@ -144,7 +145,7 @@ export class Craft {
     if (c.air || c.dead || !isWater(c.x, c.y)) { c.wetT = 0; return false; }
     c.wetT += dt;
     c.vx *= Math.exp(-3 * dt); c.vy *= Math.exp(-3 * dt);
-    if (Math.random() < 0.5) this.g.spray(c.x + rnd(-14, 14), c.y + rnd(-14, 14), WATER_Y + 1, rnd(-30, 30), rnd(-30, 30));
+    if (Math.random() < 30 * dt) this.g.spray(c.x + rnd(-14, 14), c.y + rnd(-14, 14), WATER_Y + 1, rnd(-30, 30), rnd(-30, 30));
     if (c.wetT < SINK_TIME) return false;
     c.dead = true; c.wrecked = true; c.hp = 0; c.parked = true; c.driver = false;
     return true;

@@ -23,6 +23,8 @@ export interface Progress {
 }
 export interface SaveData {
   v: typeof SAVE_VERSION;
+  legacy?: boolean;
+  map?: number;        // 2: the big map of Solara Bay 2.0    // written by an older version for the old, smaller map: positions are moved to the nearest street
   savedAt: number;
   difficulty: SaveDifficulty;
   onFoot: boolean;
@@ -149,7 +151,7 @@ function validate(d: unknown): SaveData | null {
   const garage: OwnedCar[] = [];
   if (Array.isArray(d.garage)) for (const c of d.garage) { const o = carOf(c, false); if (o) garage.push({ model: o.model, color: o.color, hp: o.hp, maxHp: o.maxHp, mass: o.mass, tune: o.tune }); }
   return {
-    v: SAVE_VERSION, savedAt: d.savedAt, difficulty: d.difficulty, onFoot: d.onFoot,
+    v: SAVE_VERSION, legacy: d.v !== SAVE_VERSION || d.map !== 2, savedAt: d.savedAt, difficulty: d.difficulty, onFoot: d.onFoot,
     ped: { x: p.x, y: p.y, a: p.a, hp: p.hp, armor: clampN(p.armor, 0, 100, 0) }, car,
     // before version 3 "no car + cars in the garage" meant: parked in the garage
     carStored: !car && (typeof d.carStored === "boolean" ? d.carStored : garage.length > 0),

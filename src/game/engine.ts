@@ -1,5 +1,5 @@
 import { sfx } from "./audio";
-import { World, MAP_MIN, MAP_MAX, WATER_Y, inCity, isWater, terrainH, terrainGrad, roofOf, type Building } from "./world";
+import { World, MAP_MIN, MAP_MAX, WATER_Y, EDGE_LAND, SOFT_EDGE, TUNNEL, ROAD, inCity, isWater, isEdgeSea, edgeDist, terrainH, terrainGrad, tunnelAt, roofOf, type Building } from "./world";
 import { Renderer3D } from "./renderer3d";
 import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, CRIMES, type Crime } from "./wanted";
@@ -93,9 +93,9 @@ interface Callbacks {
   onMapKey?: () => void; // M: open the big map (pause menu)
 }
 
-export interface Ped { x: number; y: number; z: number; a: number; vx: number; vy: number; hp: number; maxHp: number; armor: number; walk: number; moving: boolean; sprint: boolean; shootT: number; hitFlash: number; dead: boolean; swim: boolean; }
+export interface Ped { x: number; y: number; z: number; a: number; vx: number; vy: number; vz: number; air: boolean; fallFrom: number; hp: number; maxHp: number; armor: number; walk: number; moving: boolean; sprint: boolean; shootT: number; hitFlash: number; dead: boolean; swim: boolean; stamina: number; }
 export const MAX_ARMOR = 100;
-export const newPed = (x: number, y: number, a = 0): Ped => ({ x, y, z: terrainH(x, y), a, vx: 0, vy: 0, hp: 100, maxHp: 100, armor: 0, walk: 0, moving: false, sprint: false, shootT: 0, hitFlash: 0, dead: false, swim: false });
+export const newPed = (x: number, y: number, a = 0): Ped => ({ x, y, z: terrainH(x, y), a, vx: 0, vy: 0, vz: 0, air: false, fallFrom: 0, hp: 100, maxHp: 100, armor: 0, walk: 0, moving: false, sprint: false, shootT: 0, hitFlash: 0, dead: false, swim: false, stamina: 1 });
 // team: who fired (enemy bullets of the police and the gangs also hit each other); src: ped that fired (-1: none)
 export interface Proj { kind: "bullet" | "rocket" | "bomb" | "grenade"; from: "player" | "enemy"; team: Team; src: number; dmg: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; a: number; life: number; px: number; py: number; }
 export interface Bomb { car: Car | null; ox: number; oy: number; x: number; y: number; z: number; t: number; }
@@ -114,9 +114,16 @@ export const wrap = (a: number) => { while (a > Math.PI) a -= TAU; while (a < -M
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 
+export const STEP = 1 / 120;     // fixed physics step
+const SWIM_DRAIN = 1 / 95, SWIM_REGEN = 1 / 15; // swimming stamina per second
+const RAMP_CONE = (35 * Math.PI) / 180;      // a ramp is entered only within this angle of its direction
+// a random event that happens about p times per 1/60 s, independent of the step size
+const P60 = (p: number, dt: number) => Math.random() < p * dt * 60;
+// a thing the auto aim can lock onto (cars and people that attack you)
+export interface AimTarget { x: number; y: number; z: number; vx: number; vy: number; car: Car | null; ped: Civilian | null; }
+
 const DIGITS = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8"];
 const MAX_PARTICLES = 560;
-const PAIR_R = 13; // half width of a car for the side-by-side test
 export const MAX_SKIDS = 900;
 
 export class Game {
@@ -171,6 +178,7 @@ export class Game {
   stats: SaveStats = emptyStats();
   progress: Progress = emptyProgress();
   private autosaveT = AUTOSAVE_EVERY;
+  private acc = 0;
   private raf = 0; private last = 0; private hudT = 0; private tmpB: Building[] = [];
 
   constructor(glCanvas: HTMLCanvasElement, overlay: HTMLCanvasElement, cb: Callbacks, config: GameConfig) {
@@ -302,9 +310,9 @@ export class Game {
     const d = this.carDef;
     const p = new Car("player", d.model, d.color);
     p.hp = p.maxHp = d.hp; p.mass = d.mass;
-    const n = this.world.nodePos(5, 5);
+    const n = this.world.nodePos(8, 7);
     p.x = n.x + 10; p.y = n.y + 34; p.a = 0;
-    p.wpI = 6; p.wpJ = 5; p.prevI = 5; p.prevJ = 5;
+    p.wpI = 9; p.wpJ = 7; p.prevI = 8; p.prevJ = 7;
     this.player = p;
     this.cars.push(p);
     this.onFoot = false;
@@ -371,12 +379,14 @@ export class Game {
     this.time = sv.stats.playTime;
     const pd = this.ped;
     pd.x = sv.ped.x; pd.y = sv.ped.y; pd.z = terrainH(pd.x, pd.y); pd.a = sv.ped.a; pd.hp = Math.min(pd.maxHp, Math.max(1, sv.ped.hp));
+    if (sv.legacy) { const q = this.world.nearestSafeRoad(pd.x, pd.y); pd.x = q.x; pd.y = q.y; pd.a = q.a; pd.z = terrainH(q.x, q.y); }
     pd.armor = Math.min(MAX_ARMOR, sv.ped.armor);
     if (sv.car) {
       const c = sv.car;
       p.model = c.model; p.color = c.color; p.maxHp = c.maxHp; p.hp = Math.min(c.maxHp, Math.max(1, c.hp)); p.mass = c.mass;
       p.tune = { ...c.tune };
       p.x = c.x; p.y = c.y; p.a = c.a;
+      if (sv.legacy) { const q = this.world.nearestSafeRoad(c.x, c.y); p.x = q.x; p.y = q.y; p.a = q.a; }
     } else if (sv.carStored) {
       // the car is in the garage: walk
       this.cars.splice(this.cars.indexOf(p), 1);
@@ -411,7 +421,7 @@ export class Game {
     this.stats.playTime = this.time;
     this.stats.maxStars = Math.max(this.stats.maxStars, this.wanted.maxStars);
     const d: SaveData = {
-      v: SAVE_VERSION, savedAt: Date.now(), difficulty: this.config.difficulty,
+      v: SAVE_VERSION, map: 2, savedAt: Date.now(), difficulty: this.config.difficulty,
       onFoot: this.onFoot, ped: { x: pd.x, y: pd.y, a: pd.a, hp: pd.hp, armor: pd.armor },
       car: p.dead || this.playerCarStored ? null : { model: p.model, color: p.color, hp: p.hp, maxHp: p.maxHp, mass: p.mass, x: p.x, y: p.y, a: p.a, tune: { ...p.tune } },
       cash: this.cash, bank: this.bank, carStored: this.playerCarStored, inventory: this.inv.save(), outfit: this.outfit,
@@ -515,7 +525,7 @@ export class Game {
   }
 
   private damagePlayerCar(amt: number) {
-    if (this.state !== "playing" || this.ending || amt <= 0) return;
+    if (this.state !== "playing" || this.ending || amt <= 0 || this.fall) return; // going over the cliffs never hurts
     const p = this.player;
     if (p.dead) return;
     p.hitFlash = 0.15;
@@ -532,7 +542,7 @@ export class Game {
   }
 
   private damagePed(amt: number) {
-    if (this.state !== "playing" || this.ending || amt <= 0 || !this.onFoot) return;
+    if (this.state !== "playing" || this.ending || amt <= 0 || !this.onFoot || this.fall) return;
     const pd = this.ped;
     pd.hitFlash = 0.3;
     if (!this.rules.damage) return;
@@ -685,7 +695,7 @@ export class Game {
     this.copSpawnT = this.diff.firstCop;
     const p = this.player;
     p.throttle = 0; p.steer = 0; p.nitro = false; p.handbrake = true;
-    const n = this.world.nodePos(5, 5);
+    const n = this.world.nodePos(8, 7);
     const x = place ? place.x : n.x, y = place ? place.y : n.y;
     this.ped = newPed(x, y, place ? place.a : 0);
     this.onFoot = true;
@@ -700,19 +710,38 @@ export class Game {
   cycleWeapon(dir = 1) { this.inv.cycle(dir); sfx.beep(); }
   reload() { if (this.inv.startReload()) sfx.reload(); }
 
-  private findTarget(originX: number, originY: number, facing: number, cone: number) {
-    let best: Car | null = null, bd = Infinity;
+  // auto aim: everything that attacks you (police with a wanted level, angry gangs, mission targets), cars and people
+  private aim: AimTarget = { x: 0, y: 0, z: 0, vx: 0, vy: 0, car: null, ped: null };
+  private findTarget(originX: number, originY: number, facing: number, cone: number): AimTarget | null {
+    let bestCar: Car | null = null, bestPed: Civilian | null = null, bd = Infinity;
+    const score = (x: number, y: number, max: number) => {
+      const d = Math.hypot(x - originX, y - originY);
+      if (d > max) return Infinity;
+      const da = Math.abs(wrap(Math.atan2(y - originY, x - originX) - facing));
+      if (da > cone) return Infinity;
+      return d * (1 + da); // closer and more in front wins
+    };
     for (const c of this.cars) {
-      if (c.dead || c === this.player || (c.kind === "civ" && c.parked)) continue;
-      if (c.kind !== "cop" && this.rules.cops) continue;
-      const d = Math.hypot(c.x - originX, c.y - originY);
-      if (d > 700 || d >= bd) continue;
-      const da = Math.abs(wrap(Math.atan2(c.y - originY, c.x - originX) - facing));
-      if (da > cone) continue;
-      if (!this.world.lineClear(originX, originY, c.x, c.y, 50)) continue;
-      best = c; bd = d;
+      if (c.dead || c === this.player || (c.kind === "civ" && c.parked && !c.tag)) continue;
+      const enemy = !this.rules.cops ? c.kind !== "player" // arcade: anything
+        : (c.kind === "cop" && !c.calm) || (!!c.faction && (c.hunt || this.gangs.hostile(c.faction))) || c.tag === "target" || c.flee;
+      if (!enemy) continue;
+      const sc = score(c.x, c.y, 700);
+      if (sc >= bd || !this.world.lineClear(originX, originY, c.x, c.y, 50)) continue;
+      bestCar = c; bestPed = null; bd = sc;
     }
-    return best;
+    if (this.rules.city) for (const p of this.peds.list) {
+      if (!p.active || p.state === "down") continue;
+      const enemy = (p.state === "attack" && p.target < 0) || p.tag === "target" || p.tag === "suspect";
+      if (!enemy) continue;
+      const sc = score(p.x, p.y, 500);
+      if (sc >= bd || !this.world.lineClear(originX, originY, p.x, p.y, 40)) continue;
+      bestPed = p; bestCar = null; bd = sc;
+    }
+    const t = this.aim;
+    if (bestCar) { t.x = bestCar.x; t.y = bestCar.y; t.z = bestCar.z; t.vx = bestCar.vx; t.vy = bestCar.vy; t.car = bestCar; t.ped = null; return t; }
+    if (bestPed) { t.x = bestPed.x; t.y = bestPed.y; t.z = bestPed.z - 4; t.vx = bestPed.vx; t.vy = bestPed.vy; t.car = null; t.ped = bestPed; return t; }
+    return null;
   }
 
   private fire() {
@@ -1129,10 +1158,13 @@ export class Game {
     if (this.state === "playing" || this.state === "menu") {
       if (this.hitStop > 0) this.hitStop -= dt;
       else {
-        const sdt = dt * this.timeScale;
-        const steps = sdt > 1 / 70 ? 2 : 1;
-        for (let i = 0; i < steps; i++) this.update(sdt / steps);
+        // fixed physics step with an accumulator (no tunnelling at high speed, same result at any frame rate)
+        this.acc += dt * this.timeScale;
+        let n = 0;
+        while (this.acc >= STEP && n < 10) { this.update(STEP); this.acc -= STEP; n++; }
+        if (n >= 10) this.acc = 0;
       }
+      this.updateFall(dt);
       this.updateFx(dt);
     } else if (this.state === "over" || this.state === "modal") this.updateFx(dt);
     this.r3d.render(this, dt);
@@ -1198,7 +1230,7 @@ export class Game {
     this.routeT -= dt;
     if (this.routeT > 0) return;
     this.routeT = 0.4;
-    this.routeN = goal ? findRoute(this.fx, this.fy, goal.x, goal.y, this.route) : 0;
+    this.routeN = goal ? findRoute(this.world.roads, this.fx, this.fy, goal.x, goal.y, this.route) : 0;
   }
 
   hintMsg(h: string) { this.setHint(h, 2.4); }
@@ -1275,34 +1307,53 @@ export class Game {
   private updatePed(dt: number) {
     const pd = this.ped;
     const w = this.world;
+    if (this.fall?.fade) return;
     const nx = pd.x + pd.vx * dt, ny = pd.y + pd.vy * dt;
     if (!this.pedBlocked(nx, pd.y)) pd.x = nx; else pd.vx = 0;
     if (!this.pedBlocked(pd.x, ny)) pd.y = ny; else pd.vy = 0;
-    pd.x = clamp(pd.x, MAP_MIN + 10, MAP_MAX - 10); pd.y = clamp(pd.y, MAP_MIN + 10, MAP_MAX - 10);
     const jetty = onJetty(pd.x, pd.y);
-    pd.swim = !jetty && isWater(pd.x, pd.y);
-    // swimming: head above the water; on a roof (after landing the helicopter there) you stay up until you walk off
-    const roof = pd.z > 30 ? w.roofAt(pd.x, pd.y) : -Infinity;
-    const z = pd.swim ? WATER_Y - 13 : jetty ? 2.5 : Math.max(terrainH(pd.x, pd.y), roof);
-    if (pd.z - z > 80) this.damagePed((pd.z - z - 80) * 0.25); // jumped off a roof
-    pd.z = z;
+    const wet = !jetty && isWater(pd.x, pd.y);
+    // ground: water surface, jetty, bridge deck / tunnel floor / terrain, roofs (only the one you stand on), ramps
+    let ground = wet ? WATER_Y - 13 : jetty ? 2.5 : this.groundH(pd.x, pd.y, pd.z + 4);
+    if (!wet) ground = Math.max(ground, w.rampH(pd.x, pd.y));
+    if (pd.air) {
+      pd.vz -= GRAV * dt; pd.z += pd.vz * dt;
+      if (pd.z <= ground) {
+        const drop = pd.fallFrom - ground;
+        pd.air = false; pd.z = ground; pd.vz = 0;
+        if (!wet && drop > 80) this.damagePed((drop - 80) * 0.25); // jumped off a roof
+        if (wet) this.spray(pd.x, pd.y, WATER_Y + 1, 0, 0);
+      }
+    } else if (ground < pd.z - 30) { pd.air = true; pd.vz = 0; pd.fallFrom = pd.z; } // stepped off an edge
+    else pd.z = ground;
+    pd.swim = wet && !pd.air;
+    // swimming tires you out: when the stamina is gone you are pulled to the shore (no damage)
+    if (pd.swim) {
+      pd.stamina = Math.max(0, pd.stamina - dt * SWIM_DRAIN * (pd.sprint ? 2 : 1));
+      if (pd.stamina <= 0 && !this.fall) { this.startFall(false); this.setHint("Keine Kraft mehr – du wirst ans Ufer gebracht", 2.5); }
+    } else pd.stamina = Math.min(1, pd.stamina + dt * SWIM_REGEN);
     pd.walk += dt * Math.hypot(pd.vx, pd.vy) * 0.05;
     pd.shootT = Math.max(0, pd.shootT - dt);
     pd.hitFlash = Math.max(0, pd.hitFlash - dt);
-    // cars vs ped
+    // cars vs ped (boxes in the real size of each model)
     for (const c of this.cars) {
-      const dx = pd.x - c.x, dy = pd.y - c.y;
-      if (dx * dx + dy * dy > 40 * 40) continue;
+      const dx = pd.x - c.x, dy = pd.y - c.y, R = c.hl + 10;
+      if (dx * dx + dy * dy > R * R || Math.abs(c.z - pd.z) > 25) continue;
       const ca = Math.cos(c.a), sa = Math.sin(c.a);
       const lx = dx * ca + dy * sa, ly = -dx * sa + dy * ca;
-      const cx = clamp(lx, -25, 25), cy = clamp(ly, -13, 13);
+      const cx = clamp(lx, -c.hl, c.hl), cy = clamp(ly, -c.hw, c.hw);
       let ex = lx - cx, ey = ly - cy;
       let d = Math.hypot(ex, ey);
       if (d > 9) continue;
-      if (d < 0.01) { ex = ly >= 0 ? 0 : 0; ey = ly >= 0 ? 1 : -1; d = 1; }
+      if (d < 0.01) { ex = 0; ey = ly >= 0 ? 1 : -1; d = 1; }
       const nxl = ex / d, nyl = ey / d;
       const wnx = nxl * ca - nyl * sa, wny = nxl * sa + nyl * ca;
       const push = 9 - d;
+      // a stranded boat close to the water can be pushed back in
+      if (c.model === "boat" && !isWater(c.x, c.y) && (isWater(c.x - wnx * 60, c.y - wny * 60) || isWater(c.x - wnx * 30, c.y - wny * 30))) {
+        c.x -= wnx * push * 0.7; c.y -= wny * push * 0.7; pd.x += wnx * push * 0.3; pd.y += wny * push * 0.3;
+        continue;
+      }
       pd.x += wnx * push; pd.y += wny * push;
       const vrel = (c.vx - pd.vx) * wnx + (c.vy - pd.vy) * wny;
       if (vrel > 90 && pd.hitFlash <= 0) {
@@ -1313,6 +1364,69 @@ export class Game {
         if (c.kind === "cop" && !c.calm && this.rules.cops) this.bust = Math.min(1, this.bust + 0.15);
       } else if (vrel > 0) { pd.vx += wnx * vrel; pd.vy += wny * vrel; }
     }
+  }
+
+  // ---------- the world border: a cliff into the deep sea (no damage), a soft border on the water and in the air ----------
+  fall: { t: number; x: number; y: number; car: boolean; hp: number; fade: boolean; fadeT: number; cam: boolean } | null = null;
+  fade = 0; // black overlay 0..1
+  private startFall(cam: boolean) {
+    const car = !this.onFoot;
+    this.fall = { t: 0, x: this.fx, y: this.fy, car, hp: car ? this.player.hp : this.ped.hp, fade: !cam, fadeT: 0, cam };
+    if (cam) { this.timeScale = 0.35; this.slowT = 1; this.r3d.fallCam = true; }
+  }
+  // per step: does the player go over the edge, hit the deep sea, drift out too far?
+  private checkBorder(dt: number) {
+    if (this.fall || this.ending) return;
+    const fx = this.fx, fy = this.fy, e = edgeDist(fx, fy);
+    const p = this.player;
+    const craft = !this.onFoot && (p.model === "boat" || p.model === "heli");
+    if (!craft && e < EDGE_LAND + 600 && terrainH(fx, fy) < WATER_Y - 30 && this.fz > WATER_Y + 4 && (this.onFoot ? this.ped.air : p.air)) { this.startFall(true); return; }
+    if (!craft && isEdgeSea(fx, fy) && this.fz <= WATER_Y + 2) { this.startFall(false); return; }
+    // soft border: current on the water, head wind in the air
+    const zone = SOFT_EDGE + 500;
+    if (e < zone && (craft || (this.onFoot && this.ped.swim))) {
+      const k = (1 - Math.max(0, e) / zone) * 900 * dt;
+      const m = Math.min(fx - MAP_MIN, MAP_MAX - fx, fy - MAP_MIN, MAP_MAX - fy);
+      const nx = m === fx - MAP_MIN ? 1 : m === MAP_MAX - fx ? -1 : 0, ny = nx ? 0 : m === fy - MAP_MIN ? 1 : -1;
+      if (this.onFoot) { this.ped.vx += nx * k; this.ped.vy += ny * k; }
+      else {
+        p.vx += nx * k; p.vy += ny * k;
+        if (p.model === "heli") p.av += wrap(Math.atan2(ny, nx) - p.a) * dt * 0.8; // the wind turns it back
+      }
+      if (this.hintT <= 0) this.setHint(p.model === "heli" && !this.onFoot ? "Starker Gegenwind – hier ist die Welt zu Ende" : "Hier ist die Bucht zu Ende – die Strömung treibt dich zurück", 2);
+    }
+  }
+  // per frame (real time): slow motion, fade, then back on a safe street
+  private updateFall(dt: number) {
+    const f = this.fall;
+    if (!f) { this.fade = Math.max(0, this.fade - dt * 2.5); return; }
+    f.t += dt;
+    if (!f.fade) {
+      // falling: wait for the splash (or 2.5 s at most)
+      const wet = this.fz <= WATER_Y + 2 && isWater(this.fx, this.fy);
+      if (wet || f.t > 2.5) { f.fade = true; f.fadeT = 0; if (wet) for (let i = 0; i < 12; i++) this.spray(this.fx, this.fy, WATER_Y + 1, rnd(-80, 80), rnd(-80, 80)); }
+      return;
+    }
+    f.fadeT += dt;
+    if (!this.onFoot) { const p = this.player; p.vx = 0; p.vy = 0; p.vz = 0; }
+    else { this.ped.vx = 0; this.ped.vy = 0; this.ped.vz = 0; }
+    this.fade = Math.min(1, f.fadeT / 0.5);
+    if (f.fadeT < 0.55) return;
+    // back on land: the nearest safe street, same vehicle in the same state
+    const pt = this.world.nearestSafeRoad(f.x, f.y);
+    if (f.car && !this.onFoot) {
+      const p = this.player;
+      p.x = pt.x; p.y = pt.y; p.a = pt.a; p.vx = 0; p.vy = 0; p.vz = 0; p.av = 0; p.air = false; p.onRamp = -1; p.wetT = 0;
+      p.z = this.groundH(p.x, p.y, 0); p.hp = Math.max(p.hp, f.hp); p.dead = false;
+    } else {
+      const pd = this.ped;
+      pd.x = pt.x; pd.y = pt.y; pd.a = pt.a; pd.vx = 0; pd.vy = 0; pd.vz = 0; pd.air = false; pd.swim = false; pd.stamina = 1;
+      pd.z = this.groundH(pd.x, pd.y, 0); pd.hp = Math.max(pd.hp, f.hp); pd.dead = false;
+    }
+    this.r3d.fallCam = false; this.r3d.resetCamera(this.fa);
+    this.timeScale = 1; this.slowT = 0;
+    this.fall = null;
+    this.setHint("Zurück an Land – nichts passiert", 2.2);
   }
 
   private update(dt: number) {
@@ -1367,7 +1481,7 @@ export class Game {
           const acc = (p.nitro ? st.acc + 500 : st.acc) * tuneAcc(t);
           const g2 = (grass ? grip * 0.5 : grip) * (p.flat ? 0.45 : 1);
           this.drive(c, dt, acc, grass ? maxV * 0.8 : maxV, g2, 1.7);
-          if (p.flat && p.speed > 120 && Math.random() < 0.3) this.sparks(p.x - Math.cos(p.a) * 14, p.y - Math.sin(p.a) * 14, p.z + 2, 1, -p.vx, -p.vy, 0.4);
+          if (p.flat && p.speed > 120 && P60(0.3, dt)) this.sparks(p.x - Math.cos(p.a) * 14, p.y - Math.sin(p.a) * 14, p.z + 2, 1, -p.vx, -p.vy, 0.4);
         } else this.drive(c, dt, 300, c.cruise + 20, 12, 3);
       } else if (c.dead || (c.kind === "civ" && c.wrecked && !c.parked)) this.wreckPhysics(c, dt);
       else if (c.kind === "cop") {
@@ -1376,11 +1490,13 @@ export class Game {
       } else if (c.hunt) this.drive(c, dt, 520, 480, 10, 3);
       else this.drive(c, dt, 300, c.cruise + 20, 12, 3);
       this.collideWorld(c);
-      // cars that drive into the bay sink
-      if (this.rules.city && this.craft.sink(c, dt)) this.onSunk(c);
+      // cars that drive into the bay sink (going over the cliffs at the border is handled by checkBorder)
+      if (this.rules.city && !(c === p && this.fall) && this.craft.sink(c, dt)) this.onSunk(c);
     }
     this.collideCars();
     if (this.onFoot && playing) this.updatePed(dt);
+    if (playing && this.rules.city) this.checkBorder(dt);
+    this.traffic.lights.update(dt);
     if (playing && this.rules.city) { this.peds.update(dt, this); this.traffic.updateParking(this, dt, this.parkedLimit); }
     if (playing) this.updateProjs(dt);
     if (playing && !this.ending) {
@@ -1405,12 +1521,12 @@ export class Game {
       const c = this.cars[i];
       if (c === p) continue;
       const d = Math.hypot(c.x - this.fx, c.y - this.fy);
-      const remove = c.keep && !c.dead ? false : d > 1900 || (c.wrecked && c.wreckT > 9 && d > 500) || (c.wrecked && c.wreckT > 20 && !c.parked);
+      const remove = isEdgeSea(c.x, c.y) && c.z < WATER_Y + 4 ? true : c.keep && !c.dead ? false : d > 1900 || (c.wrecked && c.wreckT > 9 && d > 500) || (c.wrecked && c.wreckT > 20 && !c.parked);
       if (remove) { this.cars.splice(i, 1); continue; }
       if (c.kind === "civ" && !c.wrecked && !c.parked) civs++;
       if (c.kind === "cop" && !c.dead) cops++;
     }
-    if (civs < civTarget && Math.random() < 0.1 && inCity(this.fx, this.fy)) this.traffic.spawnCiv(this);
+    if (civs < civTarget && P60(0.1, dt)) this.traffic.spawnCiv(this);
 
     if (!playing) return;
 
@@ -1561,13 +1677,13 @@ export class Game {
       c.x += c.vx * dt; c.y += c.vy * dt; c.z += c.vz * dt;
       c.av *= Math.exp(-1.5 * dt);
       c.a += c.av * dt;
-      const gh = this.groundH(c.x, c.y);
+      const gh = this.carGround(c);
       if (c.z <= gh) { this.land(c, gh); }
       const ca = Math.cos(c.a), sa = Math.sin(c.a);
       c.vF = c.vx * ca + c.vy * sa; c.vR = -c.vx * sa + c.vy * ca;
       return;
     }
-    if (!inCity(c.x, c.y)) {
+    if (!inCity(c.x, c.y) && c.onRamp < 0 && Math.abs(c.z - terrainH(c.x, c.y)) < 3) { // rolls down hills (not on bridges, in the tunnel or on ramps)
       const g = terrainGrad(c.x, c.y);
       c.vx -= 520 * g.x * dt; c.vy -= 520 * g.y * dt;
     }
@@ -1596,19 +1712,158 @@ export class Game {
   }
 
   private followTerrain(c: Car, dt: number) {
-    const gh = this.groundH(c.x, c.y);
+    const gh = this.carGround(c);
     const zFall = c.z + c.vz * dt - 0.5 * GRAV * dt * dt;
-    // leave the ground when launched off a ramp or hill crest, or when driving off a roof edge
+    // leave the ground when launched off a ramp or hill crest, or when driving off a roof edge or a cliff
     if ((zFall > gh + 1.5 && c.vz > 40 && c.speed > 120) || c.z - gh > 25) { c.air = true; c.airT = 0; c.z = zFall; }
-    else { c.vz = clamp((gh - c.z) / dt, -900, 900); c.z = gh; }
+    else {
+      // following the road never makes the car shoot up faster than the slope allows
+      const maxUp = c.speed * 0.47 + 60;
+      c.vz = clamp((gh - c.z) / dt, -900, maxUp); c.z = gh;
+    }
   }
 
-  // ground height under a car: terrain (the sea floor in the bay), ramps and building roofs
-  private groundH(x: number, y: number): number {
-    const w = this.world, r = w.rampH(x, y);
-    return Math.max(terrainH(x, y), r > 0 ? r : -Infinity, w.roofAt(x, y));
+  // ground under a car: terrain (the sea floor in the bay), bridge decks, the tunnel floor, roofs and the ramp it drives on
+  carGround(c: Car): number {
+    const g = this.groundH(c.x, c.y, c.z);
+    const r = this.rampGround(c);
+    return r > g ? r : g;
+  }
+  // ground under (x, y) for something at height z (z = Infinity: the highest surface)
+  groundH(x: number, y: number, z = Infinity): number {
+    const w = this.world, t = terrainH(x, y);
+    let g = w.roads.surface(x, y, z, t);
+    const roof = w.roofAt(x, y);
+    if (roof > g && z >= roof - 25) g = roof;
+    return g;
   }
   groundAt(x: number, y: number) { return Math.max(this.groundH(x, y), WATER_Y); } // for the helicopter: the water surface counts
+
+  // ramps: the surface only counts for a car that drove on over the low edge (or came down on it from above)
+  private rampGround(c: Car): number {
+    const w = this.world;
+    if (c.onRamp >= 0) {
+      const rp = w.ramps[c.onRamp], q = w.rampLocal(rp, c.x, c.y);
+      if (q.s >= -8 && q.s <= rp.l && q.v >= -6 && q.v <= rp.w + 6) return rp.base + rp.h * clamp(q.s / rp.l, 0, 1);
+      if (q.s > rp.l && c.kind === "player") this.jumpStart = { x: c.x, y: c.y, ramp: c.onRamp }; // launched over the lip
+      c.onRamp = -1; // over the lip, back off the low end or off a side
+      return -Infinity;
+    }
+    const ids = w.rampsAt(c.x, c.y);
+    if (!ids) return -Infinity;
+    for (const i of ids) {
+      const rp = w.ramps[i], q = w.rampLocal(rp, c.x, c.y);
+      if (q.s < -4 || q.s > rp.l || q.v < 0 || q.v > rp.w) continue;
+      const surf = rp.base + rp.h * clamp(q.s / rp.l, 0, 1);
+      const moveA = c.speed > 30 ? Math.atan2(c.vy, c.vx) : c.a;
+      const front = q.s < 30 && Math.abs(wrap(moveA - w.rampDir(rp))) < RAMP_CONE;
+      if (front || c.z >= surf - 3) { c.onRamp = i; return surf; }
+    }
+    return -Infinity;
+  }
+
+  private wreckPhysics(c: Car, dt: number) {
+    const f = Math.exp(-2.4 * dt);
+    c.vx *= f; c.vy *= f;
+    c.av *= Math.exp(-2.5 * dt);
+    c.a += c.av * dt;
+    c.x += c.vx * dt; c.y += c.vy * dt;
+    const ca = Math.cos(c.a), sa = Math.sin(c.a);
+    c.vF = c.vx * ca + c.vy * sa; c.vR = -c.vx * sa + c.vy * ca;
+    const gh = this.carGround(c);
+    if (c.air || c.z - gh > 25) { c.air = true; c.vz -= GRAV * dt; c.z += c.vz * dt; if (c.z <= gh) { c.z = gh; c.air = false; c.vz = 0; } }
+    else c.z = gh;
+  }
+
+  // ---------- collision boxes ----------
+  // separating axis test of the car box against an axis-aligned rectangle: depth > 0 on overlap,
+  // hitN points from the rectangle to the car, hitP is the deepest car corner
+  private hitN = { x: 0, y: 0 }; private hitP = { x: 0, y: 0 };
+  private boxRect(c: Car, x0: number, y0: number, x1: number, y1: number): number {
+    const ca = Math.cos(c.a), sa = Math.sin(c.a), hl = c.hl, hw = c.hw;
+    const ex = Math.abs(ca) * hl + Math.abs(sa) * hw, ey = Math.abs(sa) * hl + Math.abs(ca) * hw;
+    const rx = (x0 + x1) / 2, ry = (y0 + y1) / 2, rw = (x1 - x0) / 2, rh = (y1 - y0) / 2;
+    const dx = c.x - rx, dy = c.y - ry;
+    let best = ex + rw - Math.abs(dx);
+    if (best <= 0) return 0;
+    let nx = Math.sign(dx) || 1, ny = 0;
+    const oy = ey + rh - Math.abs(dy);
+    if (oy <= 0) return 0;
+    if (oy < best) { best = oy; nx = 0; ny = Math.sign(dy) || 1; }
+    // the car's own axes
+    for (const [ux, uy, own] of [[ca, sa, hl], [-sa, ca, hw]] as const) {
+      const rr = rw * Math.abs(ux) + rh * Math.abs(uy), d = dx * ux + dy * uy;
+      const o = own + rr - Math.abs(d);
+      if (o <= 0) return 0;
+      if (o < best) { best = o; const sg = Math.sign(d) || 1; nx = ux * sg; ny = uy * sg; }
+    }
+    this.hitN.x = nx; this.hitN.y = ny;
+    const sf = ca * nx + sa * ny > 0 ? -1 : 1, sr = -sa * nx + ca * ny > 0 ? -1 : 1;
+    this.hitP.x = c.x + ca * hl * sf - sa * hw * sr; this.hitP.y = c.y + sa * hl * sf + ca * hw * sr;
+    return best;
+  }
+
+  private collideWorld(c: Car) {
+    let maxImpact = 0, hx = 0, hy = 0, hnx = 0, hny = 0;
+    const inertia = (c.hl * c.hl + c.hw * c.hw) / 3;
+    const resolve = (pen: number) => {
+      const nx = this.hitN.x, ny = this.hitN.y;
+      c.x += nx * pen; c.y += ny * pen;
+      const rx = this.hitP.x - c.x, ry = this.hitP.y - c.y;
+      const vcx = c.vx - c.av * ry, vcy = c.vy + c.av * rx; // velocity of the contact point
+      const vn = vcx * nx + vcy * ny;
+      if (vn >= 0) return;
+      const rn = rx * ny - ry * nx;
+      const j = (-1.3 * vn) / (1 + (rn * rn) / inertia);
+      c.vx += j * nx; c.vy += j * ny; c.vx *= 0.97; c.vy *= 0.97;
+      c.av = clamp(c.av + (j * rn) / inertia, -5, 5);
+      if (-vn > maxImpact) { maxImpact = -vn; hx = this.hitP.x; hy = this.hitP.y; hnx = nx; hny = ny; }
+    };
+    const w = this.world;
+    const bs = w.nearbyBuildings(c.x, c.y, this.tmpB); // buildings, containers, fences, rails
+    for (const b of bs) {
+      if (c.z >= roofOf(b) - 25) continue; // car is up on/above the roof: no wall
+      const pen = this.boxRect(c, b.x, b.y, b.x + b.w, b.y + b.h);
+      if (pen > 0) resolve(pen);
+    }
+    // ramps are walls from the sides and the back (the lowest part is left out so you can roll onto it)
+    const ids = w.rampsAt(c.x, c.y);
+    if (ids) for (const i of ids) {
+      const rp = w.ramps[i];
+      if (c.onRamp === i || c.z > rp.base + rp.h - 2) continue;
+      const cut = 26, lo = rp.rising > 0 ? cut : 0, hi = rp.rising > 0 ? 0 : cut;
+      const pen = rp.alongX ? this.boxRect(c, rp.x0 + lo, rp.y0, rp.x0 + rp.l - hi, rp.y0 + rp.w) : this.boxRect(c, rp.x0, rp.y0 + lo, rp.x0 + rp.w, rp.y0 + rp.l - hi);
+      if (pen > 0) resolve(pen);
+    }
+    // bridge rails on the deck, bridge piers below it
+    const br = w.roads.bridgeAt(c.x, c.y, 50);
+    if (br) {
+      const b = br.b;
+      if (c.z >= br.h - 16) {
+        for (const side of [-1, 1]) {
+          const v0 = side > 0 ? b.c + b.hw : b.c - b.hw - 5, v1 = v0 + 5;
+          const pen = b.alongX ? this.boxRect(c, b.s0, v0, b.s1, v1) : this.boxRect(c, v0, b.s0, v1, b.s1);
+          if (pen > 0) resolve(pen);
+        }
+      } else for (const s of b.piers) {
+        for (const off of [-42, 42]) {
+          const px = b.alongX ? s : b.c + off, py = b.alongX ? b.c + off : s;
+          const pen = this.boxRect(c, px - 8, py - 8, px + 8, py + 8);
+          if (pen > 0) resolve(pen);
+        }
+      }
+    }
+    // tunnel walls
+    if (Math.abs(c.x - TUNNEL.x) < TUNNEL.hw + 40 && c.y < TUNNEL.yA && c.y > TUNNEL.yB) {
+      const f = tunnelAt(TUNNEL.x, c.y);
+      if (!isNaN(f) && c.z < f + TUNNEL.clear) for (const side of [-1, 1]) {
+        const x0 = side > 0 ? TUNNEL.x + ROAD / 2 + 6 : TUNNEL.x - ROAD / 2 - 26;
+        const pen = this.boxRect(c, x0, c.y - 60, x0 + 20, c.y + 60);
+        if (pen > 0) resolve(pen);
+      }
+    }
+    if (maxImpact > 90) this.onWallHit(c, maxImpact, hx, hy, hnx, hny);
+  }
 
   // water spray / wake (boats, sinking cars)
   spray(x: number, y: number, z: number, vx: number, vy: number) { this.emit(x, y, z, vx + rnd(-25, 25), vy + rnd(-25, 25), rnd(30, 90), rnd(0.4, 0.8), rnd(4, 8), 18, "#e8f6ff", 0, 2.5); }
@@ -1628,10 +1883,24 @@ export class Game {
     this.banner("ABGESOFFEN", "Der Wagen ist im Wasser versunken – schwimm an Land", "#2bb3ff", 2.2);
   }
 
+  // the player's car left a ramp: remember where (jump distance, stunt jumps, records)
+  private jumpStart: { x: number; y: number; ramp: number } | null = null;
+
   private land(c: Car, gh: number) {
     const impact = -c.vz;
     c.z = gh; c.air = false;
-    if (c.kind === "player" && !this.onFoot && this.rules.city && this.state === "playing") this.jobs.landed(c.airT); // stunt jumps
+    if (c.kind === "player" && !this.onFoot && this.rules.city && this.state === "playing") {
+      const js = this.jumpStart;
+      this.jumpStart = null;
+      if (js && this.world.ramps[js.ramp]?.jump && c.airT > 0.3) {
+        const m = Math.hypot(c.x - js.x, c.y - js.y) * 0.1; // 10 units = 1 m
+        this.text(c.x, c.y - 30, `${m.toFixed(1).replace(".", ",")} m`, "#2bf0ff", 28);
+        const rec = this.progress.records;
+        if (m > (rec.jumpDist ?? 0)) { rec.jumpDist = Math.round(m * 10) / 10; if (m > 15) this.setHint(`Neuer Rekord: weitester Sprung ${m.toFixed(1).replace(".", ",")} m`, 2.5); }
+        if (c.airT > (rec.airTime ?? 0)) rec.airTime = Math.round(c.airT * 100) / 100;
+      }
+      this.jobs.landed(c.airT, js ? js.ramp : -1); // stunt jumps
+    }
     if (impact > 180) {
       const g = terrainGrad(c.x, c.y);
       c.vz = 0;
@@ -1649,61 +1918,6 @@ export class Game {
       } else if (impact > 600 && c.kind === "cop") this.damageCar(c, (impact - 600) * 0.1);
     } else c.vz = 0;
     c.airT = 0;
-  }
-
-  private wreckPhysics(c: Car, dt: number) {
-    const f = Math.exp(-2.4 * dt);
-    c.vx *= f; c.vy *= f;
-    c.av *= Math.exp(-2.5 * dt);
-    c.a += c.av * dt;
-    c.x += c.vx * dt; c.y += c.vy * dt;
-    const ca = Math.cos(c.a), sa = Math.sin(c.a);
-    c.vF = c.vx * ca + c.vy * sa; c.vR = -c.vx * sa + c.vy * ca;
-    if (c.air) { c.vz -= GRAV * dt; c.z += c.vz * dt; const gh = this.groundH(c.x, c.y); if (c.z <= gh) { c.z = gh; c.air = false; c.vz = 0; } }
-    else c.z = this.groundH(c.x, c.y);
-  }
-
-  private collideWorld(c: Car) {
-    const ca = Math.cos(c.a), sa = Math.sin(c.a);
-    const R = 12;
-    let maxImpact = 0, hx = 0, hy = 0, hnx = 0, hny = 0;
-    const bs = this.world.nearbyBuildings(c.x, c.y, this.tmpB); // city buildings and harbour containers
-    for (let s = -1; s <= 1; s += 2) {
-      const resolve = (nx: number, ny: number, pen: number, cx: number, cy: number) => {
-        c.x += nx * pen; c.y += ny * pen;
-        const vn = c.vx * nx + c.vy * ny;
-        if (vn < 0) {
-          c.vx -= 1.3 * vn * nx; c.vy -= 1.3 * vn * ny; c.vx *= 0.96; c.vy *= 0.96;
-          const cross = ca * ny - sa * nx;
-          c.av += -s * cross * Math.min(4, -vn * 0.012);
-          if (-vn > maxImpact) { maxImpact = -vn; hx = cx; hy = cy; hnx = nx; hny = ny; }
-        }
-      };
-      const px = c.x + ca * 12 * s, py = c.y + sa * 12 * s;
-      if (px < MAP_MIN + R) resolve(1, 0, MAP_MIN + R - px, MAP_MIN, py);
-      if (py < MAP_MIN + R) resolve(0, 1, MAP_MIN + R - py, px, MAP_MIN);
-      if (px > MAP_MAX - R) resolve(-1, 0, px - (MAP_MAX - R), MAP_MAX, py);
-      if (py > MAP_MAX - R) resolve(0, -1, py - (MAP_MAX - R), px, MAP_MAX);
-      for (const b of bs) {
-        if (c.z >= roofOf(b) - 25) continue; // car is up on/above the roof: no wall
-        const qx = c.x + ca * 12 * s, qy = c.y + sa * 12 * s;
-        const cx = clamp(qx, b.x, b.x + b.w), cy = clamp(qy, b.y, b.y + b.h);
-        let dx = qx - cx, dy = qy - cy;
-        const d2 = dx * dx + dy * dy;
-        if (d2 >= R * R) continue;
-        if (d2 < 0.0001) {
-          const l = qx - b.x, r = b.x + b.w - qx, t = qy - b.y, bt = b.y + b.h - qy;
-          const m = Math.min(l, r, t, bt);
-          if (m === l) resolve(-1, 0, l + R, b.x, qy); else if (m === r) resolve(1, 0, r + R, b.x + b.w, qy);
-          else if (m === t) resolve(0, -1, t + R, qx, b.y); else resolve(0, 1, bt + R, qx, b.y + b.h);
-          continue;
-        }
-        const d = Math.sqrt(d2);
-        dx /= d; dy /= d;
-        resolve(dx, dy, R - d, cx, cy);
-      }
-    }
-    if (maxImpact > 90) this.onWallHit(c, maxImpact, hx, hy, hnx, hny);
   }
 
   private onWallHit(c: Car, impact: number, x: number, y: number, nx: number, ny: number) {
@@ -1724,44 +1938,46 @@ export class Game {
     } else if (impact > 150) this.damageCar(c, (impact - 150) * 0.1);
   }
 
+  // car against car: rotated boxes in the real size of each model (separating axis test), impulse at the contact
   private collideCars() {
     const cars = this.cars;
-    const R2 = 38;
     for (let i = 0; i < cars.length; i++) {
       const a = cars[i];
+      const ra = a.hl + a.hw;
       for (let j = i + 1; j < cars.length; j++) {
         const b = cars[j];
-        let dx = b.x - a.x, dy = b.y - a.y;
-        if (dx > R2 || dx < -R2 || dy > R2 || dy < -R2) continue;
+        const dx = b.x - a.x, dy = b.y - a.y, R = ra + b.hl + b.hw;
+        if (dx > R || dx < -R || dy > R || dy < -R) continue;
         if (Math.abs(a.z - b.z) > 22) continue;
-        const d2 = dx * dx + dy * dy;
-        if (d2 >= R2 * R2 || d2 < 0.0001) continue;
-        if ((a.parked || b.parked) && !this.closePair(a, b)) continue;
-        const d = Math.sqrt(d2);
-        dx /= d; dy /= d;
-        const pen = R2 - d;
-        const ma = a.mass, mb = b.mass;
+        const ca = Math.cos(a.a), sa = Math.sin(a.a), cb = Math.cos(b.a), sb = Math.sin(b.a);
+        let best = Infinity, nx = 0, ny = 0;
+        let sep = false;
+        for (const [ux, uy] of [[ca, sa], [-sa, ca], [cb, sb], [-sb, cb]]) {
+          const pa = a.hl * Math.abs(ca * ux + sa * uy) + a.hw * Math.abs(-sa * ux + ca * uy);
+          const pb = b.hl * Math.abs(cb * ux + sb * uy) + b.hw * Math.abs(-sb * ux + cb * uy);
+          const d = dx * ux + dy * uy, o = pa + pb - Math.abs(d);
+          if (o <= 0) { sep = true; break; }
+          if (o < best) { best = o; const sg = Math.sign(d) || 1; nx = ux * sg; ny = uy * sg; }
+        }
+        if (sep) continue;
+        // contact: the corner of b that reaches deepest towards a
+        const sf = cb * nx + sb * ny > 0 ? -1 : 1, sr = -sb * nx + cb * ny > 0 ? -1 : 1;
+        const px = b.x + cb * b.hl * sf - sb * b.hw * sr, py = b.y + sb * b.hl * sf + cb * b.hw * sr;
+        const ma = a.parked && !b.parked ? a.mass * 2.5 : a.mass, mb = b.parked && !a.parked ? b.mass * 2.5 : b.mass;
         const ia = mb / (ma + mb), ib = ma / (ma + mb);
-        a.x -= dx * pen * ia; a.y -= dy * pen * ia; b.x += dx * pen * ib; b.y += dy * pen * ib;
-        const vn = (b.vx - a.vx) * dx + (b.vy - a.vy) * dy;
+        a.x -= nx * best * ia; a.y -= ny * best * ia; b.x += nx * best * ib; b.y += ny * best * ib;
+        const rax = px - a.x, ray = py - a.y, rbx = px - b.x, rby = py - b.y;
+        const vax = a.vx - a.av * ray, vay = a.vy + a.av * rax, vbx = b.vx - b.av * rby, vby = b.vy + b.av * rbx;
+        const vn = (vbx - vax) * nx + (vby - vay) * ny;
         if (vn >= 0) continue;
-        const jImp = -1.4 * vn;
-        a.vx -= jImp * dx * ia; a.vy -= jImp * dy * ia; b.vx += jImp * dx * ib; b.vy += jImp * dy * ib;
-        a.av += rnd(-1, 1) * Math.min(5, -vn * 0.01); b.av += rnd(-1, 1) * Math.min(5, -vn * 0.01);
-        this.onCarHit(a, b, -vn, a.x + dx * 19, a.y + dy * 19, dx, dy);
+        const Ia = (a.hl * a.hl + a.hw * a.hw) / 3 * ma, Ib = (b.hl * b.hl + b.hw * b.hw) / 3 * mb;
+        const rna = rax * ny - ray * nx, rnb = rbx * ny - rby * nx;
+        const jImp = (-1.4 * vn) / (1 / ma + 1 / mb + (rna * rna) / Ia + (rnb * rnb) / Ib);
+        a.vx -= (jImp * nx) / ma; a.vy -= (jImp * ny) / ma; b.vx += (jImp * nx) / mb; b.vy += (jImp * ny) / mb;
+        a.av = clamp(a.av - (jImp * rna) / Ia, -5, 5); b.av = clamp(b.av + (jImp * rnb) / Ib, -5, 5);
+        this.onCarHit(a, b, -vn, px, py, nx, ny);
       }
     }
-  }
-
-  // finer test for cars side by side: two circles per car (front and back half)
-  private closePair(a: Car, b: Car) {
-    const R = PAIR_R * 2;
-    const ax = Math.cos(a.a) * 12, ay = Math.sin(a.a) * 12, bx = Math.cos(b.a) * 12, by = Math.sin(b.a) * 12;
-    for (let i = -1; i <= 1; i += 2) for (let j = -1; j <= 1; j += 2) {
-      const dx = (b.x + bx * j) - (a.x + ax * i), dy = (b.y + by * j) - (a.y + ay * i);
-      if (dx * dx + dy * dy < R * R) return true;
-    }
-    return false;
   }
 
   private onCarHit(a: Car, b: Car, impact: number, x: number, y: number, nx: number, ny: number) {
@@ -1818,18 +2034,18 @@ export class Game {
         this.emit(rx + sa * 10 * side, ry - ca * 10 * side, c.z + 4, c.vx * 0.15 + rnd(-20, 20), c.vy * 0.15 + rnd(-20, 20), rnd(10, 30), rnd(0.7, 1.2), rnd(7, 11), 34, "#9a93a9", 0, 1.8);
       }
     } else c.rlx = NaN;
-    if (near && !c.air && c.speed > 200 && !inCity(c.x, c.y) && !this.world.isRoad(c.x, c.y) && Math.random() < 0.5) {
+    if (near && !c.air && c.speed > 200 && !inCity(c.x, c.y) && !this.world.isRoad(c.x, c.y) && P60(0.5, dt)) {
       this.emit(rx, ry, c.z + 3, c.vx * 0.1 + rnd(-20, 20), c.vy * 0.1 + rnd(-20, 20), rnd(10, 40), rnd(0.6, 1.1), rnd(6, 10), 28, "#8a7a62", 0, 1.5);
     }
     if (near && (c.kind !== "civ" || c.dead)) {
       const hp01 = c.hp / c.maxHp;
-      if ((hp01 < 0.5 || c.dead) && Math.random() < (c.dead ? 0.5 : (0.5 - hp01) * 1.2)) {
+      if ((hp01 < 0.5 || c.dead) && P60(c.dead ? 0.5 : (0.5 - hp01) * 1.2, dt)) {
         const fxp = c.x + ca * 14, fyp = c.y + sa * 14;
         this.emit(fxp, fyp, c.z + 16, rnd(-15, 15), rnd(-15, 15), rnd(30, 60), rnd(0.9, 1.8), rnd(6, 10), 28, c.dead ? "#1f1b24" : "#4a4552", 0, 1);
         if (hp01 < 0.25 || (c.dead && c.deadT < 8)) this.emit(fxp, fyp, c.z + 14, rnd(-20, 20), rnd(-20, 20), rnd(20, 50), rnd(0.25, 0.5), rnd(6, 11), -8, "#ff7a1a", 2, 2);
       }
     }
-    if (c.nitro && c.kind === "player") {
+    if (c.nitro && c.kind === "player" && P60(1, dt)) {
       for (let i = 0; i < 2; i++) {
         const sx = c.x - ca * 26 + sa * rnd(-5, 5), sy = c.y - sa * 26 - ca * rnd(-5, 5);
         this.emit(sx, sy, c.z + 8, -ca * rnd(200, 360) + c.vx * 0.6, -sa * rnd(200, 360) + c.vy * 0.6, 0, rnd(0.1, 0.22), rnd(5, 9), -12, Math.random() < 0.5 ? "#2bf0ff" : "#9d4dff", 2, 1);

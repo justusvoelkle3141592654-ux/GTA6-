@@ -403,8 +403,8 @@ export class PedSystem {
   update(dt: number, h: PedHost) {
     const fx = h.fx, fy = h.fy;
     this.cars = h.cars;
-    if (this.civCount() < this.limit && Math.random() < 0.25) this.trySpawn(fx, fy);
-    if (Math.random() < 0.012) this.trySpawnGang(h, fx, fy);
+    if (this.civCount() < this.limit && Math.random() < 15 * dt) this.trySpawn(fx, fy);
+    if (Math.random() < 0.72 * dt) this.trySpawnGang(h, fx, fy);
     for (const c of this.list) {
       if (!c.active) continue;
       c.t += dt;

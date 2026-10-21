@@ -1,6 +1,7 @@
 import { Car, MODEL_NAME, type CarModel } from "./vehicles";
 import { BLOCK, ROAD, GRID, WORLD, HIGHWAYS, mulberry32, terrainH, isWater, type World } from "./world";
 import type { Game } from "./engine";
+import { oldNode } from "./districts";
 import type { Civilian } from "./peds";
 import type { Marker } from "./missions";
 import type { Place } from "./places";
@@ -23,7 +24,7 @@ export const jobFor = (m: CarModel): JobKind | null => JOB_KINDS.find((k) => JOB
 
 // ---------------------------------------------------------------- street races
 export interface RaceDef { id: string; name: string; start: [number, number]; points: [number, number][]; par: number; reward: number; }
-const node = (i: number, j: number): [number, number] => [i * BLOCK + ROAD / 2, j * BLOCK + ROAD / 2];
+const node = (i: number, j: number): [number, number] => [oldNode(i) * BLOCK + ROAD / 2, oldNode(j) * BLOCK + ROAD / 2];
 const hw = HIGHWAYS[1] * BLOCK + ROAD / 2;
 export const RACES: RaceDef[] = [
   { id: "r1", name: "Küstenlauf", start: node(1, 1), points: [node(1, 10), node(4, 10), node(4, 6), node(8, 6), node(8, 1), node(1, 1)], par: 70, reward: 1000 },
@@ -36,10 +37,12 @@ export interface Jump { id: number; x: number; y: number; ramp: number; } // x, 
 export interface Shell { id: number; x: number; y: number; z: number; }
 export const JUMP_REWARD = 500, SHELL_REWARD = 100, SHELL_BONUS = 5000, JUMP_AIR = 0.9;
 
+// every fourth launch ramp is a stunt jump (blue sign; land after enough air time)
 export function buildJumps(world: World): Jump[] {
   const out: Jump[] = [];
+  let k = 0;
   world.ramps.forEach((r, i) => {
-    if (r.bld || r.h < 62 || out.length >= 10) return;
+    if (!r.jump || out.length >= 10 || k++ % 4) return;
     const s = world.rampStart(r);
     out.push({ id: out.length, x: s.x, y: s.y, ramp: i });
   });
@@ -58,12 +61,12 @@ export function buildShells(world: World): Shell[] {
       if (b.kind === "city") continue;
       x = b.bx * BLOCK + ROAD + 40 + r() * (BLOCK - ROAD - 80); y = b.by * BLOCK + ROAD + 40 + r() * (BLOCK - ROAD - 80);
     } else if (k < 0.65) { x = -30 - r() * 170; y = 80 + r() * (WORLD - 160); } // beach
-    else { // hills around the city
-      const a = r() * Math.PI * 2, d = 900 + r() * 3200;
-      x = WORLD / 2 + Math.cos(a) * (WORLD / 2 + d); y = WORLD / 2 + Math.sin(a) * (WORLD / 2 + d);
+    else { // hills north of the city
+      x = -2000 + r() * (WORLD + 4000); y = -600 - r() * 4500;
     }
-    while (isWater(x, y)) x += 60; // the bay: move it to the shore (same order, so saved ids stay valid)
-    if (world.isSolid(x, y, 12)) continue;
+    let tries = 0;
+    while (isWater(x, y) && tries++ < 80) x += 60; // the bay: move it to the shore
+    if (isWater(x, y) || world.isSolid(x, y, 12) || world.nearRamp(x, y, 30)) continue;
     out.push({ id: out.length, x, y, z: terrainH(x, y) });
   }
   return out;
@@ -86,7 +89,7 @@ export class Jobs {
   race: ActiveRace | null = null;
   markers: Marker[] = [];
   jumps: Jump[]; shells: Shell[];
-  private lastRamp = -1; private raceLatch = "";
+  private raceLatch = "";
 
   constructor(private g: Game) {
     this.jumps = buildJumps(g.world);
@@ -332,15 +335,12 @@ export class Jobs {
         g.saveSoon();
       }
     }
-    // remember the last ramp the car drove on
-    if (inCar) { const i = g.world.rampIndexAt(g.player.x, g.player.y); if (i >= 0) this.lastRamp = i; }
   }
 
   // called by the game when the player's car lands after airtime
-  landed(airT: number) {
+  landed(airT: number, ramp: number) {
     const g = this.g;
-    const j = this.jumps.find((x) => x.ramp === this.lastRamp);
-    this.lastRamp = -1;
+    const j = this.jumps.find((x) => x.ramp === ramp);
     if (!j || airT < JUMP_AIR || g.progress.jumps.includes(j.id)) return;
     g.progress.jumps.push(j.id);
     g.addCash(JUMP_REWARD);

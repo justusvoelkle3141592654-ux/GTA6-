@@ -1,6 +1,7 @@
 import { Car } from "./vehicles";
 import { ROAD, GRID, WATER_Y, inCity, isWater, terrainH } from "./world";
 import { steerTo, avoid, stuck } from "./traffic";
+import { findRoute, MAX_ROUTE } from "./route";
 import { SEEN_CLOSE, SEEN_DIST } from "./wanted";
 import { isPolice } from "./peds";
 import { sfx } from "./audio";
@@ -69,10 +70,12 @@ export class Police {
     for (let tries = 0; tries < 40; tries++) {
       let x: number, y: number;
       if (outside) {
-        const a = Math.random() * TAU, d = rnd(850, 1250);
-        x = fx + Math.cos(a) * d; y = fy + Math.sin(a) * d;
-        if (inCity(x, y)) { const n = g.world.nearestNode(x, y); const np = g.world.nodePos(n.i, n.j); x = np.x; y = np.y; }
-        if (g.world.isSolid(x, y, 20) || isWater(x, y)) continue;
+        // on a highway near you (or on land close to you when you are far from the roads)
+        const net = g.world.roads, rd = net.roads[Math.floor(Math.random() * net.roads.length)];
+        const q = net.point(rd, Math.floor(Math.random() * rd.n), 34);
+        x = q.x; y = q.y;
+        if (tries > 25) { const a = Math.random() * TAU, d = rnd(850, 1250); x = fx + Math.cos(a) * d; y = fy + Math.sin(a) * d; }
+        if (g.world.isSolid(x, y, 20) || isWater(x, y) || g.world.nearRamp(x, y, 30)) continue;
       } else {
         const i = Math.floor(Math.random() * (GRID + 1)), j = Math.floor(Math.random() * (GRID + 1));
         const np = g.world.nodePos(i, j);
@@ -84,7 +87,7 @@ export class Police {
       const army = g.rules.city && g.wanted.stars >= ARMY_STARS && Math.random() < 0.45;
       const swat = !army && g.rules.city && g.wanted.stars >= SWAT_STARS && Math.random() < 0.6;
       const c = new Car("cop", army ? "armor" : swat ? "swat" : "police", army ? "#4b5320" : swat ? "#1b1d22" : "#f4f6fa");
-      c.x = x; c.y = y; c.z = terrainH(x, y);
+      c.x = x; c.y = y; c.z = g.world.roads.drawH(x, y);
       c.a = Math.atan2(fy - y, fx - x);
       c.hp = c.maxHp = army ? 600 : swat ? 220 : g.config.difficulty === "easy" ? 70 : 100;
       c.mass = army ? 4 : swat ? 2 : 1.25;
@@ -125,17 +128,24 @@ export class Police {
     if (g.ending || g.ped.dead) { steerTo(c, g.fx, g.fy); c.throttle = d > 120 ? 0.6 : -0.3; c.handbrake = false; return; }
     // officers get out when you are on foot and close (open world)
     if (c.driver && g.onFoot && this.seen && Math.hypot(g.fx - c.x, g.fy - c.y) < 170 && c.speed < 60) { this.dismount(c); return; }
-    // cops also use ramps: "elevated" = currently on a ramp or roof
-    const elevated = c.z > terrainH(c.x, c.y) + 15;
+    // cops also use the garage ramps: "elevated" = currently on a ramp, roof or bridge
+    const elevated = c.z > terrainH(c.x, c.y) + 15 && c.onRamp >= 0;
     const roofRamp = !g.onFoot && g.player.z > 25 && this.seen ? w.rampToRoofAt(fx, fy) : null;
-    const direct = elevated || !inCity(c.x, c.y) || !inCity(fx, fy) || (d < 650 && w.lineClear(c.x, c.y, fx, fy));
+    // straight at the target only when nothing (buildings, water) is in the way; otherwise along the streets, bridges and the tunnel
+    const wetBetween = (x0: number, y0: number, x1: number, y1: number) => {
+      const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 60);
+      for (let k = 1; k <= n; k++) if (isWater(x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n)) return true;
+      return false;
+    };
+    const outside = !inCity(c.x, c.y) && !inCity(fx, fy);
+    const direct = (elevated || (d < 650 && w.lineClear(c.x, c.y, fx, fy)) || (outside && d < 1400)) && !wetBetween(c.x, c.y, fx, fy);
     if (c.model === "armor") this.turret(c, d, dt);
-    // half of the cars try to cut you off: they head for the crossing in front of you
+    // half of the cars try to cut you off: they head for the point in front of you
     const intercept = c.siren > 5 && this.seen && !g.onFoot && g.player.speed > 150;
     if (roofRamp && !elevated) {
-      const rs = w.rampStart(roofRamp);
+      const rs = w.rampStart(roofRamp, 60);
       tx = rs.x; ty = rs.y;
-      c.hasWp = false;
+      if (Math.hypot(rs.x - c.x, rs.y - c.y) < 40) { const lip = w.rampLip(roofRamp); tx = lip.x; ty = lip.y; }
     } else if (direct) {
       const lead = Math.min(g.diff.lead, d / 700);
       tx = fx + fvx * lead; ty = fy + fvy * lead;
@@ -145,25 +155,19 @@ export class Police {
         const ca = Math.cos(p.a), sa = Math.sin(p.a), side = c.siren % 2 < 1 ? 1 : -1;
         tx = p.x - ca * 16 - sa * 14 * side + p.vx * 0.12; ty = p.y - sa * 16 + ca * 14 * side + p.vy * 0.12;
       }
-      c.hasWp = false;
     } else {
-      if (!c.hasWp || Math.hypot(c.x - w.nodePos(c.wpI, c.wpJ).x, c.y - w.nodePos(c.wpI, c.wpJ).y) < 70) {
-        const cur = c.hasWp ? { i: c.wpI, j: c.wpJ } : w.nearestNode(c.x, c.y);
-        const pn = intercept ? w.nearestNode(fx + fvx * 1.4, fy + fvy * 1.4) : w.nearestNode(fx, fy);
-        const di = pn.i - cur.i, dj = pn.j - cur.j;
-        let ni = cur.i, nj = cur.j;
-        if (di === 0 && dj === 0) { /* direct */ }
-        else if (Math.abs(di) > Math.abs(dj) || (Math.abs(di) === Math.abs(dj) && Math.random() < 0.5)) ni += Math.sign(di);
-        else nj += Math.sign(dj);
-        if (!c.hasWp) {
-          const a = w.nodePos(cur.i, cur.j), b = w.nodePos(ni, nj);
-          const onSeg = ni !== cur.i ? Math.abs(c.y - a.y) < ROAD / 2 && (c.x - a.x) * (b.x - a.x) > 0 : Math.abs(c.x - a.x) < ROAD / 2 && (c.y - a.y) * (b.y - a.y) > 0;
-          if (onSeg || (di === 0 && dj === 0)) { c.wpI = ni; c.wpJ = nj; } else { c.wpI = cur.i; c.wpJ = cur.j; }
-        } else { c.wpI = ni; c.wpJ = nj; }
-        c.hasWp = true;
+      // route over the street graph, recomputed now and then
+      c.routeT -= dt;
+      if (!c.route2) c.route2 = new Float32Array(MAX_ROUTE * 2);
+      if (c.routeT <= 0 || c.routeN < 2) {
+        c.routeT = 1.2 + Math.random() * 0.6;
+        const gx = intercept ? fx + fvx * 1.4 : fx, gy = intercept ? fy + fvy * 1.4 : fy;
+        c.routeN = findRoute(w.roads, c.x, c.y, gx, gy, c.route2);
       }
-      const np = w.nodePos(c.wpI, c.wpJ);
-      tx = np.x; ty = np.y;
+      // first route point that is not right next to the car
+      let k = 1;
+      while (k < c.routeN - 1 && Math.hypot(c.route2[k * 2] - c.x, c.route2[k * 2 + 1] - c.y) < 70) k++;
+      tx = c.route2[k * 2]; ty = c.route2[k * 2 + 1];
     }
     const diff = steerTo(c, tx, ty);
     c.throttle = Math.abs(diff) > 1.4 ? 0.45 : 1;
@@ -235,7 +239,7 @@ export class Police {
     const np = wd.nodePos(ni, nj);
     // block the segment just before that crossing, across the road
     const bx = np.x - dirx * (ROAD / 2 + 70), by = np.y - diry * (ROAD / 2 + 70);
-    if (Math.hypot(bx - p.x, by - p.y) < 500) return;
+    if (Math.hypot(bx - p.x, by - p.y) < 500 || wd.nearRamp(bx, by, 60)) return;
     for (const off of [-34, 34]) {
       const c = new Car("cop", "police", "#f4f6fa");
       c.x = bx + (diry ? off : 0); c.y = by + (dirx ? off : 0); c.z = terrainH(c.x, c.y);

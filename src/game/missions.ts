@@ -3,6 +3,7 @@ import { BLOCK, ROAD, GRID, WATER_Y, terrainH, roofOf } from "./world";
 import type { DialogLine, Game } from "./engine";
 import type { Civilian } from "./peds";
 import { STAR_HEAT } from "./wanted";
+import { oldNode } from "./districts";
 import { sfx } from "./audio";
 
 // ---------------------------------------------------------------- data
@@ -273,10 +274,10 @@ export class Missions {
       if (!pl) return { x: 0, y: 0 };
       return l.car ? { x: pl.cx, y: pl.cy } : { x: pl.x, y: pl.y };
     }
-    if ("node" in l) return { x: l.node[0] * BLOCK + ROAD / 2, y: l.node[1] * BLOCK + ROAD / 2 };
+    if ("node" in l) return { x: oldNode(l.node[0]) * BLOCK + ROAD / 2, y: oldNode(l.node[1]) * BLOCK + ROAD / 2 }; // story data uses the old grid
     if ("last" in l) return this.lastPos;
     if ("roof" in l) {
-      const b = this.g.world.blocks[l.roof[1] * GRID + l.roof[0]];
+      const b = this.g.world.blocks[oldNode(l.roof[1]) * GRID + oldNode(l.roof[0])];
       let best = b?.buildings[0];
       for (const bd of b?.buildings ?? []) if (best && roofOf(bd) > roofOf(best)) best = bd;
       return best ? { x: best.x + best.w / 2, y: best.y + best.h / 2 } : { x: 0, y: 0 };

@@ -1,4 +1,4 @@
-import { BLOCK, ROAD, GRID, HIGHWAYS, mulberry32, isWater, type World } from "./world";
+import { BLOCK, ROAD, GRID, HIGHWAYS, mulberry32, isWater, inCity, cityDist, type World } from "./world";
 import { Car, MODEL_STATS, type CarModel, type FactionId } from "./vehicles";
 import { DISTRICTS, districtAt } from "./districts";
 import type { PedSystem } from "./peds";
@@ -64,8 +64,8 @@ export function buildParking(world: World, seed = 777): ParkingSpot[] {
   const out: ParkingSpot[] = [];
   const add = (x: number, y: number, a: number) => {
     const ca = Math.cos(a), sa = Math.sin(a);
-    // no ramps under the car
-    if (world.rampH(x, y) > 0 || world.rampH(x + ca * 28, y + sa * 28) > 0 || world.rampH(x - ca * 28, y - sa * 28) > 0) return;
+    // nothing on or right in front of ramps
+    if (world.nearRamp(x, y, 30) || world.nearRamp(x + ca * 28, y + sa * 28, 30) || world.nearRamp(x - ca * 28, y - sa * 28, 30)) return;
     const model = PARKED_MODELS[Math.floor(r() * PARKED_MODELS.length)];
     const color = model === "taxi" ? "#ffc21a" : CIV_COLORS[Math.floor(r() * CIV_COLORS.length)];
     out.push({ id: out.length, x, y, a, model, color, d: 0 });
@@ -87,7 +87,35 @@ export function buildParking(world: World, seed = 777): ParkingSpot[] {
   return out;
 }
 
+// traffic lights at the big crossings (highway lines and the centre); a green wave through the grid
+export const LIGHT_CYCLE = 26;
+export class TrafficLights {
+  has: Uint8Array;
+  t = 0;
+  constructor() {
+    const N = GRID + 1;
+    this.has = new Uint8Array(N * N);
+    for (let j = 1; j < GRID; j++) for (let i = 1; i < GRID; i++) {
+      const major = HIGHWAYS.includes(i) || HIGHWAYS.includes(j);
+      const centre = i >= 5 && i <= 11 && j >= 4 && j <= 11;
+      if ((major && (HIGHWAYS.includes(i) && HIGHWAYS.includes(j) || (i + j) % 2 === 0)) || (centre && (i + j) % 2 === 1)) this.has[j * N + i] = 1;
+    }
+  }
+  update(dt: number) { this.t += dt; }
+  // phase of crossing (i, j): 0 green for traffic along x, 1 yellow x, 2 green along y, 3 yellow y
+  phase(i: number, j: number) {
+    const t = (this.t + (i + j) * 1.6) % LIGHT_CYCLE;
+    return t < 11 ? 0 : t < 13 ? 1 : t < 24 ? 2 : 3;
+  }
+  red(i: number, j: number, alongX: boolean) {
+    if (i < 0 || j < 0 || i > GRID || j > GRID || !this.has[j * (GRID + 1) + i]) return false;
+    const ph = this.phase(i, j);
+    return alongX ? ph !== 0 : ph !== 2;
+  }
+}
+
 export class Traffic {
+  lights = new TrafficLights();
   spots: ParkingSpot[];
   private taken = new Set<number>();   // stolen spots stay empty until the player is far away
   private present = new Set<number>();
@@ -101,8 +129,45 @@ export class Traffic {
   // the car leaves its spot for good (stolen)
   release(c: Car) { if (c.spotId >= 0) { this.taken.add(c.spotId); c.spotId = -1; } }
 
+  private pickModel(h: TrafficHost, x: number, y: number) {
+    const r = Math.random();
+    // gang turf: some cars belong to the gang (their colour)
+    const gang = h.rules.city ? DISTRICTS[districtAt(x, y)].gang : null;
+    const isGang = !!gang && Math.random() < 0.3;
+    // arcade modes keep the original traffic mix
+    const model: CarModel = !h.rules.city ? (r < 0.15 ? "taxi" : r < 0.3 ? "van" : r < 0.4 ? "suv" : r < 0.5 ? "muscle" : "sedan")
+      : isGang ? (r < 0.5 ? "muscle" : "suv")
+      : r < 0.12 ? "taxi" : r < 0.24 ? "van" : r < 0.32 ? "suv" : r < 0.4 ? "muscle" : r < 0.47 ? "bike" : r < 0.52 ? "truck" : r < 0.56 ? "bus" : "sedan";
+    const color = isGang ? GANG_COLORS[gang!] : model === "taxi" ? "#ffc21a" : model === "bus" ? "#2bb3ff" : CIV_COLORS[Math.floor(Math.random() * CIV_COLORS.length)];
+    const c = new Car("civ", model, color);
+    if (isGang) c.faction = gang;
+    if (h.rules.city) { c.hp = c.maxHp = MODEL_STATS[model].hp; c.mass = MODEL_STATS[model].mass; }
+    else { c.hp = c.maxHp = 90; c.mass = model === "van" || model === "suv" ? 1.2 : 0.8; }
+    c.driver = true;
+    return c;
+  }
+
   spawnCiv(h: TrafficHost, anywhereNear = false) {
     const fx = h.fx, fy = h.fy, w = this.world;
+    // outside the city: traffic on the highways and bridges
+    if (!inCity(fx, fy) && cityDist(fx, fy) > 300) {
+      for (let tries = 0; tries < 12; tries++) {
+        const rd = w.roads.roads[Math.floor(Math.random() * w.roads.roads.length)];
+        const p = Math.floor(Math.random() * rd.n);
+        const dir = Math.random() < 0.5 ? 1 : -1;
+        const q = w.roads.point(rd, p, 34 * dir);
+        const d = Math.hypot(q.x - fx, q.y - fy);
+        if (d > 1400 || d < (anywhereNear ? 250 : 650)) continue;
+        const c = this.pickModel(h, q.x, q.y);
+        c.x = q.x; c.y = q.y; c.z = w.roads.drawH(q.x, q.y); c.a = dir > 0 ? q.a : q.a + Math.PI;
+        c.croad = rd.id; c.cp = p; c.cdir = dir; c.route = true;
+        c.cruise = c.model === "bus" || c.model === "truck" ? rnd(170, 200) : rnd(230, 290);
+        c.vx = Math.cos(c.a) * c.cruise; c.vy = Math.sin(c.a) * c.cruise;
+        h.cars.push(c);
+        return;
+      }
+      return;
+    }
     for (let tries = 0; tries < 20; tries++) {
       const i = Math.floor(Math.random() * (GRID + 1)), j = Math.floor(Math.random() * (GRID + 1));
       const np = w.nodePos(i, j);
@@ -111,39 +176,59 @@ export class Traffic {
       const dir = DIRS[Math.floor(Math.random() * 4)];
       const ni = i + dir[0], nj = j + dir[1];
       if (ni < 0 || nj < 0 || ni > GRID || nj > GRID) continue;
-      const r = Math.random();
-      // gang turf: some cars belong to the gang (their colour)
-      const gang = h.rules.city ? DISTRICTS[districtAt(np.x, np.y)].gang : null;
-      const isGang = !!gang && Math.random() < 0.3;
-      // arcade modes keep the original traffic mix
-      const model: CarModel = !h.rules.city ? (r < 0.15 ? "taxi" : r < 0.3 ? "van" : r < 0.4 ? "suv" : r < 0.5 ? "muscle" : "sedan")
-        : isGang ? (r < 0.5 ? "muscle" : "suv")
-        : r < 0.12 ? "taxi" : r < 0.24 ? "van" : r < 0.32 ? "suv" : r < 0.4 ? "muscle" : r < 0.47 ? "bike" : r < 0.52 ? "truck" : r < 0.56 ? "bus" : "sedan";
-      const color = isGang ? GANG_COLORS[gang!] : model === "taxi" ? "#ffc21a" : model === "bus" ? "#2bb3ff" : CIV_COLORS[Math.floor(Math.random() * CIV_COLORS.length)];
-      const c = new Car("civ", model, color);
-      if (isGang) c.faction = gang;
+      const c = this.pickModel(h, np.x, np.y);
       const t = rnd(0.2, 0.7);
       c.x = np.x + dir[0] * BLOCK * t - dir[1] * LANE; c.y = np.y + dir[1] * BLOCK * t + dir[0] * LANE;
       c.a = Math.atan2(dir[1], dir[0]);
       c.prevI = i; c.prevJ = j; c.wpI = ni; c.wpJ = nj; c.route = true;
-      c.cruise = model === "bus" || model === "truck" ? rnd(120, 150) : model === "bike" ? rnd(170, 220) : rnd(150, 200);
+      c.cruise = c.model === "bus" || c.model === "truck" ? rnd(120, 150) : c.model === "bike" ? rnd(170, 220) : rnd(150, 200);
       c.vx = Math.cos(c.a) * c.cruise; c.vy = Math.sin(c.a) * c.cruise;
-      if (h.rules.city) { c.hp = c.maxHp = MODEL_STATS[model].hp; c.mass = MODEL_STATS[model].mass; }
-      else { c.hp = c.maxHp = 90; c.mass = model === "van" || model === "suv" ? 1.2 : 0.8; }
-      c.driver = true;
       h.cars.push(c);
       return;
     }
   }
 
+  // highway driving: follow the road points on the right lane, turn back at the end, join the city grid at its first crossing
+  private highwayAI(h: TrafficHost, c: Car) {
+    const net = this.world.roads, rd = net.roads[c.croad];
+    const look = c.cp + c.cdir * 4;
+    const q = net.point(rd, look, 34 * c.cdir);
+    if (Math.hypot(q.x - c.x, q.y - c.y) < 70) c.cp += c.cdir * 2;
+    if (c.cdir > 0 && c.cp >= rd.n - 3) { c.cdir = -1; c.cp = rd.n - 3; } // dead end at the cliffs: turn around
+    if (c.cdir < 0 && c.cp <= 1) {
+      // back at the city: continue on the grid from the crossing where the road starts
+      c.croad = -1;
+      const n = rd.node;
+      const inward = n.j === 0 ? [0, 1] : n.j === GRID ? [0, -1] : n.i === 0 ? [1, 0] : [-1, 0];
+      c.prevI = n.i; c.prevJ = n.j; c.wpI = n.i + inward[0]; c.wpJ = n.j + inward[1];
+      return;
+    }
+    void h;
+    return q;
+  }
+
   civAI(h: TrafficHost, c: Car, dt: number) {
     const w = this.world;
+    let tx: number, ty: number, cruise = c.cruise;
+    const hq = c.croad >= 0 ? this.highwayAI(h, c) : undefined;
+    if (hq) { tx = hq.x; ty = hq.y; }
+    else {
     const from = w.nodePos(c.prevI, c.prevJ), to = w.nodePos(c.wpI, c.wpJ);
     let dx = to.x - from.x, dy = to.y - from.y;
     const L = Math.hypot(dx, dy) || 1;
     dx /= L; dy /= L;
-    const tx = to.x - dy * LANE - dx * 10, ty = to.y + dx * LANE - dy * 10;
-    if (Math.hypot(tx - c.x, ty - c.y) < 55) {
+    tx = to.x - dy * LANE - dx * 10; ty = to.y + dx * LANE - dy * 10;
+    // red light ahead: stop at the line (police with a siren ignores it)
+    if (!(c.kind === "cop" && !c.calm) && !c.flee && !c.hunt && this.lights.red(c.wpI, c.wpJ, dx !== 0)) {
+      const dStop = (to.x - c.x) * dx + (to.y - c.y) * dy - ROAD / 2 - 14;
+      if (dStop > 2 && dStop < 140) cruise = Math.min(cruise, Math.sqrt(2 * BRAKE_DECEL * Math.max(0, dStop - 6)));
+    }
+    // leaving the city: a highway starts at this edge crossing
+    if (Math.hypot(tx - c.x, ty - c.y) < 55 && !c.flee && Math.random() < 0.35) {
+      const rd = w.roads.roads.find((r) => r.node.i === c.wpI && r.node.j === c.wpJ && (c.wpI === 0 || c.wpJ === 0 || c.wpI === GRID || c.wpJ === GRID));
+      if (rd && c.kind === "civ") { c.croad = rd.id; c.cp = 1; c.cdir = 1; }
+    }
+    if (c.croad < 0 && Math.hypot(tx - c.x, ty - c.y) < 55) {
       // pick the next crossing at random (fleeing cars: away from the player), never straight back
       let n = 0, ci = c.prevI, cj = c.prevJ, best = -Infinity;
       for (const d of DIRS) {
@@ -158,8 +243,9 @@ export class Traffic {
       }
       c.prevI = c.wpI; c.prevJ = c.wpJ; c.wpI = ci; c.wpJ = cj;
     }
+    }
     const diff = steerTo(c, tx, ty);
-    const want = c.cruise * (Math.abs(diff) > 0.45 ? 0.55 : 1);
+    const want = cruise * (Math.abs(diff) > 0.45 ? 0.55 : 1);
     c.throttle = c.vF < want ? 1 : c.vF > want + 40 ? -0.4 : 0;
     c.handbrake = false;
     // obstacles ahead: slow down to a speed that still stops in time instead of slamming the brakes
@@ -184,6 +270,13 @@ export class Traffic {
 
   // cop without a wanted level: drive along the streets like traffic
   patrol(h: TrafficHost, c: Car, dt: number) {
+    if (!c.route && !inCity(c.x, c.y) && cityDist(c.x, c.y) > 150) {
+      // outside the city: join the nearest highway
+      const net = this.world.roads;
+      let br = -1, bp = 0, bd = Infinity;
+      for (const rd of net.roads) for (let p = 0; p < rd.n; p += 5) { const d = Math.hypot(rd.pts[p * 2] - c.x, rd.pts[p * 2 + 1] - c.y); if (d < bd) { bd = d; br = rd.id; bp = p; } }
+      if (br >= 0) { c.croad = br; c.cp = bp; c.cdir = Math.random() < 0.5 ? 1 : -1; c.route = true; }
+    }
     if (!c.route) {
       const n = this.world.nearestNode(c.x, c.y);
       const dir = DIRS[Math.floor(Math.random() * 4)];

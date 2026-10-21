@@ -6,7 +6,11 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_MAX, MAP_SIZE, EXT, HIGHWAYS, H_SCALE, WATER_Y, terrainH, terrainGrad, cityDist, inCity, isHighway, seaDist, mulberry32, type Building, type Ramp } from "./world";
+import { wrapA, clamp, canvasTex, radialTex, withColor, C, box, flat, cyl, sph } from "./meshutil";
+import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_SIZE, H_SCALE, WATER_Y, EDGE_LAND, STUNT_PARK, terrainH, terrainGrad, cityDist, inCity, coast, edgeDist, mulberry32, type Building, tunnelAt, TUNNEL } from "./world";
+import { terrainMesh, backdropMesh, roadsMesh, rampsMesh, coastMesh, extrasMesh, LightsMesh } from "./worldmesh";
+import { TrafficLights } from "./traffic";
+const inStuntPark = (x: number, y: number) => x > STUNT_PARK.x0 - 60 && x < STUNT_PARK.x1 + 60 && y > STUNT_PARK.y0 - 60 && y < STUNT_PARK.y1 + 60;
 import { isCraft } from "./vehicles";
 import { JETTY, HELI_SPOT, type Place } from "./places";
 import { CrowdRenderer } from "./crowd3d";
@@ -21,51 +25,6 @@ const MAX_PTS = 600;
 const WIN = 16;
 const FLOOR = 18;
 
-const wrapA = (a: number) => { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; };
-const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
-
-function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, srgb = true) {
-  const c = document.createElement("canvas");
-  c.width = w; c.height = h;
-  draw(c.getContext("2d")!);
-  const t = new THREE.CanvasTexture(c);
-  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-function radialTex(inner: string, outer: string, size = 128) {
-  return canvasTex(size, size, (g) => {
-    const gr = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    gr.addColorStop(0, inner); gr.addColorStop(1, outer);
-    g.fillStyle = gr; g.fillRect(0, 0, size, size);
-  });
-}
-function withColor(g: THREE.BufferGeometry, col: THREE.Color, mul = 1) {
-  const n = g.attributes.position.count;
-  const arr = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) { arr[i * 3] = col.r * mul; arr[i * 3 + 1] = col.g * mul; arr[i * 3 + 2] = col.b * mul; }
-  g.setAttribute("color", new THREE.BufferAttribute(arr, 3));
-  return g;
-}
-const colCache = new Map<string, THREE.Color>();
-function C(hex: string) { let c = colCache.get(hex); if (!c) { c = new THREE.Color(hex); colCache.set(hex, c); } return c; }
-function box(w: number, h: number, d: number, x: number, y: number, z: number, col: string | THREE.Color, mul = 1, ry = 0) {
-  const g = new THREE.BoxGeometry(w, h, d);
-  if (ry) g.rotateY(ry);
-  g.translate(x, y, z);
-  return withColor(g, typeof col === "string" ? C(col) : col, mul);
-}
-function flat(w: number, d: number, x: number, z: number, col: string, y = 0.12, mul = 1) {
-  const g = new THREE.PlaneGeometry(w, d); g.rotateX(-Math.PI / 2); g.translate(x, y, z);
-  return withColor(g, C(col), mul);
-}
-function cyl(rt: number, rb: number, h: number, x: number, y: number, z: number, col: string, seg = 8, mul = 1) {
-  const g = new THREE.CylinderGeometry(rt, rb, h, seg); g.translate(x, y, z);
-  return withColor(g, C(col), mul);
-}
-function sph(r: number, x: number, y: number, z: number, col: string, seg = 10) {
-  const g = new THREE.SphereGeometry(r, seg, seg); g.translate(x, y, z);
-  return withColor(g, C(col));
-}
 
 // ---------------------------------------------------------------- car models
 type PaintCol = string | THREE.Color;
@@ -570,7 +529,7 @@ export class Renderer3D {
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     this.scene.environmentIntensity = 0.6;
@@ -676,7 +635,7 @@ export class Renderer3D {
     const asphalt = new THREE.Mesh(new THREE.PlaneGeometry(WORLD, WORLD).rotateX(-Math.PI / 2).translate(WORLD / 2, 0, WORLD / 2), new THREE.MeshStandardMaterial({ color: 0x46464b, map: noise, roughness: 0.55, metalness: 0.15, envMapIntensity: 0.6 }));
     asphalt.receiveShadow = true;
     this.scene.add(asphalt);
-    const water = new THREE.Mesh(new THREE.PlaneGeometry(60000, 60000).rotateX(-Math.PI / 2).translate(WORLD / 2, WATER_Y, WORLD / 2), new THREE.MeshStandardMaterial({ color: 0x1d5c78, roughness: 0.08, metalness: 0.6, envMapIntensity: 1.2 }));
+    const water = new THREE.Mesh(new THREE.PlaneGeometry(140000, 140000).rotateX(-Math.PI / 2).translate(WORLD / 2, WATER_Y, WORLD / 2), new THREE.MeshStandardMaterial({ color: 0x1d5c78, roughness: 0.08, metalness: 0.6, envMapIntensity: 1.2 }));
     this.scene.add(water);
 
     const M: THREE.BufferGeometry[] = [];
@@ -712,103 +671,21 @@ export class Renderer3D {
     for (const g of M) g.dispose();
   }
 
-  // sloped launch ramps (street ramps and ramps onto buildings)
+  // launch ramps (wood, steel, concrete) and parking garage ramps
   private buildRamps() {
-    const top: THREE.BufferGeometry[] = [], side: THREE.BufferGeometry[] = [];
-    const lift = 0.4;
-    for (const rp of this.world.ramps as Ramp[]) {
-      const { x0, y0, l, w, alongX, rising, h } = rp;
-      const sA = alongX ? x0 : y0, vA = alongX ? y0 : x0;
-      const sLo = rising > 0 ? sA : sA + l; // ground-level end
-      const sHi = rising > 0 ? sA + l : sA; // lip
-      const P = (s: number, y: number, v: number) => (alongX ? [s, y + lift, v] : [v, y + lift, s]);
-      const tri = (dst: number[], a: number[], b: number[], c: number[]) => dst.push(...a, ...b, ...c);
-      const pTop: number[] = [], pSide: number[] = [];
-      const pA = P(sLo, 0, vA), pB = P(sHi, h, vA), pC = P(sHi, h, vA + w), pD = P(sLo, 0, vA + w);
-      const pE = P(sHi, 0, vA), pF = P(sHi, 0, vA + w);
-      tri(pTop, pA, pB, pC); tri(pTop, pA, pC, pD);      // sloped surface
-      tri(pSide, pB, pE, pF); tri(pSide, pB, pF, pC);    // lip
-      tri(pSide, pA, pB, pE); tri(pSide, pD, pF, pC);    // side walls
-      const gt = new THREE.BufferGeometry(); gt.setAttribute("position", new THREE.Float32BufferAttribute(pTop, 3)); gt.computeVertexNormals();
-      const gs = new THREE.BufferGeometry(); gs.setAttribute("position", new THREE.Float32BufferAttribute(pSide, 3)); gs.computeVertexNormals();
-      top.push(withColor(gt, C("#ffc23a")));
-      side.push(withColor(gs, C("#4a4458")));
-    }
-    if (!top.length) return;
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.1, side: THREE.DoubleSide });
-    const m = new THREE.Mesh(mergeGeometries([...top, ...side])!, mat);
-    m.castShadow = true; m.receiveShadow = true;
-    this.scene.add(m);
+    const g = rampsMesh(this.world);
+    g.traverse((o) => { if ((o as THREE.Mesh).isMesh && o.userData.cast) this.cityMeshes.push(o as THREE.Mesh); });
+    this.scene.add(g);
   }
 
   private buildTerrain() {
-    const SEG = this.quality === "high" ? 420 : 300;
-    const geo = new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE, SEG, SEG);
-    geo.rotateX(-Math.PI / 2);
-    geo.translate(MAP_MIN + MAP_SIZE / 2, 0, MAP_MIN + MAP_SIZE / 2);
-    const pos = geo.attributes.position as THREE.BufferAttribute;
-    const cols = new Float32Array(pos.count * 3);
-    const grassLo = C("#667a3c"), grassHi = C("#9a9158"), rock = C("#6e665c"), peak = C("#5f574c"), sand = C("#d2bf91"), dirt = C("#8d7352");
-    const tmp = new THREE.Color();
-    const r = mulberry32(55);
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), z = pos.getZ(i);
-      const h = terrainH(x, z);
-      pos.setY(i, h - 0.6);
-      const d = cityDist(x, z);
-      const g = terrainGrad(x, z, 12);
-      const slope = Math.hypot(g.x, g.y);
-      const sd = seaDist(x, z);
-      if (d > EXT - 330 || sd > -160) tmp.copy(sand).multiplyScalar(sd > 0 ? 0.7 : 1); // outer beach, bay shore and sea floor
-      else {
-        tmp.copy(grassLo).lerp(grassHi, clamp(h / 350, 0, 1));
-        if (d < 260 && d > 0) tmp.copy(dirt).lerp(tmp, clamp((d - 120) / 140, 0, 1));
-        tmp.lerp(rock, clamp((slope - 0.25) * 2.2, 0, 1));
-        if (h > 420) tmp.lerp(peak, clamp((h - 420) / 260, 0, 1) * 0.8);
-        const n = 0.9 + r() * 0.2;
-        tmp.multiplyScalar(n);
-      }
-      cols[i * 3] = tmp.r; cols[i * 3 + 1] = tmp.g; cols[i * 3 + 2] = tmp.b;
-    }
-    geo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
-    geo.computeVertexNormals();
-    this.terrain = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, envMapIntensity: 0.25 }));
-    this.terrain.receiveShadow = true;
-    this.scene.add(this.terrain);
-
-    // highways as terrain-conforming ribbons
-    const R: THREE.BufferGeometry[] = [];
-    const ribbon = (ax: number, ay: number, bx: number, by: number, width: number, col: string, lift: number) => {
-      const L = Math.hypot(bx - ax, by - ay), n = Math.ceil(L / 25);
-      const dx = (bx - ax) / L, dy = (by - ay) / L, nx = -dy * width / 2, ny = dx * width / 2;
-      const v: number[] = [], idx: number[] = [];
-      for (let i = 0; i <= n; i++) {
-        const t = i / n, x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
-        v.push(x + nx, terrainH(x + nx, y + ny) + lift, y + ny, x - nx, terrainH(x - nx, y - ny) + lift, y - ny);
-        if (i < n) { const b = i * 2; idx.push(b, b + 2, b + 1, b + 1, b + 2, b + 3); }
-      }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
-      g.setIndex(idx);
-      g.computeVertexNormals();
-      R.push(withColor(g, C(col)));
-    };
-    for (const i of HIGHWAYS) {
-      const c = i * BLOCK + ROAD / 2;
-      for (const [a0, a1] of [[MAP_MIN + 40, -8], [WORLD + 8, MAP_MAX - 40]]) {
-        ribbon(c, a0, c, a1, ROAD, "#3c3846", 0.3); ribbon(a0, c, a1, c, ROAD, "#3c3846", 0.3);
-        ribbon(c, a0, c, a1, 3, "#e0a82a", 0.6); ribbon(a0, c, a1, c, 3, "#e0a82a", 0.6);
-        ribbon(c - ROAD / 2 + 8, a0, c - ROAD / 2 + 8, a1, 2, "#c8c8d2", 0.6); ribbon(c + ROAD / 2 - 8, a0, c + ROAD / 2 - 8, a1, 2, "#c8c8d2", 0.6);
-        ribbon(a0, c - ROAD / 2 + 8, a1, c - ROAD / 2 + 8, 2, "#c8c8d2", 0.6); ribbon(a0, c + ROAD / 2 - 8, a1, c + ROAD / 2 - 8, 2, "#c8c8d2", 0.6);
-      }
-    }
-    const roads = new THREE.Mesh(mergeGeometries(R)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.1 }));
-    roads.receiveShadow = true;
+    this.terrain = terrainMesh(this.quality);
+    this.scene.add(this.terrain, backdropMesh());
+    const roads = roadsMesh(this.world);
+    roads.traverse((o) => { if ((o as THREE.Mesh).isMesh && o.userData.cast) this.cityMeshes.push(o as THREE.Mesh); });
     this.scene.add(roads);
-    for (const g of R) g.dispose();
-
     // forest + rocks
-    const treeN = this.quality === "high" ? 2100 : 1200, rockN = 430;
+    const treeN = this.quality === "high" ? 3600 : 2000, rockN = 700;
     const pine = mergeGeometries([
       withColor(new THREE.CylinderGeometry(1.6, 2.4, 14, 6).translate(0, 7, 0), C("#4a3320")),
       withColor(new THREE.ConeGeometry(11, 26, 7).translate(0, 24, 0), C("#1f4d2a")),
@@ -824,8 +701,7 @@ export class Renderer3D {
     while (placed < treeN && guard++ < treeN * 12) {
       const x = MAP_MIN + 400 + rr() * (MAP_SIZE - 800), z = MAP_MIN + 400 + rr() * (MAP_SIZE - 800);
       const d = cityDist(x, z);
-      if (d < 320 || d > EXT - 420 || seaDist(x, z) > -260 || Math.hypot(x - HELI_SPOT.x, z - HELI_SPOT.y) < 230) continue;
-      if (isHighway(x, z) || Math.min(...HIGHWAYS.map((i) => Math.abs(x - (i * BLOCK + ROAD / 2)))) < 110 || Math.min(...HIGHWAYS.map((i) => Math.abs(z - (i * BLOCK + ROAD / 2)))) < 110) continue;
+      if (d < 320 || coast(x, z).d < 260 || edgeDist(x, z) < EDGE_LAND + 120 || Math.hypot(x - HELI_SPOT.x, z - HELI_SPOT.y) < 230 || this.world.roads.nearest(x, z, 140).road >= 0 || this.world.isSolid(x, z, 30) || inStuntPark(x, z)) continue;
       const h = terrainH(x, z);
       const g = terrainGrad(x, z, 10);
       if (Math.hypot(g.x, g.y) > 0.42 || h > 460) continue;
@@ -838,7 +714,7 @@ export class Renderer3D {
     while (placed < rockN && guard++ < rockN * 12) {
       const x = MAP_MIN + 400 + rr() * (MAP_SIZE - 800), z = MAP_MIN + 400 + rr() * (MAP_SIZE - 800);
       const d = cityDist(x, z);
-      if (d < 420 || d > EXT - 420 || isHighway(x, z) || seaDist(x, z) > -120 || Math.hypot(x - HELI_SPOT.x, z - HELI_SPOT.y) < 230) continue;
+      if (d < 420 || coast(x, z).d < 120 || this.world.roads.nearest(x, z, 110).road >= 0 || Math.hypot(x - HELI_SPOT.x, z - HELI_SPOT.y) < 230 || inStuntPark(x, z)) continue;
       const h = terrainH(x, z);
       const g = terrainGrad(x, z, 10);
       if (h < 120 && Math.hypot(g.x, g.y) < 0.2 && rr() < 0.7) continue;
@@ -920,8 +796,27 @@ export class Renderer3D {
         L.ground.push(box(size - 20, 0.8, size - 20, mx, 2.5, mz, "#4c7a3a"), box(size * 0.45, 0.4, size * 0.4, x0 + size * 0.35, 3.0, z0 + size * 0.4, "#58853f"));
         L.ground.push(box(size - 20, 0.6, 12, mx, 3.0, mz, "#6b6350"), box(12, 0.6, size - 20, mx, 3.0, mz, "#6b6350"));
         L.prop.push(cyl(36, 38, 4, mx, 4, mz, "#b0aca2", 20)); L.neon.push(cyl(31, 31, 0.6, mx, 6.2, mz, "#1aa6c9", 20, 0.55)); L.prop.push(cyl(3, 4, 14, mx, 10, mz, "#d0ccdc", 8));
+      } else if (blk.kind === "site") {
+        L.ground.push(box(size - 20, 0.6, size - 20, mx, 2.4, mz, "#8a7556"));
+        for (let k = 0; k < 6; k++) L.prop.push(box(14 + r() * 20, 6 + r() * 8, 10 + r() * 14, x0 + 40 + r() * (size - 80), 4, z0 + 40 + r() * (size - 80), r() < 0.5 ? "#9a8a6a" : "#7a6a52"));
+        for (let k = 0; k < size; k += 30) L.prop.push(box(1.6, 12, 1.6, x0 + 6 + k, 8, z0 + 6, "#ff8a1a"), box(1.6, 12, 1.6, x0 + 6, 8, z0 + 6 + k, "#ff8a1a"));
+      } else if (blk.kind === "lot" || blk.kind === "garage") {
+        L.ground.push(box(size - 16, 0.4, size - 16, mx, 2.3, mz, "#4a4852"));
+        for (let k = 0; k < 9; k++) L.ground.push(box(1.4, 0.2, 40, x0 + 30 + k * 36, 2.6, z0 + size - 40, "#e8e8ec"));
+      } else if (blk.kind === "skate") {
+        L.ground.push(box(size - 20, 0.6, size - 20, mx, 2.4, mz, "#b0aca4"));
+        L.prop.push(cyl(48, 48, 1, mx, 2.8, mz, "#8f8b84", 24));
       } else L.ground.push(box(size - 24, 0.4, size - 24, mx, 2.3, mz, "#a8a49a"));
       for (const b of blk.buildings) {
+        if (b.garage) {
+          // parking garage: concrete decks with open bands
+          const H = b.height * H_SCALE + 14, cx = b.x + b.w / 2, cz = b.y + b.h / 2;
+          L.prop.push(box(b.w, H, b.h, cx, H / 2, cz, "#a9a59d"));
+          for (const yy of [H * 0.25, H * 0.7]) L.prop.push(box(b.w + 0.4, H * 0.18, b.h + 0.4, cx, yy, cz, "#2a2a30"));
+          L.prop.push(box(b.w + 2, 4, b.h + 2, cx, H + 2, cz, "#8f8b84"), box(b.w - 6, 0.4, b.h - 6, cx, H + 0.3, cz, "#4a4852"));
+          for (let k = 0; k < 6; k++) L.ground.push(box(1.2, 0.2, 30, b.x + 30 + k * 44, H + 0.6, cz, "#e8e8ec"));
+          continue;
+        }
         const H = b.height * H_SCALE + 14, cx = b.x + b.w / 2, cz = b.y + b.h / 2;
         const col = C(WALL_COLS[Math.floor(r() * WALL_COLS.length)]).clone().multiplyScalar(0.75 + r() * 0.3).lerp(distWall, dist.wallMix);
         L.wall.push(wallBox(b, H, col));
@@ -949,6 +844,7 @@ export class Renderer3D {
         }
       }
       for (const t of blk.trees) {
+        if (t.kind === 0) { this.leafTree(L.prop, t.x, t.y, 0, t.r, r); continue; }
         const H = 42 + t.r * 2.2, lean = (r() - 0.5) * 6;
         L.prop.push(cyl(1.5, 2.6, H, t.x + lean * 0.5, H / 2 + 2, t.y, "#6b4a2e", 6));
         const top = H + 2;
@@ -970,53 +866,44 @@ export class Renderer3D {
       };
       add(L.ground, groundMat, false, true); add(L.wall, wallMat, true, true); add(L.prop, propMat, true, true); add(L.neon, neonMat, false, false);
     }
+    // palms on the island and along the promenade
+    const T: THREE.BufferGeometry[] = [];
+    for (const t of this.world.extraTrees) {
+      const z0 = terrainH(t.x, t.y), H = 42 + t.r * 2.2, lean = (r() - 0.5) * 6;
+      T.push(cyl(1.5, 2.6, H, t.x + lean * 0.5, z0 + H / 2, t.y, "#6b4a2e", 6));
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2 + t.rot, len = 24 + t.r * 0.5;
+        const g = new THREE.BoxGeometry(len, 0.8, 7); g.translate(len / 2, 0, 0); g.rotateZ(-0.5 - r() * 0.25); g.rotateY(a); g.translate(t.x + lean, z0 + H, t.y);
+        T.push(withColor(g, C(k % 2 ? "#2f8f4e" : "#3aa85c")));
+      }
+    }
+    if (T.length) { const tm = new THREE.Mesh(mergeGeometries(T)!, propMat); tm.castShadow = true; tm.userData.cast = true; this.scene.add(tm); this.cityMeshes.push(tm); for (const g of T) g.dispose(); }
     this.buildEdge();
-    const E: THREE.BufferGeometry[] = [];
-    const B = MAP_SIZE;
-    for (const [w, d, x, z] of [[B, 3, MAP_MIN + B / 2, MAP_MIN - 2], [B, 3, MAP_MIN + B / 2, MAP_MAX + 2], [3, B, MAP_MIN - 2, MAP_MIN + B / 2], [3, B, MAP_MAX + 2, MAP_MIN + B / 2]]) E.push(box(w, 6, d, x, 2, z, "#a8a49c"));
-    this.scene.add(new THREE.Mesh(mergeGeometries(E)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 })));
   }
 
-  // beach west of the city, harbour quay with containers and cranes east of it
-  private buildEdge() {
-    const r = mulberry32(4711);
-    const P: THREE.BufferGeometry[] = [];
-    const hw = HIGHWAYS.map((i) => i * BLOCK + ROAD / 2);
-    // strips between the highways
-    let a = 0;
-    for (const c of [...hw, WORLD + ROAD]) {
-      const b = Math.min(WORLD, c - ROAD / 2 - 4);
-      if (b - a > 20) {
-        P.push(box(216, 0.8, b - a, -112, 0.4, (a + b) / 2, "#e3cd98"));
-        P.push(box(226, 2.4, b - a, WORLD + 117, 1.2, (a + b) / 2, "#6e7177"));
-        P.push(box(4, 3, b - a, WORLD + 228, 1.5, (a + b) / 2, "#d9b23a"));
-      }
-      a = c + ROAD / 2 + 4;
+  // deciduous tree: trunk and a few overlapping crowns
+  private leafTree(out: THREE.BufferGeometry[], x: number, y: number, z0: number, rad: number, r: () => number) {
+    const H = 18 + rad * 1.1;
+    out.push(cyl(1.6, 2.4, H, x, z0 + H / 2 + 2, y, "#5a3e26", 6));
+    const greens = ["#3f6f2e", "#4c7d34", "#355f28", "#5a8a3a"];
+    for (let k = 0; k < 4; k++) {
+      const a = r() * 6.28, d = k ? rad * 0.45 : 0, s = rad * (k ? 0.75 : 1);
+      const g = new THREE.SphereGeometry(s, 8, 6); g.scale(1, 0.85, 1); g.translate(x + Math.cos(a) * d, z0 + H + 2 + s * 0.4 + (k ? r() * 6 : 4), y + Math.sin(a) * d);
+      out.push(withColor(g, C(greens[(k + Math.floor(r() * 4)) % 4])));
     }
-    // beach umbrellas and loungers
-    const UMB = ["#ff3cac", "#2bf0ff", "#ffd23f", "#ff8a3d", "#3dff8b"];
-    for (let i = 0; i < 46; i++) {
-      const z = 60 + r() * (WORLD - 120);
-      if (hw.some((c) => Math.abs(z - c) < ROAD / 2 + 30)) continue;
-      const x = -40 - r() * 160;
-      P.push(cyl(0.8, 0.8, 22, x, 11, z, "#e8e8ec", 6), withColor(new THREE.ConeGeometry(15, 6, 10).translate(x, 24, z), C(UMB[i % UMB.length])));
-      P.push(box(18, 2, 7, x + 12, 2, z + 4, "#f4f4f6"));
-    }
-    // containers (solid, from world.extras) and cranes
-    for (const e of this.world.extras) {
-      const stack = e.detail, col = C(e.wall);
-      for (let k = 0; k < stack; k++) P.push(box(e.w - 1, 25, e.h - 1, e.x + e.w / 2, 13 + k * 26, e.y + e.h / 2, col.clone().multiplyScalar(0.85 + 0.15 * ((k + e.seed * 3) % 1))));
-    }
-    for (const zc of [WORLD * 0.18, WORLD * 0.5, WORLD * 0.82]) {
-      const x = WORLD + 205;
-      for (const dz of [-22, 22]) P.push(box(4, 120, 4, x - 18, 60, zc + dz, "#d98a1a"), box(4, 120, 4, x + 18, 60, zc + dz, "#d98a1a"));
-      P.push(box(44, 6, 50, x, 122, zc, "#d98a1a"), box(190, 5, 6, x - 60, 128, zc, "#d98a1a"), box(12, 10, 12, x - 130, 118, zc, "#555"));
-    }
-    const m = new THREE.Mesh(mergeGeometries(P)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }));
-    m.receiveShadow = true; m.castShadow = this.quality === "high"; m.userData.cast = true;
-    this.scene.add(m); this.cityMeshes.push(m);
-    for (const g of P) g.dispose();
   }
+
+  // beach, harbour quay and promenade, everything outside the blocks
+  private buildEdge() {
+    const c = coastMesh(this.world);
+    this.scene.add(c); this.cityMeshes.push(c);
+    const e = extrasMesh(this.world);
+    e.traverse((o) => { if ((o as THREE.Mesh).isMesh && o.userData.cast) this.cityMeshes.push(o as THREE.Mesh); });
+    this.scene.add(e);
+    this.lightsMesh = new LightsMesh(new TrafficLights());
+    this.scene.add(this.lightsMesh.group);
+  }
+  private lightsMesh: LightsMesh | null = null;
 
   // places outside the blocks: sign on a post, plus a jetty into the bay or a helipad
   private buildSpot(pl: Place, sign: THREE.Texture) {
@@ -1094,6 +981,10 @@ export class Renderer3D {
 
   resetCamera(yaw = this.camYaw) { this.camInit = false; this.camYaw = yaw; }
   cinematic: { x: number; y: number; z: number; a: number } | null = null;
+  // falling over a cliff: the camera stays at the edge and looks down after you
+  set fallCam(v: boolean) { this.fallFix = v ? this.camPos.clone() : null; }
+  get fallCam() { return !!this.fallFix; }
+  private fallFix: THREE.Vector3 | null = null;
 
   private buildLamps() {
     const pts: [number, number][] = [];
@@ -1669,8 +1560,12 @@ export class Renderer3D {
         const cx = Math.cos(this.camYaw), cy = Math.sin(this.camYaw);
         for (let s = 0.12; s <= 1.0001; s += 0.08) if (this.world.isSolid(p.x - cx * full * s, p.y - cy * full * s, 6)) { dist = Math.max(36, full * s - 12); break; }
         const behindH = terrainH(p.x - cx * dist, p.y - cy * dist);
-        const h = (46 + sp * 0.025 + (fly ? 45 : 0)) * (0.55 + 0.45 * (dist / full)) + (g.ending ? 40 : 0);
-        tgt.set(p.x - cx * dist, Math.max(p.z + h, behindH + 22), p.y - cy * dist);
+        let h = (46 + sp * 0.025 + (fly ? 45 : 0)) * (0.55 + 0.45 * (dist / full)) + (g.ending ? 40 : 0);
+        // in the tunnel the camera stays under the ceiling, close behind the car
+        const tf = tunnelAt(p.x, p.y), tb = tunnelAt(p.x - cx * dist, p.y - cy * dist);
+        const inTunnel = (!isNaN(tf) && p.z < tf + TUNNEL.clear) || (!isNaN(tb) && p.z < tb + TUNNEL.clear);
+        if (inTunnel) { h = Math.min(h, TUNNEL.clear - 14); dist = Math.min(dist, 80); }
+        tgt.set(p.x - cx * dist, inTunnel ? p.z + h : Math.max(p.z + h, behindH + 22), p.y - cy * dist);
         lx = p.x + cx * 70; ly = p.z + 12; lz = p.y + cy * 70;
         fov = 62 + clamp(sp / 700, 0, 1) * 14 + (p.nitro ? 8 : 0);
         kp = 11;
@@ -1682,6 +1577,7 @@ export class Renderer3D {
       lx = ax; ly = fz; lz = az; fov = 50 + (p.nitro && !g.onFoot ? 5 : 0); kp = 5;
       this.camYaw = -Math.PI / 2;
     }
+    if (this.fallFix && !cin) { tgt.copy(this.fallFix); lx = fx; ly = fz; lz = fy; kp = 6; }
     if (!this.camInit) { this.camPos.copy(tgt); this.camLook.set(lx, ly, lz); this.camInit = true; }
     if (instant) { this.camPos.copy(tgt); this.camLook.set(lx, ly, lz); }
     else {
@@ -1712,6 +1608,7 @@ export class Renderer3D {
     this.syncSpikes(g);
     this.ped.update(g, dt);
     this.crowd.update(g.peds.list, g.state !== "menu");
+    this.lightsMesh?.update(g.traffic.lights);
     this.updateCamera(g, dt);
     const scale = this.renderer.domElement.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
     this.smoke.mat.uniforms.scale.value = scale;
