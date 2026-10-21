@@ -70,12 +70,13 @@ export const MODEL_STATS: Record<CarModel, ModelStats> = {
 
 // half length / half width of each model (collision boxes match the drawn models)
 export const MODEL_DIM: Record<CarModel, { hl: number; hw: number }> = {
-  sport: { hl: 24, hw: 12 }, super: { hl: 25, hw: 12.5 }, muscle: { hl: 25, hw: 12.5 }, suv: { hl: 25, hw: 13 }, sedan: { hl: 24, hw: 12 },
-  van: { hl: 26, hw: 12.5 }, police: { hl: 25, hw: 12.5 }, taxi: { hl: 24, hw: 12 }, bike: { hl: 17, hw: 4.5 }, truck: { hl: 33, hw: 13.5 },
-  bus: { hl: 41, hw: 14 }, swat: { hl: 27, hw: 13 }, armor: { hl: 31, hw: 14.5 }, boat: { hl: 28, hw: 11 }, heli: { hl: 30, hw: 12 },
-  roadster: { hl: 23, hw: 11.5 }, pickup: { hl: 27, hw: 13 }, compact: { hl: 20, hw: 11 }, wagon: { hl: 25, hw: 12 }, offroad: { hl: 25, hw: 13.5 },
-  tow: { hl: 33, hw: 13.5 }, garbage: { hl: 36, hw: 14 }, ambulance: { hl: 28, hw: 13 }, fire: { hl: 40, hw: 14 }, icecream: { hl: 27, hw: 13 },
-  policebike: { hl: 17, hw: 4.5 }, unmarked: { hl: 24, hw: 12 }, scooter: { hl: 12, hw: 4 }, bicycle: { hl: 11, hw: 3 },
+  // real sizes of the car bodies (10 units = 1 m), see SHAPES in carmodel.ts
+  sport: { hl: 22.5, hw: 9.5 }, super: { hl: 23, hw: 10 }, muscle: { hl: 24.5, hw: 9.8 }, suv: { hl: 24, hw: 10 }, sedan: { hl: 24, hw: 9.3 },
+  van: { hl: 26, hw: 10 }, police: { hl: 25, hw: 9.5 }, taxi: { hl: 24, hw: 9.3 }, bike: { hl: 17, hw: 4.5 }, truck: { hl: 34, hw: 12 },
+  bus: { hl: 50, hw: 12.5 }, swat: { hl: 27, hw: 10.5 }, armor: { hl: 31, hw: 14.5 }, boat: { hl: 28, hw: 11 }, heli: { hl: 30, hw: 12 },
+  roadster: { hl: 21, hw: 9.1 }, pickup: { hl: 27, hw: 10 }, compact: { hl: 20, hw: 8.8 }, wagon: { hl: 24.3, hw: 9.3 }, offroad: { hl: 25, hw: 9.8 },
+  tow: { hl: 33, hw: 12 }, garbage: { hl: 37, hw: 12.3 }, ambulance: { hl: 28, hw: 10.3 }, fire: { hl: 41, hw: 12.5 }, icecream: { hl: 27, hw: 10.3 },
+  policebike: { hl: 17, hw: 4.5 }, unmarked: { hl: 24, hw: 9.4 }, scooter: { hl: 12, hw: 4 }, bicycle: { hl: 11, hw: 3 },
   jetski: { hl: 14, hw: 6 }, fishboat: { hl: 34, hw: 13 }, policeboat: { hl: 30, hw: 12 }, policeheli: { hl: 30, hw: 12 },
 };
 
@@ -111,8 +112,30 @@ export class Car {
   stuckT = 0; reverseT = 0; nearCd = 0; hitFlash = 0;
   rlx = NaN; rly = NaN; rrx = NaN; rry = NaN;
   siren = Math.random() * 10; cruise = 170; smokeT = 0; shootT = 0;
+  blink = 0;               // indicator: -1 left, 1 right, 2 hazard lights
+  dents: number[] = [];    // where the body was hit: local x, local z (right side +), depth
+  glass: Record<string, number> = {}; glassV = 0; // window panes: 1 cracked, 2 broken (glassV counts changes)
+  bumpers = 0;             // torn off: bit 1 front, bit 2 rear
+  doors = [0, 0, 0, 0];    // how far each door is open (0..1): 0 right front, 1 left front, 2 right rear, 3 left rear
   constructor(public kind: CarKind, public model: CarModel, public color: string) {}
   get speed() { return Math.hypot(this.vx, this.vy); }
   get hl() { return MODEL_DIM[this.model].hl; }
   get hw() { return MODEL_DIM[this.model].hw; }
 }
+
+// a hit at the world point (wx, wy): dents in the body, cracked or broken windows, a bumper that falls off
+export function hitCar(c: Car, wx: number, wy: number, impact: number) {
+  if (impact < 90 || isCraft(c.model) || isTwoWheel(c.model)) return;
+  const ca = Math.cos(c.a), sa = Math.sin(c.a), dx = wx - c.x, dy = wy - c.y;
+  const hl = c.hl, hw = c.hw;
+  const lx = Math.max(-hl, Math.min(hl, dx * ca + dy * sa)), lz = Math.max(-hw, Math.min(hw, -dx * sa + dy * ca));
+  if (c.dents.length < 14 * 3) c.dents.push(lx, lz, Math.min(2.6, impact / 260));
+  if (impact > 260) {
+    const id = lx > hl * 0.45 ? "front" : lx < -hl * 0.55 ? "rear" : "door" + ((lx > -hl * 0.05 ? 0 : 2) + (lz > 0 ? 0 : 1));
+    const was = c.glass[id] ?? 0, now = Math.min(2, was + (impact > 460 ? 2 : 1));
+    if (now !== was) { c.glass[id] = now; c.glassV++; }
+  }
+  if (impact > 380 && Math.abs(lx) > hl * 0.75) c.bumpers |= lx > 0 ? 1 : 2;
+}
+export function repairBody(c: Car) { c.dents = []; c.glass = {}; c.glassV++; c.bumpers = 0; }
+export function copyBody(to: Car, from: Car) { to.dents = [...from.dents]; to.glass = { ...from.glass }; to.glassV++; to.bumpers = from.bumpers; to.doors = [0, 0, 0, 0]; to.blink = 0; }

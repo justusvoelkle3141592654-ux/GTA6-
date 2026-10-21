@@ -5,7 +5,7 @@ import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, CRIMES, type Crime } from "./wanted";
 import { buildPlaces, onJetty, respawnCost, RESPAWN_RULES, type Place } from "./places";
 import { PedSystem, PED_LIMIT, isPolice, type Civilian, type Team } from "./peds";
-import { Car, CARS, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, type CarDef, type FactionId } from "./vehicles";
+import { Car, CARS, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, hitCar, copyBody, repairBody, type CarDef, type FactionId } from "./vehicles";
 import { Inventory, WEAPONS, type Weapon } from "./weapons";
 import { AUTOSAVE_EVERY, SAVE_VERSION, emptyProgress, emptyStats, writeSave, type Progress, type SaveData, type SaveResult, type SaveStats } from "./save";
 import { Traffic, PARKED_LIMIT } from "./traffic";
@@ -597,6 +597,11 @@ export class Game {
 
   private damageCar(c: Car, amt: number, byWeapon = false, byPlayer = true) {
     if (c.dead) return;
+    if (byWeapon && amt < 300 && Math.random() < 0.35) {
+      // a bullet in a window: cracked, the second one breaks it
+      const ids = ["front", "rear", "door0", "door1", "door2", "door3"], id = ids[Math.floor(Math.random() * ids.length)];
+      c.glass[id] = Math.min(2, (c.glass[id] ?? 0) + 1); c.glassV++;
+    }
     if (c.kind === "player") { this.damagePlayerCar(amt); return; }
     c.hp -= amt;
     c.hitFlash = 0.12;
@@ -756,6 +761,7 @@ export class Game {
         const old = new Car("civ", p.model, p.color);
         old.x = p.x; old.y = p.y; old.z = p.z; old.a = p.a;
         old.hp = p.hp; old.maxHp = p.maxHp; old.mass = p.mass; old.parked = true; old.owned = true; old.tune = p.tune; old.flat = p.flat;
+        copyBody(old, p);
         this.cars.push(old);
         for (const b of this.bombs) if (b.car === p) b.car = old;
       }
@@ -1184,7 +1190,7 @@ export class Game {
         const old = new Car("civ", p.model, p.color);
         old.x = p.x; old.y = p.y; old.z = p.z; old.a = p.a; old.vx = p.vx; old.vy = p.vy;
         old.hp = p.hp; old.maxHp = p.maxHp; old.mass = p.mass; old.dead = p.dead; old.wrecked = p.wrecked; old.parked = true; old.owned = true; old.deadT = p.deadT; old.wreckT = p.wreckT; old.tune = p.tune;
-        old.keep = p.keep && !p.dead;
+        old.keep = p.keep && !p.dead; copyBody(old, p);
         this.cars.push(old);
         for (const b of this.bombs) if (b.car === p) b.car = old;
       }
@@ -1203,7 +1209,7 @@ export class Game {
       this.traffic.release(c);
       p.x = c.x; p.y = c.y; p.z = c.z; p.a = c.a; p.vx = c.vx; p.vy = c.vy; p.av = 0; p.vz = 0; p.air = false;
       p.model = c.model; p.color = c.color; p.hp = Math.max(c.hp, c.maxHp * 0.6); p.maxHp = c.maxHp; p.mass = Math.max(1, c.mass);
-      p.tune = c.tune; p.tag = c.tag; p.faction = null;
+      p.tune = c.tune; p.tag = c.tag; p.faction = null; copyBody(p, c);
       if (c.tag) this.onCarTaken?.(c);
       p.dead = false; p.wrecked = false; p.deadT = 0; p.wreckT = 0; p.parked = false; p.hitFlash = 0;
       p.rlx = NaN;
@@ -1730,7 +1736,7 @@ export class Game {
       for (let i = 0; i < 16; i++) { const a = Math.random() * TAU, s = rnd(60, 220); this.emit(pk.x, pk.y, z + 12, Math.cos(a) * s + this.fvx * 0.3, Math.sin(a) * s + this.fvy * 0.3, rnd(120, 280), rnd(0.5, 0.9), rnd(2.5, 4.5), 0, "#3dff8b", 5, 2); }
       ring("#3dff8b"); this.shake(0.06);
     } else if (pk.type === "repair") {
-      if (!this.onFoot && !p.dead) p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.5);
+      if (!this.onFoot && !p.dead) { p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.5); repairBody(p); }
       this.ped.hp = Math.min(this.ped.maxHp, this.ped.hp + 50);
       this.text(pk.x, pk.y - 20, "REPARATUR", "#ffffff", 24); sfx.powerup(); ring("#ffffff"); this.spawnPickup("repair", true);
     } else if (pk.type === "nitro") {
@@ -2035,6 +2041,7 @@ export class Game {
   }
 
   private onWallHit(c: Car, impact: number, x: number, y: number, nx: number, ny: number) {
+    hitCar(c, x, y, impact);
     this.sparks(x, y, c.z + 8, Math.min(18, Math.floor(impact / 30)), nx, ny);
     for (let i = 0; i < 3; i++) this.emit(x, y, c.z + 8, nx * 40 + rnd(-30, 30), ny * 40 + rnd(-30, 30), rnd(15, 35), rnd(0.5, 1), rnd(6, 12), 20, "#6b6478", 0, 2);
     if (c.kind === "player") {
@@ -2096,6 +2103,7 @@ export class Game {
 
   private onCarHit(a: Car, b: Car, impact: number, x: number, y: number, nx: number, ny: number) {
     if (impact < 40) return;
+    hitCar(a, x, y, impact); hitCar(b, x, y, impact);
     const playing = this.state === "playing" && !this.ending;
     const p = a.kind === "player" ? a : b.kind === "player" ? b : null;
     const other = p === a ? b : a;
@@ -2134,8 +2142,9 @@ export class Game {
   // ---------- effects ----------
   private carEffects(c: Car, dt: number) {
     const ca = Math.cos(c.a), sa = Math.sin(c.a);
-    const rx = c.x - ca * 15, ry = c.y - sa * 15;
-    const lx = rx + sa * 10, ly = ry - ca * 10, rrx = rx - sa * 10, rry = ry + ca * 10;
+    const rb = c.hl * 0.6, wb = c.hw * 0.8;
+    const rx = c.x - ca * rb, ry = c.y - sa * rb;
+    const lx = rx + sa * wb, ly = ry - ca * wb, rrx = rx - sa * wb, rry = ry + ca * wb;
     const sliding = !c.air && !isCraft(c.model) && (Math.abs(c.vR) > 120 || (c.handbrake && Math.abs(c.vF) > 120) || (c.throttle < 0 && c.vF > 250));
     const near = Math.abs(c.x - this.fx) < 1100 && Math.abs(c.y - this.fy) < 1100;
     if (sliding && near && !c.wrecked) {
@@ -2158,6 +2167,11 @@ export class Game {
         this.emit(fxp, fyp, c.z + 16, rnd(-15, 15), rnd(-15, 15), rnd(30, 60), rnd(0.9, 1.8), rnd(6, 10), 28, c.dead ? "#1f1b24" : "#4a4552", 0, 1);
         if (hp01 < 0.25 || (c.dead && c.deadT < 8)) this.emit(fxp, fyp, c.z + 14, rnd(-20, 20), rnd(-20, 20), rnd(20, 50), rnd(0.25, 0.5), rnd(6, 11), -8, "#ff7a1a", 2, 2);
       }
+    }
+    // exhaust: a puff when pulling away
+    if (near && !c.air && !c.dead && !isCraft(c.model) && c.throttle > 0.5 && c.speed < 180 && P60(c.kind === "player" ? 0.6 : 0.2, dt)) {
+      const ex = c.x - ca * (c.hl + 1.5) - sa * c.hw * 0.55, ey = c.y - sa * (c.hl + 1.5) + ca * c.hw * 0.55;
+      this.emit(ex, ey, c.z + 2, -ca * rnd(30, 60) + rnd(-8, 8), -sa * rnd(30, 60) + rnd(-8, 8), rnd(5, 15), rnd(0.5, 0.9), rnd(2.5, 4.5), 9, "#a9a6b0", 0, 0.8);
     }
     if (c.nitro && c.kind === "player" && P60(1, dt)) {
       for (let i = 0; i < 2; i++) {

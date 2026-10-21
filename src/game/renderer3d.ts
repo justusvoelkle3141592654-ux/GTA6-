@@ -16,6 +16,7 @@ import { WaterSurface } from "./water";
 import { buildHideFields } from "./hide";
 const inStuntPark = (x: number, y: number) => x > STUNT_PARK.x0 - 60 && x < STUNT_PARK.x1 + 60 && y > STUNT_PARK.y0 - 60 && y < STUNT_PARK.y1 + 60;
 import { isCraft, isBoat, isHeli, isTwoWheel } from "./vehicles";
+import { CarRig, carMaterials, hasRig, topAt, type CarMats } from "./carmodel";
 import { JETTY, HELI_SPOT, type Place } from "./places";
 import { CrowdRenderer } from "./crowd3d";
 import { DISTRICTS, blockDistrict } from "./districts";
@@ -386,10 +387,16 @@ function getCarGeo(model: CarModel, color: string): CarGeo {
 
 interface CarObj {
   group: THREE.Group; tilt: THREE.Group; body: THREE.Mesh; glass: THREE.Mesh; lights: THREE.Mesh; pool: THREE.Mesh; glow?: THREE.Mesh; rotor?: THREE.Mesh;
-  wheels: { pivot: THREE.Group; spin: THREE.Mesh; front: boolean; r: number }[];
+  wheels: { pivot: THREE.Object3D; spin: THREE.Object3D; front: boolean; r: number; y: number }[];
   bar?: { reds: THREE.MeshBasicMaterial; blues: THREE.MeshBasicMaterial; white: THREE.MeshBasicMaterial };
   model: CarModel; color: string; wreck: boolean; pitch: number; roll: number; spinA: number; steerA: number;
+  rig?: CarRig; dentN: number; glassV: number; bumpers: number; prevV: number; brakeT: number; wipe: number; bounce: number; bounceV: number;
 }
+// people at the wheel of traffic cars
+const DRIVER_SKIN = ["#f1c7a5", "#d9a07c", "#b07850", "#7a4f32", "#5a3a26"];
+const DRIVER_SHIRT = ["#2b3242", "#c0392b", "#eef0f2", "#3d6e9a", "#5a7a3a", "#d4a017", "#6a4a8a", "#1d1d22"];
+const DRIVER_HAIR = ["#1b1410", "#3a2a1c", "#6a4a2a", "#b08850", "#8a8a8a", "#0d0d0d"];
+let plateNo = 1000 + Math.floor(Math.random() * 7000);
 
 // ---------------------------------------------------------------- particles
 class PointsLayer {
@@ -1181,7 +1188,59 @@ export class Renderer3D {
   }
 
   // ---------------------------------------------------------- per-frame
+  private carMats: CarMats | null = null;
+  // a realistic car: lofted body, doors, glass, interior, switchable lights (carmodel.ts)
+  private makeRigCar(c: Car): CarObj {
+    const mats = this.carMats ??= carMaterials();
+    plateNo = plateNo >= 9999 ? 1000 : plateNo + 37;
+    const rig = new CarRig(c.model, c.color, mats, `SB · ${plateNo}`);
+    const s = rig.geo.shape, hi = this.quality === "high" || this.quality === "ultra";
+    const group = rig.root, tilt = rig.tilt;
+    group.rotation.order = "YXZ";
+    rig.body.castShadow = this.quality !== "low"; rig.trim.castShadow = hi;
+    if (rig.extra) rig.extra.castShadow = this.quality !== "low";
+    for (const w of rig.wheels) for (const m of w.spin.children) m.castShadow = hi;
+    const wheels: CarObj["wheels"] = rig.wheels.map((w) => ({ pivot: w.pivot, spin: w.spin, front: w.front, r: s.R, y: s.R }));
+    const shadow = new THREE.Mesh(this.shadowGeo, this.shadowMat);
+    shadow.renderOrder = 1; shadow.scale.set(s.L / 50, 1, s.W / 30);
+    const pool = new THREE.Mesh(this.poolGeo, c.kind === "player" ? this.poolMatP : this.poolMat);
+    pool.renderOrder = 2;
+    group.add(shadow, pool);
+    const r = Math.abs(Math.sin(c.siren * 7.31));
+    rig.setDriver(DRIVER_SKIN[Math.floor(r * 97) % DRIVER_SKIN.length], c.kind === "cop" ? "#1f3a6e" : DRIVER_SHIRT[Math.floor(r * 331) % DRIVER_SHIRT.length], DRIVER_HAIR[Math.floor(r * 53) % DRIVER_HAIR.length]);
+    const obj: CarObj = { group, tilt, body: rig.body, glass: rig.body, lights: rig.lights.head, pool, wheels, model: c.model, color: c.color, wreck: false, pitch: 0, roll: 0, spinA: 0, steerA: 0,
+      rig, dentN: 0, glassV: -1, bumpers: 0, prevV: c.vF, brakeT: 0, wipe: 0, bounce: 0, bounceV: 0 };
+    if (c.kind === "player") { obj.glow = new THREE.Mesh(this.glowGeo, this.glowMat); obj.glow.renderOrder = 2; group.add(obj.glow); }
+    if (c.model === "police" || c.model === "swat" || c.model === "ambulance" || c.model === "fire") {
+      const reds = new THREE.MeshBasicMaterial({ color: this.copRed.clone(), toneMapped: false });
+      const blues = new THREE.MeshBasicMaterial({ color: this.copBlue.clone(), toneMapped: false });
+      const white = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1, 1), toneMapped: false });
+      const bx = s.box ? Math.min(s.box.x1, s.roofF) - 3 : (s.roofF + s.roofR) / 2 + 2, top = s.box ? Math.max(s.roof, s.box.h) : s.roof;
+      const housing = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.6, s.W * 0.66), mats.trim); housing.position.set(bx, top + 0.35, 0); tilt.add(housing);
+      for (let i = 0; i < 6; i++) {
+        const z = (-2.5 + i) * s.W * 0.11;
+        const seg = new THREE.Mesh(this.barSeg, i < 2 ? reds : i > 3 ? blues : white);
+        seg.scale.set(0.9, 0.7, s.W * 0.04);
+        seg.position.set(bx, top + 1.3, z);
+        tilt.add(seg);
+      }
+      if (c.model === "police") {
+        const sy = s.belt - 3.2, sz = s.W / 2 + 0.12;
+        const d1 = new THREE.Mesh(this.decalGeo, this.decalMat); d1.scale.set(0.9, 0.7, 1); d1.position.set(-2, sy, sz); tilt.add(d1);
+        const d2 = new THREE.Mesh(this.decalGeo, this.decalMatB); d2.scale.set(0.9, 0.7, 1); d2.position.set(-2, sy, -sz); d2.rotation.y = Math.PI; tilt.add(d2);
+        const d3 = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), this.roofDecalMat); d3.rotation.x = -Math.PI / 2; d3.rotation.z = -Math.PI / 2; d3.position.set(bx - 7, s.roof + 0.16, 0); tilt.add(d3);
+        const hx = (s.cowlX + s.L / 2) / 2;
+        const d4 = new THREE.Mesh(new THREE.PlaneGeometry(9, 4.5), this.roofDecalMat); d4.rotation.x = -Math.PI / 2; d4.rotation.z = -Math.PI / 2; d4.position.set(hx, topAt(s, hx) + 0.55, 0); tilt.add(d4);
+      }
+      obj.bar = { reds, blues, white };
+    }
+    this.scene.add(group);
+    this.atm.setupMaterials(group);
+    return obj;
+  }
+
   private makeCar(c: Car): CarObj {
+    if (hasRig(c.model)) return this.makeRigCar(c);
     const geo = getCarGeo(c.model, c.color);
     const group = new THREE.Group();
     group.rotation.order = "YXZ";
@@ -1200,14 +1259,14 @@ export class Renderer3D {
       spin.castShadow = this.quality === "high";
       pivot.add(spin);
       tilt.add(pivot);
-      wheels.push({ pivot, spin, front: w.front, r: w.r });
+      wheels.push({ pivot, spin, front: w.front, r: w.r, y: w.r });
     }
     const shadow = new THREE.Mesh(this.shadowGeo, this.shadowMat);
     shadow.renderOrder = 1;
     const pool = new THREE.Mesh(this.poolGeo, c.kind === "player" ? this.poolMatP : this.poolMat);
     pool.renderOrder = 2;
     group.add(shadow, pool);
-    const obj: CarObj = { group, tilt, body, glass, lights, pool, wheels, model: c.model, color: c.color, wreck: false, pitch: 0, roll: 0, spinA: 0, steerA: 0 };
+    const obj: CarObj = { group, tilt, body, glass, lights, pool, wheels, model: c.model, color: c.color, wreck: false, pitch: 0, roll: 0, spinA: 0, steerA: 0, dentN: 0, glassV: 0, bumpers: 0, prevV: 0, brakeT: 0, wipe: 0, bounce: 0, bounceV: 0 };
     if (c.kind === "player") { obj.glow = new THREE.Mesh(this.glowGeo, this.glowMat); obj.glow.renderOrder = 2; group.add(obj.glow); }
     if (isHeli(c.model)) { obj.rotor = new THREE.Mesh(this.rotorGeo, this.rotorMat); obj.rotor.position.y = 27; tilt.add(obj.rotor); shadow.visible = false; }
     if (isBoat(c.model)) { shadow.visible = false; pool.visible = false; }
@@ -1239,6 +1298,7 @@ export class Renderer3D {
 
   private disposeCar(o: CarObj) {
     this.scene.remove(o.group);
+    o.rig?.dispose();
     if (o.bar) { o.bar.reds.dispose(); o.bar.blues.dispose(); o.bar.white.dispose(); }
   }
 
@@ -1249,7 +1309,7 @@ export class Renderer3D {
     for (const c of g.cars) {
       seen.add(c);
       let o = this.carObjs.get(c);
-      if (o && (o.model !== c.model || o.color !== c.color || (o.wreck && !c.dead))) { this.disposeCar(o); o = undefined; }
+      if (o && (o.model !== c.model || o.color !== c.color || (o.wreck && !c.dead) || c.dents.length < o.dentN * 3 || (o.bumpers & ~c.bumpers) !== 0)) { this.disposeCar(o); o = undefined; }
       if (!o) { o = this.makeCar(c); this.carObjs.set(c, o); }
       o.group.position.set(c.x, c.z, c.y);
       // terrain tilt
@@ -1279,12 +1339,14 @@ export class Renderer3D {
       } else o.tilt.rotation.x = clamp(-c.vR / 900, -0.09, 0.09);
       if (!isCraft(c.model)) o.tilt.rotation.z = c.dead ? 0 : c.throttle > 0 ? 0.025 * c.throttle : c.throttle < 0 && c.vF > 50 ? -0.04 : 0;
       o.pool.visible = !c.air && !c.dead && !isBoat(c.model);
-      if (c.dead && !o.wreck) {
+      if (o.rig) this.updateRig(g, c, o, dt);
+      else if (c.dead && !o.wreck) {
         o.wreck = true; o.body.material = this.wreckMat; o.glass.material = this.wreckMat; o.lights.visible = false; o.pool.visible = false;
         if (o.glow) o.glow.visible = false;
         if (o.bar) { o.bar.reds.color.setScalar(0.1); o.bar.blues.color.setScalar(0.1); o.bar.white.color.setScalar(0.1); }
       }
-      if (!o.wreck) {
+      if (o.rig) { /* see updateRig */ }
+      else if (!o.wreck) {
         // badly damaged cars look scorched and dull
         o.body.material = c.hitFlash > 0.07 ? this.flashMat : c.hp < c.maxHp * 0.4 ? this.dmgMat : this.bodyMat;
         if (o.glow) { o.glow.visible = !g.onFoot; (o.glow.material as THREE.MeshBasicMaterial).opacity = 0.75 + Math.sin(t * 4) * 0.15 + (c.nitro ? 0.3 : 0); }
@@ -1303,8 +1365,71 @@ export class Renderer3D {
       o.steerA += (steerTarget - o.steerA) * Math.min(1, dt * 14);
       o.spinA += (c.dead ? 0 : c.vF) * dt;
       for (const w of o.wheels) { if (w.front) w.pivot.rotation.y = o.steerA; w.spin.rotation.z = -o.spinA / w.r; }
+      if (o.rig) o.rig.steering.rotation.x = -o.steerA * 3.2; // the steering wheel turns about 3 times as far as the wheels
     }
     for (const [c, o] of this.carObjs) if (!seen.has(c)) { this.disposeCar(o); this.carObjs.delete(c); }
+  }
+
+  // lights, doors, glass, dents, suspension, driver and detail level of a realistic car
+  private updateRig(g: Game, c: Car, o: CarObj, dt: number) {
+    const rig = o.rig!, m = this.carMats!, st = this.atm.state, t = g.t;
+    const d = Math.hypot(c.x - this.camPos.x, c.y - this.camPos.z);
+    rig.setLod(d < 260 ? 0 : d < 900 ? 1 : 2);
+    if (c.dead) {
+      if (!o.wreck) {
+        o.wreck = true; rig.wreck(); o.pool.visible = false;
+        if (o.glow) o.glow.visible = false;
+        if (o.bar) { o.bar.reds.color.setScalar(0.1); o.bar.blues.color.setScalar(0.1); o.bar.white.color.setScalar(0.1); }
+        for (const k of ["head", "tail", "brake", "rev", "indL", "indR"] as const) rig.lights[k].material = k === "head" || k === "rev" ? m.headOff : m.offLens;
+        rig.driver.visible = false;
+      }
+      return;
+    }
+    // paint: scratched and dull when badly damaged, a short flash when hit
+    rig.setPaint(c.color, c.hp < c.maxHp * 0.45 || c.dents.length >= 12);
+    if (c.hitFlash > 0.07) { rig.body.material = this.flashMat; }
+    // dents where the car was hit (only new ones are added)
+    while (o.dentN * 3 < c.dents.length) { const i = o.dentN * 3; rig.dent(c.dents[i], c.dents[i + 1], c.dents[i + 2]); o.dentN++; }
+    if (o.glassV !== c.glassV) { o.glassV = c.glassV; rig.setGlass((id) => (c.glass[id] ?? 0) as 0 | 1 | 2); }
+    if (c.bumpers & 1 && !(o.bumpers & 1)) { rig.dropBumper(true); o.bumpers |= 1; }
+    if (c.bumpers & 2 && !(o.bumpers & 2)) { rig.dropBumper(false); o.bumpers |= 2; }
+    // who sits inside: traffic and police drivers, the player (not in first person)
+    const isP = c === g.player;
+    rig.driver.visible = rig.lod < 2 && (isP ? !g.onFoot && this.camMode !== "fp" : c.kind === "cop" || (c.kind === "civ" && (c.driver || (!c.parked && c.speed > 5))));
+    if (isP && rig.driver.visible) { const of = OUTFITS[g.outfit] ?? OUTFITS[0]; rig.setDriver("#d9a07c", of.shirt, "#1b1410"); }
+    // lights: dipped beam at night and in bad weather, brake lights when slowing down, reversing light, indicators, hazards
+    const occupied = isP ? !g.onFoot : c.kind === "cop" || !c.parked;
+    const lightsOn = occupied && (st.day < 0.55 || st.rain > 0.3 || st.fog > 0.3);
+    const decel = (o.prevV - c.vF) / Math.max(dt, 1e-3);
+    o.prevV = c.vF;
+    if (occupied && ((c.throttle < -0.05 && c.vF > 15) || (c.handbrake && c.speed > 10) || (decel > 140 && c.vF > 10) || (c.speed < 4 && !isP && !c.parked))) o.brakeT = 0.25;
+    else o.brakeT = Math.max(0, o.brakeT - dt);
+    o.pool.visible = o.pool.visible && lightsOn;
+    rig.lights.head.material = lightsOn ? m.headOn : m.headOff;
+    rig.lights.tail.material = lightsOn ? m.tailOn : m.tailDim;
+    rig.lights.brake.material = o.brakeT > 0 ? m.brakeOn : m.offLens;
+    rig.lights.rev.material = occupied && c.vF < -8 && c.throttle < 0 ? m.revOn : m.headOff;
+    const blink = c.wrecked && c.kind === "civ" ? 2 : c.blink, on = Math.floor(t * 2.6) % 2 === 0;
+    rig.lights.indL.material = on && (blink === -1 || blink === 2) ? m.indOn : m.offLens;
+    rig.lights.indR.material = on && (blink === 1 || blink === 2) ? m.indOn : m.offLens;
+    // wipers in the rain
+    if (occupied && st.rain > 0.15) o.wipe += dt * 2.4; else if (o.wipe % Math.PI > 0.05) o.wipe += dt * 2.4; else o.wipe = 0;
+    const wa = -Math.abs(Math.sin(o.wipe)) * 1.45;
+    for (const w of rig.wipers) w.rotation.y = wa;
+    // doors swing open and shut
+    for (let i = 0; i < rig.doors.length; i++) {
+      const dr = rig.doors[i];
+      dr.target = c.doors[i] ?? 0;
+      dr.open += (dr.target - dr.open) * Math.min(1, dt * 7);
+      dr.pivot.rotation.y = dr.side * dr.open * 1.15;
+    }
+    // suspension: the body bounces on landing and over bumps; flat tyres sit lower
+    const ground = c.air ? 0 : 1;
+    o.bounceV += (-o.bounce * 160 - o.bounceV * 14) * dt;
+    if (c.vz < -120 && !c.air) o.bounceV -= Math.min(30, -c.vz * 0.05);
+    o.bounce += o.bounceV * dt;
+    rig.tilt.position.y = clamp(o.bounce, -1.6, 1.2) * ground;
+    for (const w of o.wheels) w.pivot.position.y = w.y - (c.flat ? w.r * 0.22 : 0) - (c.air ? 0.8 : 0);
   }
 
   private syncPickups(g: Game) {
@@ -1620,6 +1745,8 @@ export class Renderer3D {
 
   private tmpM = new THREE.Matrix4(); private tmpQ = new THREE.Quaternion(); private tmpS = new THREE.Vector3(); private tmpP = new THREE.Vector3(); private up = new THREE.Vector3(0, 1, 0);
 
+  // a camera placed from outside (camera flight in the main menu, test shots)
+  flyCam: { pos: THREE.Vector3; look: THREE.Vector3 } | null = null;
   private updateCamera(g: Game, dt: number) {
     const p = g.player;
     const fx = g.fx, fy = g.fy, fz = g.fz, sp = g.fspeed;
@@ -1653,9 +1780,11 @@ export class Renderer3D {
         const cx = Math.cos(p.a), cy = Math.sin(p.a);
         const rx = -cy, ry = cx;
         const roll = clamp(-p.vR / 900, -0.09, 0.09);
-        const eye = getCarGeo(p.model, p.color).roofY - 3.2;
-        tgt.set(p.x + cx * 3 - rx * 5, p.z + eye + roll * 3, p.y + cy * 3 - ry * 5);
-        lx = p.x + cx * 220 - rx * 5; ly = p.z + eye - 5 + (p.air ? p.vz * 0.05 : 0); lz = p.y + cy * 220 - ry * 5;
+        // eye of the driver: from the seat of a realistic car, else below the roof
+        const rg = this.carObjs.get(p)?.rig?.geo;
+        const eye = rg ? rg.eye[1] : getCarGeo(p.model, p.color).roofY - 3.2, fw = rg ? rg.eye[0] : 3, sd = rg ? -rg.eye[2] : 5;
+        tgt.set(p.x + cx * fw - rx * sd, p.z + eye + roll * 3, p.y + cy * fw - ry * sd);
+        lx = p.x + cx * 220 - rx * sd; ly = p.z + eye - 2 + (p.air ? p.vz * 0.05 : 0); lz = p.y + cy * 220 - ry * sd;
       }
       fov = 78 + clamp(sp / 700, 0, 1) * 10 + (p.nitro && !g.onFoot ? 6 : 0);
       kp = 40; instant = true;
@@ -1696,6 +1825,7 @@ export class Renderer3D {
       this.camYaw = -Math.PI / 2;
     }
     if (this.fallFix && !cin) { tgt.copy(this.fallFix); lx = fx; ly = fz; lz = fy; kp = 6; }
+    if (this.flyCam) { tgt.copy(this.flyCam.pos); lx = this.flyCam.look.x; ly = this.flyCam.look.y; lz = this.flyCam.look.z; instant = true; }
     if (!this.camInit) { this.camPos.copy(tgt); this.camLook.set(lx, ly, lz); this.camInit = true; }
     if (instant) { this.camPos.copy(tgt); this.camLook.set(lx, ly, lz); }
     else {

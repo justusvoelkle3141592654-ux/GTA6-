@@ -242,9 +242,13 @@ export class Traffic {
         } else if (Math.random() * n < 1) { ci = ni; cj = nj; }
       }
       c.prevI = c.wpI; c.prevJ = c.wpJ; c.wpI = ci; c.wpJ = cj;
+      // indicate the turn: right of the old direction is (-dy, dx)
+      const ndx = Math.sign(ci - c.prevI), ndy = Math.sign(cj - c.prevJ), cross = -dy * ndx + dx * ndy;
+      c.blink = cross > 0.5 ? 1 : cross < -0.5 ? -1 : 0;
     }
     }
     const diff = steerTo(c, tx, ty);
+    if ((c.blink === 1 || c.blink === -1) && Math.abs(diff) < 0.08 && Math.hypot(tx - c.x, ty - c.y) > 120) c.blink = 0; // turn done
     const want = cruise * (Math.abs(diff) > 0.45 ? 0.55 : 1);
     c.throttle = c.vF < want ? 1 : c.vF > want + 40 ? -0.4 : 0;
     c.handbrake = false;

@@ -1,5 +1,5 @@
 import { sfx } from "./audio";
-import { Car, MODEL_NAME, MODEL_STATS, isCraft } from "./vehicles";
+import { Car, MODEL_NAME, MODEL_STATS, isCraft, repairBody } from "./vehicles";
 import { WEAPON_DEFS } from "./weapons";
 import { terrainH } from "./world";
 import { MAX_TUNE, PAINTS, TUNE_DEFS, tuneHp } from "./garage";
@@ -90,13 +90,13 @@ export class Shops {
         const cost = Math.ceil(Math.max(0, p.maxHp - p.hp) * REPAIR_PER_HP) + (p.flat ? TYRE_PRICE : 0);
         if (cost <= 0) return "Der Wagen ist in Ordnung";
         if (!this.pay(cost)) return broke;
-        p.hp = p.maxHp; p.flat = false;
+        p.hp = p.maxHp; p.flat = false; repairBody(p);
         return "Repariert";
       }
       case "paint": {
         if (g.onFoot || !PAINTS.includes(a.color) || a.color === p.color) return "";
         if (!this.pay(PAINT_PRICE)) return broke;
-        p.color = a.color; p.hp = p.maxHp;
+        p.color = a.color; p.hp = p.maxHp; repairBody(p);
         if (g.wanted.stars > 0 && !g.copSeesPlayer()) { g.wanted.clear(); return "Neue Farbe – die Polizei sucht jetzt ein anderes Auto"; }
         return "Frisch lackiert";
       }
