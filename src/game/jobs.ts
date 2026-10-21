@@ -1,8 +1,9 @@
-import { Car, type CarModel } from "./vehicles";
+import { Car, MODEL_NAME, type CarModel } from "./vehicles";
 import { BLOCK, ROAD, GRID, WORLD, HIGHWAYS, mulberry32, terrainH, isWater, type World } from "./world";
 import type { Game } from "./engine";
 import type { Civilian } from "./peds";
 import type { Marker } from "./missions";
+import type { Place } from "./places";
 import { sfx } from "./audio";
 
 // ---------------------------------------------------------------- side jobs (started in the right vehicle)
@@ -14,6 +15,10 @@ export const JOB_DEFS: Record<JobKind, JobDef> = {
   bounty: { kind: "bounty", name: "Streife", models: ["police", "swat"], desc: "Flüchtige stoppen und zu Fuß festnehmen" },
 };
 export const JOB_KINDS: JobKind[] = ["taxi", "delivery", "bounty"];
+// the vehicle that waits at each start point
+const JOB_VEHICLE: Record<JobKind, { model: CarModel; color: string }> = {
+  taxi: { model: "taxi", color: "#ffc21a" }, delivery: { model: "van", color: "#e4e2dc" }, bounty: { model: "police", color: "#f4f6fa" },
+};
 export const jobFor = (m: CarModel): JobKind | null => JOB_KINDS.find((k) => JOB_DEFS[k].models.includes(m)) ?? null;
 
 // ---------------------------------------------------------------- street races
@@ -90,14 +95,19 @@ export class Jobs {
 
   get busy() { return !!this.active || !!this.race; }
 
-  // job key: start the job of the car you sit in, or stop the running one
+  // job key: stops the running job; jobs start at their start points
   toggle() {
-    const g = this.g;
     if (this.active) { this.stop("Job beendet"); return; }
-    if (g.onFoot || g.playerCarStored) { g.hintMsg("Jobs startest du im passenden Auto (Taxi, Lieferwagen, Streifenwagen)"); return; }
+    this.g.hintMsg("Jobs startest du an den Startpunkten: X Taxistand · P Lieferdepot · S Streife");
+  }
+
+  // drove into the ring of a job start point (or pressed E there on foot)
+  startAt(pl: Place) {
+    const g = this.g, kind = pl.job;
+    if (!kind || this.active) return;
+    const def = JOB_DEFS[kind];
+    if (g.onFoot || g.playerCarStored || jobFor(g.player.model) !== kind) { g.hintMsg(`${def.name}: Steig in das Fahrzeug am Startpunkt (${def.models.map((m) => MODEL_NAME[m]).join(" / ")})`); return; }
     if (g.missions.active || this.race || g.hide.active) { g.hintMsg("Erst die laufende Mission beenden"); return; }
-    const kind = jobFor(g.player.model);
-    if (!kind) { g.hintMsg("In diesem Auto gibt's keinen Job – Taxi, Lieferwagen/LKW oder Streifenwagen"); return; }
     if (kind === "bounty" && g.wanted.stars > 0) { g.hintMsg("Mit Fahndung gibt dir die Zentrale keine Einsätze"); return; }
     this.active = { kind, stage: kind === "taxi" ? "pickup" : kind === "bounty" ? "hunt" : "drive", timer: 0, count: 0, fare: null, dest: { x: 0, y: 0 }, target: null, suspect: null };
     g.banner(JOB_DEFS[kind].name.toUpperCase(), JOB_DEFS[kind].desc, "#2bf0ff", 2);
@@ -182,10 +192,21 @@ export class Jobs {
     if (a.count % 5 === 0) { g.addCash(500); g.hintMsg("Serienbonus +$500"); }
   }
 
+  // the job vehicles wait at their start points
+  private keepVehicles() {
+    const g = this.g;
+    for (const pl of g.places) if (pl.job) { const v = JOB_VEHICLE[pl.job]; g.craft.keepAt(v.model, pl.cx, pl.cy, -Math.PI / 2, v.color); }
+  }
+  private keepT = 0;
+
   update(dt: number) {
     const g = this.g;
     this.markers.length = 0;
     const inCar = !g.onFoot && !g.player.dead && !g.playerCarStored;
+    this.keepT -= dt;
+    if (this.keepT <= 0) { this.keepT = 1; this.keepVehicles(); }
+    // start points (shown while no job runs)
+    if (!this.active && !g.missions.active) for (const pl of g.places) if (pl.job && Math.hypot(pl.cx - g.fx, pl.cy - g.fy) < 2500) this.markers.push({ x: pl.cx, y: pl.cy, color: pl.color, kind: "contact", label: pl.icon });
     this.updateCollectibles(inCar);
     this.updateRace(dt, inCar);
     const a = this.active;

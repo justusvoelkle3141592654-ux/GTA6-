@@ -1,7 +1,7 @@
 import { BLOCK, ROAD, GRID, WORLD, HELIPAD, type Building, type World } from "./world";
 import type { EndReason } from "./engine";
 
-export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport" | "park";
+export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport" | "park" | "job";
 export type PlaceAccess = "foot" | "car" | "both" | "none";
 
 export interface PlaceDef {
@@ -12,6 +12,7 @@ export interface PlaceDef {
   robbable?: boolean;
   at?: [number, number, number]; // fixed spot outside the city blocks (x, y, facing); vehicles wait next to it
   inPark?: boolean;              // entrance at the west edge of the nearest park (cx, cy: middle of the park)
+  job?: "taxi" | "delivery" | "bounty"; // job start point: the vehicle waits at the car spot, drive into the ring to start
 }
 // boat jetty on the beach (between the middle and the southern causeway) and helipad east of the harbour
 export const DOCK_SPOT = { x: -340, y: 3455, a: Math.PI };
@@ -36,6 +37,10 @@ export const PLACE_DEFS: PlaceDef[] = [
   { id: "ines", kind: "contact", name: "Hafenamt", color: "#ff5ad1", icon: "A", near: [0, 5], access: "foot" },
   { id: "ruiz", kind: "contact", name: "Kommissarin Ruiz", color: "#ff5ad1", icon: "R", near: [8, 4], access: "foot" },
   // vehicles: a speedboat at the jetty, a helicopter on the pad (always there again when you come back)
+  // side job start points
+  { id: "taxistand", kind: "job", job: "taxi", name: "Taxistand", color: "#ffc21a", icon: "X", near: [4, 7], access: "both" },
+  { id: "depot", kind: "job", job: "delivery", name: "Lieferdepot", color: "#e67e22", icon: "P", near: [9, 6], access: "both" },
+  { id: "patrol", kind: "job", job: "bounty", name: "Streife (Revier)", color: "#3d8bff", icon: "S", near: [7, 2], access: "both" },
   // hide and seek in the park
   { id: "hide", kind: "park", name: "Versteckspiel im Park", color: "#3dff8b", icon: "V", near: [6, 7], access: "foot", inPark: true },
   { id: "jetty", kind: "dock", name: "Bootssteg", color: "#2bb3ff", icon: "B", near: [0, 6], access: "none", at: [-196, 3455, Math.PI] },

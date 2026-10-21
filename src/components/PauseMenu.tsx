@@ -6,12 +6,14 @@ import { HIDE_ROUNDS } from "../game/hide";
 import { JOB_DEFS, JOB_KINDS, RACES } from "../game/jobs";
 import { ACTIONS, ACTION_LABEL, keyLabel, type Action } from "../game/input";
 import { CHANNELS } from "../game/audio";
+import { SPAWN_MODELS, type SpawnPeople } from "../game/spawner";
+import { MODEL_NAME } from "../game/vehicles";
 import { CHANNEL_LABEL, applySettings, loadSettings, saveSettings, type Settings } from "../game/settings";
 import BigMap from "./BigMap";
 import Help from "./Help";
 import { Btn, fmt, fmtTime } from "./ui";
 
-export type PauseTab = "menu" | "map" | "progress" | "settings" | "help";
+export type PauseTab = "menu" | "map" | "progress" | "spawn" | "settings" | "help";
 const CAM_LABEL: Record<CameraMode, string> = { chase: "3D Verfolger", fp: "Ego (im Auto)", top: "Vogelperspektive" };
 const SAVE_MSG: Record<SaveResult, string> = {
   saved: "Gespeichert ✓", memory: "Nur vorübergehend gespeichert – der Browser blockiert den lokalen Speicher",
@@ -27,7 +29,7 @@ export default function PauseMenu({ game, tab, setTab, hud, config, isTouch, mut
   const open = config.mode === "open";
   const [saveMsg, setSaveMsg] = useState("");
   const [, redraw] = useState(0);
-  const tabs: [PauseTab, string][] = open ? [["menu", "Menü"], ["map", "Karte"], ["progress", "Fortschritt"], ["settings", "Optionen"], ["help", "Hilfe"]] : [["menu", "Menü"], ["settings", "Optionen"], ["help", "Hilfe"]];
+  const tabs: [PauseTab, string][] = open ? [["menu", "Menü"], ["map", "Karte"], ["progress", "Fortschritt"], ["spawn", "Spawnen"], ["settings", "Optionen"], ["help", "Hilfe"]] : [["menu", "Menü"], ["settings", "Optionen"], ["help", "Hilfe"]];
   return (
     <div className="absolute inset-0 z-20 flex flex-col items-center overflow-y-auto bg-[#0b0614]/80 p-4 backdrop-blur-sm sm:p-6">
       <h2 className="popin font-display text-6xl tracking-wider text-white neon-text sm:text-7xl">PAUSE</h2>
@@ -52,6 +54,7 @@ export default function PauseMenu({ game, tab, setTab, hud, config, isTouch, mut
         )}
         {tab === "map" && <BigMap game={game} onChange={() => redraw((n) => n + 1)} />}
         {tab === "progress" && <Progress game={game} />}
+        {tab === "spawn" && <SpawnTab game={game} onResume={onResume} />}
         {tab === "settings" && <SettingsTab game={game} isTouch={isTouch} />}
         {tab === "help" && <div className="rounded-2xl border border-white/10 bg-black/50 p-4"><Help isTouch={isTouch} bind={game.bind} /></div>}
       </div>
@@ -104,6 +107,49 @@ function Progress({ game }: { game: Game }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// sandbox: everything on demand; vehicles take you back into the game right away
+function SpawnTab({ game, onResume }: { game: Game; onResume: () => void }) {
+  const [msg, setMsg] = useState("");
+  const sp = game.spawner;
+  const run = (m: string, resume = false) => { setMsg(m); if (resume && !/^(Nur|Nicht|Ein Boot|Hier)/.test(m)) onResume(); };
+  const people: [SpawnPeople, string][] = [["civ", "Passanten"], ["cop", "Polizisten"], ["halcones", "Halcones"], ["kings", "Neon Kings"]];
+  const card = "rounded-2xl border border-white/10 bg-black/50 p-4 text-sm";
+  const b = "rounded-lg border border-white/15 bg-white/5 px-2 py-2 text-sm font-bold text-white transition hover:border-pink-400 active:scale-95";
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className={card + " sm:col-span-2"}>
+        <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Fahrzeug herbeirufen</h3>
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+          {SPAWN_MODELS.map((m) => <button key={m} className={b} onClick={() => run(sp.vehicle(m), true)}>{MODEL_NAME[m]}</button>)}
+        </div>
+        <div className="mt-2 text-[11px] text-white/50">Du steigst sofort ein. Boote erscheinen nur in der Nähe von Wasser.</div>
+      </div>
+      <div className={card}>
+        <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Ausrüstung</h3>
+        <div className="grid grid-cols-2 gap-2">
+          <button className={b} onClick={() => run(sp.weapons())}>Alle Waffen</button>
+          <button className={b} onClick={() => run(sp.heal())}>Alles auffüllen</button>
+          <button className={b} onClick={() => run(sp.cash(1000))}>+$1.000</button>
+          <button className={b} onClick={() => run(sp.cash(10000))}>+$10.000</button>
+        </div>
+      </div>
+      <div className={card}>
+        <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Leute</h3>
+        <div className="grid grid-cols-2 gap-2">
+          {people.map(([k, l]) => <button key={k} className={b} onClick={() => run(sp.people(k))}>{l}</button>)}
+        </div>
+      </div>
+      <div className={card + " sm:col-span-2"}>
+        <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Fahndung</h3>
+        <div className="grid grid-cols-7 gap-2">
+          {[0, 1, 2, 3, 4, 5, 6].map((n) => <button key={n} className={b} onClick={() => run(sp.wanted(n))}>{n === 0 ? "0" : n + "★"}</button>)}
+        </div>
+      </div>
+      {msg && <div className="popin rounded-lg bg-white/10 px-3 py-2 text-center text-sm text-yellow-100 sm:col-span-2">{msg}</div>}
     </div>
   );
 }

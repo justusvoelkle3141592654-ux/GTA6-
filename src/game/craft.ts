@@ -32,14 +32,15 @@ export class Craft {
     this.keepAt("heli", HELI_SPOT.x, HELI_SPOT.y, HELI_SPOT.a, "#ff3cac");
   }
 
-  private keepAt(model: CarModel, x: number, y: number, a: number, color: string) {
+  // a vehicle of this model waits at (x, y) when you come close (also used for the job start points)
+  keepAt(model: CarModel, x: number, y: number, a: number, color: string) {
     const g = this.g;
     const d = Math.hypot(g.fx - x, g.fy - y);
     if (d > SPAWN_NEAR || d < SPAWN_MIN) return;
     for (const c of g.cars) if (c.model === model && !c.dead && Math.hypot(c.x - x, c.y - y) < SPOT_FREE) return;
     const c = new Car("civ", model, color);
     const st = MODEL_STATS[model];
-    c.x = x; c.y = y; c.a = a; c.z = model === "boat" ? WATER_Y : terrainH(x, y) + 3;
+    c.x = x; c.y = y; c.a = a; c.z = model === "boat" ? WATER_Y : terrainH(x, y) + (model === "heli" ? 3 : 0);
     c.hp = c.maxHp = st.hp; c.mass = st.mass;
     c.parked = true; c.handbrake = true; c.owned = true; // free to use: no crime
     g.cars.push(c);

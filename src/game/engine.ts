@@ -16,7 +16,7 @@ import type { ShopAction } from "./economy";
 import { PLACE_RADIUS } from "./places";
 import { Bindings } from "./input";
 import { Missions } from "./missions";
-import { Jobs, jobFor } from "./jobs";
+import { Jobs } from "./jobs";
 import { currentSettings } from "./settings";
 import { findRoute, MAX_ROUTE } from "./route";
 import { Tips } from "./tips";
@@ -25,6 +25,7 @@ import { Shops } from "./shops";
 import { Gangs } from "./gangs";
 import { Craft } from "./craft";
 import { HideSeek, HIDE_RADIUS } from "./hide";
+import { Spawner } from "./spawner";
 
 export type GameState = "menu" | "playing" | "paused" | "over" | "modal";
 // overlays that stop the game while open (shops, dialogs, weapon wheel)
@@ -133,6 +134,7 @@ export class Game {
   gangs: Gangs = new Gangs(this);
   craft: Craft = new Craft(this);
   hide: HideSeek = new HideSeek(this);
+  spawner: Spawner = new Spawner(this);
   state: GameState = "menu";
   dpr = 1; cw = 0; ch = 0; mobile = false;
 
@@ -990,7 +992,10 @@ export class Game {
       if (this.onFoot && (pl.access === "foot" || pl.access === "both") && Math.hypot(this.ped.x - pl.x, this.ped.y - pl.y) < PLACE_RADIUS.foot) this.nearPlace = pl;
       if (!this.onFoot && (pl.access === "car" || pl.access === "both") && Math.hypot(this.player.x - pl.cx, this.player.y - pl.cy) < PLACE_RADIUS.car) {
         this.nearPlace = pl; latch = pl.id;
-        if (this.placeLatch !== pl.id && this.player.speed < 90 && pl.kind !== "contact") { this.placeLatch = pl.id; this.openModal({ kind: "shop", place: pl }); }
+        if (this.placeLatch !== pl.id && this.player.speed < 90 && pl.kind !== "contact") {
+          this.placeLatch = pl.id;
+          if (pl.kind === "job") this.jobs.startAt(pl); else this.openModal({ kind: "shop", place: pl });
+        }
       }
     }
     if (!latch) this.placeLatch = "";
@@ -1002,6 +1007,7 @@ export class Game {
     if (!pl || !this.onFoot) return false;
     if (pl.kind === "contact") return this.onContact?.(pl) ?? false;
     if (pl.kind === "park") { this.hide.start(pl); return true; }
+    if (pl.kind === "job") { this.jobs.startAt(pl); return true; }
     this.openModal({ kind: "shop", place: pl });
     return true;
   }
@@ -1057,6 +1063,13 @@ export class Game {
     p.throttle = 0; p.steer = 0; p.handbrake = true; p.nitro = false;
     sfx.door();
     this.setHint("E / 🚗 zum Einsteigen", 2);
+  }
+
+  // sandbox menu: get into a vehicle that was just put next to you (from the car you sit in, or on foot)
+  takeVehicle(c: Car) {
+    if (!this.onFoot) { const p = this.player; p.vx = 0; p.vy = 0; if (p.model !== "heli" || p.z <= this.groundAt(p.x, p.y) + 6) this.exitCar(); else return; }
+    this.ped.x = c.x; this.ped.y = c.y;
+    this.enterCar(c);
   }
 
   private enterCar(c: Car) {
@@ -1154,7 +1167,7 @@ export class Game {
       place: this.nearPlace && this.nearPlace.kind !== "contact" ? this.nearPlace.name : this.nearPlace ? this.contactLabel(this.nearPlace) : "",
       radio: !this.onFoot && st ? st.name : "",
       objective: this.objective, objTimer: this.objTimer,
-      job: this.jobs.active ? "beenden" : !this.onFoot && this.rules.city && !this.missions.active && jobFor(p.model) ? "starten" : "",
+      job: this.jobs.active ? "beenden" : "",
       alt: !this.onFoot && p.model === "heli" && !p.dead ? Math.max(0, Math.round((p.z - this.groundAt(p.x, p.y)) * 0.1)) : -1,
       swim: this.onFoot && this.ped.swim,
     };

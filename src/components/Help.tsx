@@ -15,7 +15,7 @@ export default function Help({ isTouch, bind }: { isTouch: boolean; bind: Bindin
           <li><b>Grüner Knopf</b> – Laden / Ort betreten, Missionen und Versteckspiel starten</li>
           <li><b>Hubschrauber:</b> <b className="text-pink-300">HOCH</b> steigen · <b className="text-cyan-300">RUNTER</b> sinken · Stick fliegt und dreht · aussteigen nur gelandet</li>
           <li><b>Speedboot:</b> fährt wie ein Auto, nur auf dem Wasser · zu Fuß im Wasser schwimmst du (ohne Waffen)</li>
-          <li><b>⏸</b> Pause – Karte (Wegpunkt setzen), Fortschritt, Speichern, Einstellungen</li>
+          <li><b>⏸</b> Pause – Karte (Wegpunkt setzen), Fortschritt, Spawnen, Speichern, Einstellungen</li>
         </ul>
       ) : (
         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-white/80">
@@ -37,7 +37,9 @@ export default function Help({ isTouch, bind }: { isTouch: boolean; bind: Bindin
         Erledigt → <b className="text-red-300">Krankenhaus</b>, verhaftet → <b className="text-blue-300">Polizeiwache</b>, jeweils mit Geldverlust.<br />
         🏪 Läden: <b>W</b> Waffen · <b>T</b> Lack & Tuning · <b>K</b> Kleidung · <b>I</b> Imbiss · <b>H</b> Safehouse & Garage. Pinke Buchstaben auf der Karte sind Auftraggeber.<br />
         🚁 <b>Fahrzeuge:</b> Speedboot am Bootssteg (<b>B</b>), Hubschrauber am Heliport (<b>F</b>). Autos, die ins Wasser fahren, versinken.<br />
-        🚓 <b>Streife:</b> Im Streifenwagen den Job starten, Fluchtwagen stoppen und Flüchtige zu Fuß festnehmen (berühren oder niederschlagen).<br />
+        💼 <b>Jobs</b> starten an festen Punkten: <b>X</b> Taxistand, <b>P</b> Lieferdepot, <b>S</b> Streife. Dort wartet das Fahrzeug – einsteigen, langsam in den Ring fahren. Beenden mit dem Job-Knopf.<br />
+        🚓 <b>Streife:</b> Fluchtwagen stoppen und Flüchtige zu Fuß festnehmen (berühren oder niederschlagen).<br />
+        🧰 <b>Spawnen</b> (Pausenmenü): jedes Fahrzeug, alle Waffen, Geld, Leute und die Fahndungsstufe auf Knopfdruck.<br />
         🙈 <b>Versteckspiel</b> im Park (<b>V</b>): Verstecke dich vor den grünen Suchern – unter Bäumen, hinter Häusern oder in geparkten Autos.<br />
         🏦 <b>Bank</b> im Safehouse: eingezahltes Geld ist sicher vor Klinik- und Kautionskosten.<br />
         ⭐ Ab 4 Sternen liegen Nagelbänder vor Straßensperren (Werkstatt flickt die Reifen), bei 6 Sternen kommt das Militär.<br />

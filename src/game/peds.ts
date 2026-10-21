@@ -188,6 +188,23 @@ export class PedSystem {
     }
   }
 
+  // the pool is full: the passer-by farthest from (x, y) goes home (sandbox menu)
+  makeRoom(x: number, y: number): boolean {
+    let best: Civilian | null = null, bd = -1;
+    for (const c of this.list) { if (!c.active || c.tag || (c.role !== "civ" && c.state !== "down")) continue; const d = Math.hypot(c.x - x, c.y - y); if (d > bd) { bd = d; best = c; } }
+    if (best) best.active = false;
+    return !!best;
+  }
+
+  // a passer-by at (x, y) who walks to the nearest sidewalk first (sandbox menu)
+  spawnCiv(x: number, y: number): Civilian | null {
+    const c = this.free(true);
+    if (!c) return null;
+    this.init(c, x, y);
+    this.targetSidewalk(c);
+    return c;
+  }
+
   // a person pulled out of a car: runs away from the car, then back to the sidewalk
   spawnAt(x: number, y: number, threatX: number, threatY: number) {
     const c = this.free() ?? this.list.find((o) => o.active && o.state !== "down") ?? null;
