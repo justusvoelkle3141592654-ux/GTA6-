@@ -101,7 +101,10 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onTog
           {hud.swim && <div className="mt-1 font-display text-xl tracking-widest text-sky-300">SCHWIMMEN</div>}
         </div>
       ) : (
-        <div className="cyan-text absolute bottom-3 left-1/2 -translate-x-1/2 font-display text-2xl tracking-wider">{hud.kmh} <span className="text-xs text-white/50">KM/H</span>{hud.alt >= 0 && <span className="ml-2 text-yellow-200">↑{hud.alt} M</span>}{hud.swim && <span className="ml-2 text-sky-300">SCHWIMMEN</span>}</div>
+        <>
+          {(hud.alt >= 0 || hud.swim) && <div className="absolute bottom-11 left-[40%] font-display text-xl tracking-wider">{hud.alt >= 0 ? <span className="text-yellow-200">↑{hud.alt} M</span> : <span className="text-sky-300">SCHWIMMEN</span>}</div>}
+          <div className="cyan-text absolute bottom-3 left-[40%] font-display text-2xl tracking-wider">{hud.kmh} <span className="text-xs text-white/50">KM/H</span></div>
+        </>
       )}
 
       {hud.drift > 30 && (

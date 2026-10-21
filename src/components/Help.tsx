@@ -12,7 +12,9 @@ export default function Help({ isTouch, bind }: { isTouch: boolean; bind: Bindin
           <li><b>Waffe</b> antippen = nächste Waffe · <b>gedrückt halten</b> = Waffenrad · <b>💥</b> = Bomben zünden</li>
           <li><b className="text-pink-300">DRIFT</b> – Handbremse · <b className="text-cyan-300">NITRO / SPRINT</b> (Nitro verbraucht sich und lädt langsam nach)</li>
           <li><b>🚪 / 🚗</b> oben – aus- & einsteigen (Autos klauen) · <b>📻</b> – Radiosender · <b>🎥</b> – Kamera</li>
-          <li><b>Grüner Knopf</b> – Laden / Ort betreten, Missionen starten</li>
+          <li><b>Grüner Knopf</b> – Laden / Ort betreten, Missionen und Versteckspiel starten</li>
+          <li><b>Hubschrauber:</b> <b className="text-pink-300">HOCH</b> steigen · <b className="text-cyan-300">RUNTER</b> sinken · Stick fliegt und dreht · aussteigen nur gelandet</li>
+          <li><b>Speedboot:</b> fährt wie ein Auto, nur auf dem Wasser · zu Fuß im Wasser schwimmst du (ohne Waffen)</li>
           <li><b>⏸</b> Pause – Karte (Wegpunkt setzen), Fortschritt, Speichern, Einstellungen</li>
         </ul>
       ) : (
@@ -31,9 +33,14 @@ export default function Help({ isTouch, bind }: { isTouch: boolean; bind: Bindin
         🔫 Pistole: 3 Treffer = Cop kaputt · 🚀 Rakete: 1 Treffer · 💣 Haftbombe klebt an Autos · 🍍 Granate explodiert nach 2 s<br />
         Säulen: <b className="text-green-300">grün</b> Cash · <b className="text-orange-300">orange</b> Raketen · <b className="text-red-300">rot</b> Bomben · <b className="text-cyan-300">blau</b> Nitro · <b>weiß</b> Reparatur<br />
         🌆 <b>Open World:</b> Verbrechen vor Zeugen bringen Sterne. Bleib außer Sicht der Cops, bis die Sterne aufhören zu blinken. Lackieren (Werkstatt) oder Umziehen (bis 2 Sterne) hilft beim Verstecken.
-        Ab 3 Sternen gibt es Straßensperren, ab 4 einen Hubschrauber, bei 5 das SEK.<br />
+        Ab 3 Sternen gibt es Straßensperren, ab 4 einen Hubschrauber, bei 5 das SEK, bei 6 das Militär.<br />
         Erledigt → <b className="text-red-300">Krankenhaus</b>, verhaftet → <b className="text-blue-300">Polizeiwache</b>, jeweils mit Geldverlust.<br />
         🏪 Läden: <b>W</b> Waffen · <b>T</b> Lack & Tuning · <b>K</b> Kleidung · <b>I</b> Imbiss · <b>H</b> Safehouse & Garage. Pinke Buchstaben auf der Karte sind Auftraggeber.<br />
+        🚁 <b>Fahrzeuge:</b> Speedboot am Bootssteg (<b>B</b>), Hubschrauber am Heliport (<b>F</b>). Autos, die ins Wasser fahren, versinken.<br />
+        🚓 <b>Streife:</b> Im Streifenwagen den Job starten, Fluchtwagen stoppen und Flüchtige zu Fuß festnehmen (berühren oder niederschlagen).<br />
+        🙈 <b>Versteckspiel</b> im Park (<b>V</b>): Verstecke dich vor den grünen Suchern – unter Bäumen, hinter Häusern oder in geparkten Autos.<br />
+        🏦 <b>Bank</b> im Safehouse: eingezahltes Geld ist sicher vor Klinik- und Kautionskosten.<br />
+        ⭐ Ab 4 Sternen liegen Nagelbänder vor Straßensperren (Werkstatt flickt die Reifen), bei 6 Sternen kommt das Militär.<br />
         💾 Automatisches Speichern jede Minute ohne Sterne, Safehouse und Pausenmenü speichern ebenfalls.
       </div>
     </div>

@@ -1100,7 +1100,8 @@ export class Game {
     this.onFoot = false;
     p.handbrake = false; p.parked = false;
     sfx.door();
-    if (p.model === "heli") this.setHint(this.mobile ? "Hubschrauber: HOCH / RUNTER zum Steigen und Sinken, Stick zum Fliegen" : "Hubschrauber: Leertaste steigen · Shift sinken · W/S vor/zurück · A/D drehen", 5);
+    const b = this.bind;
+    if (p.model === "heli") this.setHint(this.mobile ? "Hubschrauber: HOCH steigen · RUNTER sinken" : `Hubschrauber: ${b.label("handbrake")} steigen · ${b.label("nitro")} sinken · ${b.label("up")}/${b.label("down")} vor/zurück · ${b.label("left")}/${b.label("right")} drehen`, 5);
     else if (p.model === "boat") this.setHint("Speedboot: fährt nur auf dem Wasser – Nitro geht auch hier", 3);
   }
 

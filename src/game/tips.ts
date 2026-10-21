@@ -3,7 +3,7 @@ import { jobFor } from "./jobs";
 import { currentSettings } from "./settings";
 
 // tutorial hints: each one is shown once (remembered in localStorage), only in the open world
-type TipId = "story" | "enter" | "nitro" | "radio" | "job" | "star" | "place" | "map" | "weapon";
+type TipId = "story" | "enter" | "nitro" | "radio" | "job" | "star" | "place" | "map" | "weapon" | "swim" | "bank" | "hide" | "chapter2" | "army" | "craft";
 interface Tip { id: TipId; when: (g: Game) => boolean; text: (g: Game, touch: boolean) => string; }
 
 const TIPS: Tip[] = [
@@ -15,6 +15,12 @@ const TIPS: Tip[] = [
   { id: "radio", when: (g) => !g.onFoot && g.time > 40, text: (g, t) => `${t ? "📻" : g.bind.label("radio")}: Radiosender wechseln` },
   { id: "job", when: (g) => !g.onFoot && !!jobFor(g.player.model), text: (g, t) => `${t ? "💼" : g.bind.label("job")}: Job in diesem Fahrzeug starten` },
   { id: "weapon", when: (g) => g.inv.owned.length > 2, text: (g, t) => t ? "Waffe gedrückt halten: Waffenrad" : `${g.bind.label("wheel")} halten: Waffenrad · ${g.bind.label("reload")}: Nachladen` },
+  { id: "swim", when: (g) => g.onFoot && g.ped.swim, text: () => "Du schwimmst – langsam und ohne Waffen. Am Bootssteg (B) liegt ein Speedboot" },
+  { id: "bank", when: (g) => g.nearPlace?.kind === "safehouse", text: () => "Im Safehouse gibt's ein Bankkonto: Geld dort verlierst du nicht in Klinik oder Haft" },
+  { id: "hide", when: (g) => g.nearPlace?.kind === "park", text: (g, t) => `${t ? "Grüner Knopf" : g.bind.label("enter")}: Versteckspiel starten – bleib unentdeckt, bis die Zeit um ist` },
+  { id: "chapter2", when: (g) => g.progress.missions.includes("m10"), text: () => "Neue Aufträge: Ines im Hafenamt (A) und Kommissarin Ruiz (R)" },
+  { id: "army", when: (g) => g.wanted.stars >= 6, text: () => "6 Sterne: Das Militär rückt an. Weg von der Straße – oder ab aufs Wasser" },
+  { id: "craft", when: (g) => g.time > 150, text: () => "Am Bootssteg (B) wartet ein Speedboot, am Heliport (F) ein Hubschrauber" },
   { id: "map", when: (g) => g.time > 90, text: (g, t) => t ? "In der Pause: Karte antippen, um einen Wegpunkt zu setzen" : `${g.bind.label("map")}: Karte – klick, um einen Wegpunkt zu setzen` },
 ];
 const KEY = "solarabay.tips.v1";

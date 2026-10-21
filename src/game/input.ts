@@ -6,8 +6,8 @@ export type Action =
 export const ACTIONS: Action[] = ["up", "down", "left", "right", "handbrake", "nitro", "fire", "enter", "nextWeapon", "wheel", "reload", "detonate", "camera", "radio", "job", "map", "pause"];
 
 export const ACTION_LABEL: Record<Action, string> = {
-  up: "Gas / vorwärts", down: "Bremse / rückwärts", left: "Links", right: "Rechts", handbrake: "Handbremse / Drift",
-  nitro: "Nitro / Sprint", fire: "Feuer", enter: "Einsteigen / Aussteigen / Betreten", nextWeapon: "Nächste Waffe",
+  up: "Gas / vorwärts", down: "Bremse / rückwärts", left: "Links", right: "Rechts", handbrake: "Handbremse / Drift · Hubschrauber steigen",
+  nitro: "Nitro / Sprint · Hubschrauber sinken", fire: "Feuer", enter: "Einsteigen / Aussteigen / Betreten", nextWeapon: "Nächste Waffe",
   wheel: "Waffenrad (halten)", reload: "Nachladen", detonate: "Haftbomben zünden", camera: "Kamera wechseln",
   radio: "Radiosender", job: "Job starten / beenden", map: "Karte", pause: "Pause",
 };
