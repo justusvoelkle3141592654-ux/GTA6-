@@ -35,4 +35,5 @@ export type ShopAction =
   | { t: "food"; i: number } | { t: "outfit"; i: number }
   | { t: "repair" } | { t: "paint"; color: string } | { t: "tune"; part: TunePart }
   | { t: "save" } | { t: "store" } | { t: "takeCar"; i: number } | { t: "sellCar"; i: number }
-  | { t: "rob" };
+  | { t: "rob" }
+  | { t: "deposit"; amount: number } | { t: "withdraw"; amount: number }; // amount -1: everything

@@ -111,6 +111,16 @@ export default function ShopMenu({ game, place, onClose }: { game: Game; place: 
 
           {place.kind === "safehouse" && <>
             <Row><div><b>Ausruhen & speichern</b><div className="text-[11px] text-white/50">Volle Gesundheit, nur ohne Sterne</div></div><Buy label="Speichern" onClick={() => act({ t: "save" })} /></Row>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+              <div className="mb-2 flex justify-between"><b>Bankkonto</b><span className="font-display text-xl text-green-300">${fmt(view.bank)}</span></div>
+              <div className="mb-2 text-[11px] text-white/50">Geld auf dem Konto verlierst du nicht in der Klinik oder bei der Kaution.</div>
+              <div className="grid grid-cols-2 gap-2">
+                <Buy label="+$500 einzahlen" onClick={() => act({ t: "deposit", amount: 500 })} disabled={view.cash <= 0} />
+                <Buy label="Alles einzahlen" onClick={() => act({ t: "deposit", amount: -1 })} disabled={view.cash <= 0} />
+                <Buy label="$500 abheben" onClick={() => act({ t: "withdraw", amount: 500 })} disabled={view.bank <= 0} />
+                <Buy label="Alles abheben" onClick={() => act({ t: "withdraw", amount: -1 })} disabled={view.bank <= 0} />
+              </div>
+            </div>
             {view.car && <Row><div><b>{view.car.name} einparken</b><div className="text-[11px] text-white/50">Bleibt dir mit Tuning erhalten</div></div><Buy label="Einparken" onClick={() => act({ t: "store" })} disabled={view.garage.length >= view.slots} /></Row>}
             <div className="pt-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/50">Garage {view.garage.length}/{view.slots}</div>
             {!view.garage.length && <div className="text-white/50">Leer. Fahr ein Auto in den großen Ring vor dem Safehouse, um es einzuparken.</div>}

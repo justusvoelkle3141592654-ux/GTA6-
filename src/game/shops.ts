@@ -27,6 +27,7 @@ export class Shops {
       car: inCar ? { name: MODEL_NAME[p.model], hp: p.hp, maxHp: p.maxHp, color: p.color, tune: { ...p.tune }, repair: Math.ceil(Math.max(0, p.maxHp - p.hp) * REPAIR_PER_HP) } : null,
       garage: g.garage.map((c) => ({ name: MODEL_NAME[c.model], color: c.color, tune: { ...c.tune }, value: Math.round(MODEL_STATS[c.model].price * 0.6) })),
       slots: GARAGE_SLOTS,
+      bank: g.bank,
       robWait: pl ? Math.max(0, Math.ceil(ROB_COOLDOWN - (g.time - (this.robbedAt.get(pl.id) ?? -1e9)))) : 0,
     };
   }
@@ -117,7 +118,7 @@ export class Shops {
       case "store": {
         if (g.onFoot || g.playerCarStored || !pl) return "Fahr mit dem Auto in die Garage";
         if (g.garage.length >= GARAGE_SLOTS) return "Garage ist voll";
-        if (p.kind === "player" && (p.model === "police" || p.model === "swat")) return "Polizeiautos nimmt die Garage nicht";
+        if (p.tag) return "Den Wagen brauchst du noch für den Auftrag";
         g.garage.push({ model: p.model, color: p.color, hp: p.hp, maxHp: p.maxHp, mass: p.mass, tune: { ...p.tune } });
         g.cars.splice(g.cars.indexOf(p), 1);
         g.playerCarStored = true;
@@ -144,6 +145,18 @@ export class Shops {
         const v = Math.round(MODEL_STATS[c.model].price * 0.6);
         g.garage.splice(a.i, 1); g.cash += v; g.stats.earned += v; sfx.cashier();
         return `Verkauft für $${v.toLocaleString("de-DE")}`;
+      }
+      case "deposit": {
+        const v = a.amount < 0 ? g.cash : Math.min(a.amount, g.cash);
+        if (v <= 0) return "Kein Bargeld dabei";
+        g.cash -= v; g.bank += v; sfx.cashier();
+        return `$${v.toLocaleString("de-DE")} eingezahlt – sicher vor Klinik und Kaution`;
+      }
+      case "withdraw": {
+        const v = a.amount < 0 ? g.bank : Math.min(a.amount, g.bank);
+        if (v <= 0) return "Das Konto ist leer";
+        g.bank -= v; g.cash += v; sfx.cashier();
+        return `$${v.toLocaleString("de-DE")} abgehoben`;
       }
       case "rob": {
         if (!pl?.robbable) return "";

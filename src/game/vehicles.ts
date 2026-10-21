@@ -54,6 +54,7 @@ export class Car {
   faction: FactionId | null = null; // gang car
   tag = "";       // mission marker ("target", "deliver", ...)
   flee = false;   // drives away from the player (mission targets)
+  hunt = false;   // gang car chasing the player (drives faster)
   dead = false; deadT = 0; wrecked = false; wreckT = 0; parked = false;
   throttle = 0; steer = 0; handbrake = false; nitro = false;
   wpI = 0; wpJ = 0; prevI = -1; prevJ = -1; hasWp = false;

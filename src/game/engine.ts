@@ -4,10 +4,10 @@ import { Renderer3D } from "./renderer3d";
 import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, CRIMES, type Crime } from "./wanted";
 import { buildPlaces, respawnCost, RESPAWN_RULES, type Place } from "./places";
-import { PedSystem, PED_LIMIT, type Civilian } from "./peds";
+import { PedSystem, PED_LIMIT, type Civilian, type Team } from "./peds";
 import { Car, CARS, MODEL_STATS, type CarDef, type FactionId } from "./vehicles";
 import { Inventory, WEAPONS, type Weapon } from "./weapons";
-import { AUTOSAVE_EVERY, emptyProgress, emptyStats, writeSave, type Progress, type SaveData, type SaveResult, type SaveStats } from "./save";
+import { AUTOSAVE_EVERY, SAVE_VERSION, emptyProgress, emptyStats, writeSave, type Progress, type SaveData, type SaveResult, type SaveStats } from "./save";
 import { Traffic, PARKED_LIMIT } from "./traffic";
 import { DISTRICTS, districtAt, type DistrictId } from "./districts";
 import { Radio } from "./radio";
@@ -22,6 +22,7 @@ import { findRoute, MAX_ROUTE } from "./route";
 import { Tips } from "./tips";
 import { Police } from "./police";
 import { Shops } from "./shops";
+import { Gangs } from "./gangs";
 
 export type GameState = "menu" | "playing" | "paused" | "over" | "modal";
 // overlays that stop the game while open (shops, dialogs, weapon wheel)
@@ -38,6 +39,7 @@ export interface ShopView {
   car: { name: string; hp: number; maxHp: number; color: string; tune: Record<TunePart, number>; repair: number } | null;
   garage: { name: string; color: string; tune: Record<TunePart, number>; value: number }[];
   slots: number;
+  bank: number;     // money on the account (safehouse), not lost on death or arrest
   robWait: number; // seconds until the shop can be robbed again
 }
 export type { Mode } from "./modes";
@@ -89,7 +91,8 @@ interface Callbacks {
 export interface Ped { x: number; y: number; z: number; a: number; vx: number; vy: number; hp: number; maxHp: number; armor: number; walk: number; moving: boolean; sprint: boolean; shootT: number; hitFlash: number; dead: boolean; }
 export const MAX_ARMOR = 100;
 export const newPed = (x: number, y: number, a = 0): Ped => ({ x, y, z: terrainH(x, y), a, vx: 0, vy: 0, hp: 100, maxHp: 100, armor: 0, walk: 0, moving: false, sprint: false, shootT: 0, hitFlash: 0, dead: false });
-export interface Proj { kind: "bullet" | "rocket" | "bomb" | "grenade"; from: "player" | "enemy"; dmg: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; a: number; life: number; px: number; py: number; }
+// team: who fired (enemy bullets of the police and the gangs also hit each other); src: ped that fired (-1: none)
+export interface Proj { kind: "bullet" | "rocket" | "bomb" | "grenade"; from: "player" | "enemy"; team: Team; src: number; dmg: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; a: number; life: number; px: number; py: number; }
 export interface Bomb { car: Car | null; ox: number; oy: number; x: number; y: number; z: number; t: number; }
 export interface Particle { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; size: number; grow: number; color: string; type: number; drag: number; }
 export type PickupType = "cash" | "repair" | "nitro" | "rocket" | "bomb";
@@ -123,6 +126,7 @@ export class Game {
   tips: Tips = new Tips(this);
   police: Police = new Police(this);
   shops: Shops = new Shops(this);
+  gangs: Gangs = new Gangs(this);
   state: GameState = "menu";
   dpr = 1; cw = 0; ch = 0; mobile = false;
 
@@ -135,7 +139,7 @@ export class Game {
 
   trauma = 0; shakeX = 0; shakeY = 0; shakeR = 0; hitStop = 0; timeScale = 1; t = 0;
 
-  score = 0; mult = 1; comboT = 0; time = 0; takedowns = 0; cash = 0;
+  score = 0; mult = 1; comboT = 0; time = 0; takedowns = 0; cash = 0; bank = 0;
   driftPts = 0; driftHold = 0; bestDrift = 0; bust = 0; nitro = 1; nitroWasOn = false; lastHurt = -10;
   inv = new Inventory(); fireCd = 0; fireHeld = false; hint = ""; hintT = 0;
   ending: null | { reason: EndReason; t: number } = null;
@@ -321,14 +325,14 @@ export class Game {
     this.autosaveT = AUTOSAVE_EVERY;
     this.wanted.reset(rules);
     this.score = 0; this.mult = 1; this.comboT = 0;
-    this.time = 0; this.takedowns = 0; this.cash = rules.respawn ? 200 : 0; this.lastHurt = -10;
+    this.time = 0; this.takedowns = 0; this.cash = rules.respawn ? 200 : 0; this.bank = 0; this.lastHurt = -10;
     this.driftPts = 0; this.driftHold = 0; this.bestDrift = 0;
     this.bust = 0; this.nitro = 1; this.ending = null; this.timeScale = 1; this.slowT = 0; this.trauma = 0;
     this.fireCd = 0; this.hint = ""; this.hintT = 0;
     // open world: fists and a pistol; arcade modes: endless pistol, rockets and sticky bombs
     if (rules.respawn) this.inv.reset(["pistol"], { pistol: 48 });
     else this.inv.reset(["pistol", "rocket", "bomb"], { rocket: 30, bomb: 30 }, ["pistol"], false);
-    this.outfit = 0; this.garage = []; this.shops.reset(); this.placeLatch = "";
+    this.outfit = 0; this.garage = []; this.shops.reset(); this.gangs.reset(); this.placeLatch = "";
     this.district = districtAt(this.player.x, this.player.y);
     this.copSpawnT = this.diff.firstCop;
     const p = this.player;
@@ -353,7 +357,7 @@ export class Game {
 
   private applySave(sv: SaveData) {
     const p = this.player;
-    this.cash = sv.cash;
+    this.cash = sv.cash; this.bank = sv.bank;
     this.inv.load(sv.inventory);
     this.outfit = sv.outfit; this.garage = sv.garage.map((c) => ({ ...c, tune: { ...c.tune } }));
     this.time = sv.stats.playTime;
@@ -365,7 +369,7 @@ export class Game {
       p.model = c.model; p.color = c.color; p.maxHp = c.maxHp; p.hp = Math.min(c.maxHp, Math.max(1, c.hp)); p.mass = c.mass;
       p.tune = { ...c.tune };
       p.x = c.x; p.y = c.y; p.a = c.a;
-    } else if (sv.garage.length) {
+    } else if (sv.carStored) {
       // the car is in the garage: walk
       this.cars.splice(this.cars.indexOf(p), 1);
       this.playerCarStored = true;
@@ -399,10 +403,10 @@ export class Game {
     this.stats.playTime = this.time;
     this.stats.maxStars = Math.max(this.stats.maxStars, this.wanted.maxStars);
     const d: SaveData = {
-      v: 2, savedAt: Date.now(), difficulty: this.config.difficulty,
+      v: SAVE_VERSION, savedAt: Date.now(), difficulty: this.config.difficulty,
       onFoot: this.onFoot, ped: { x: pd.x, y: pd.y, a: pd.a, hp: pd.hp, armor: pd.armor },
       car: p.dead || this.playerCarStored ? null : { model: p.model, color: p.color, hp: p.hp, maxHp: p.maxHp, mass: p.mass, x: p.x, y: p.y, a: p.a, tune: { ...p.tune } },
-      cash: this.cash, inventory: this.inv.save(), outfit: this.outfit,
+      cash: this.cash, bank: this.bank, carStored: this.playerCarStored, inventory: this.inv.save(), outfit: this.outfit,
       garage: this.garage.map((c) => ({ ...c, tune: { ...c.tune } })), radio: this.radio.station,
       stats: { ...this.stats }, progress: JSON.parse(JSON.stringify(this.progress)) as Progress,
     };
@@ -584,17 +588,32 @@ export class Game {
     this.reportCrime(c, mul);
   }
 
-  // a cop or gang member on foot fires at the player
-  enemyShot(x: number, y: number, z: number, a: number, dmg: number) {
+  // a cop, gang member or gang car fires (at the player or at the other side)
+  enemyShot(x: number, y: number, z: number, a: number, dmg: number, team: Team = "cop", src = -1) {
     const sp = 1100;
-    this.projs.push({ kind: "bullet", from: "enemy", dmg, x, y, z, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, vz: 0, a, life: 0.6, px: x, py: y });
+    this.addProj("bullet", "enemy", team, src, dmg, x, y, z, Math.cos(a) * sp, Math.sin(a) * sp, 0, a, 0.6);
     this.flashes.push({ x: x + Math.cos(a) * 6, y: y + Math.sin(a) * 6, z, life: 0.05, max: 0.05, size: 70 });
     if (Math.hypot(x - this.fx, y - this.fy) < 900) sfx.shot();
+    if (this.rules.city) this.peds.alarm(x, y, 300, "shot");
+  }
+
+  // projectiles come from a pool as well; removed ones go back to it
+  private projFree: Proj[] = [];
+  private addProj(kind: Proj["kind"], from: Proj["from"], team: Team, src: number, dmg: number, x: number, y: number, z: number, vx: number, vy: number, vz: number, a: number, life: number) {
+    const q = this.projFree.pop();
+    if (!q) { this.projs.push({ kind, from, team, src, dmg, x, y, z, vx, vy, vz, a, life, px: x, py: y }); return; }
+    q.kind = kind; q.from = from; q.team = team; q.src = src; q.dmg = dmg; q.x = x; q.y = y; q.z = z; q.vx = vx; q.vy = vy; q.vz = vz; q.a = a; q.life = life; q.px = x; q.py = y;
+    this.projs.push(q);
+  }
+  // swap-remove (the update walks the list backwards, so the moved one was already handled)
+  private dropProj(i: number) {
+    const ps = this.projs, q = ps[i];
+    ps[i] = ps[ps.length - 1]; ps.pop();
+    this.projFree.push(q);
   }
 
   // gangs attack when their reputation with you is bad or you recently hurt one of them
-  private gangAggro: Record<FactionId, number> = { halcones: 0, kings: 0 };
-  gangHostile(f: FactionId) { return this.rules.city && (this.progress.rep[f] <= -30 || this.gangAggro[f] > 0); }
+  gangHostile(f: FactionId) { return this.gangs.hostile(f); }
 
   // a cop with a wanted level sees the player (close, in line of sight, or from the helicopter)
   copSeesPlayer() { return this.police.copSees(this.fx, this.fy); }
@@ -706,21 +725,21 @@ export class Game {
     if (d.kind === "gun") {
       for (let i = 0; i < d.pellets; i++) {
         const aa = a + rnd(-d.spread, d.spread);
-        this.projs.push({ kind: "bullet", from: "player", dmg: d.dmg, x: ox, y: oy, z: oz, vx: Math.cos(aa) * speed * rnd(0.92, 1) + bvx * 0.3, vy: Math.sin(aa) * speed * rnd(0.92, 1) + bvy * 0.3, vz: 0, a: aa, life: d.range, px: ox, py: oy });
+        this.addProj("bullet", "player", "player", -1, d.dmg, ox, oy, oz, Math.cos(aa) * speed * rnd(0.92, 1) + bvx * 0.3, Math.sin(aa) * speed * rnd(0.92, 1) + bvy * 0.3, 0, aa, d.range);
       }
       if (w === "shotgun") { sfx.shotgun(); this.shake(0.14); } else { sfx.shot(); this.shake(0.05); }
       this.flashes.push({ x: ox + Math.cos(a) * 18, y: oy + Math.sin(a) * 18, z: oz, life: 0.06, max: 0.06, size: w === "shotgun" ? 140 : 90 });
       this.emit(ox + Math.cos(a) * 20, oy + Math.sin(a) * 20, oz, bvx * 0.5, bvy * 0.5, 0, 0.06, 7, 60, "#ffd36b", 2, 1);
     } else if (d.kind === "rocket") {
-      this.projs.push({ kind: "rocket", from: "player", dmg: 500, x: ox, y: oy, z: oz, vx: Math.cos(a) * speed + bvx * 0.5, vy: Math.sin(a) * speed + bvy * 0.5, vz: 0, a, life: d.range, px: ox, py: oy });
+      this.addProj("rocket", "player", "player", -1, 500, ox, oy, oz, Math.cos(a) * speed + bvx * 0.5, Math.sin(a) * speed + bvy * 0.5, 0, a, d.range);
       sfx.rocket();
       this.shake(0.25);
       this.flashes.push({ x: ox, y: oy, z: oz, life: 0.12, max: 0.12, size: 200 });
     } else if (d.kind === "throw") {
-      this.projs.push({ kind: "grenade", from: "player", dmg: 0, x: ox, y: oy, z: oz + 4, vx: Math.cos(a) * speed + bvx * 0.8, vy: Math.sin(a) * speed + bvy * 0.8, vz: 210, a, life: 2.2, px: ox, py: oy });
+      this.addProj("grenade", "player", "player", -1, 0, ox, oy, oz + 4, Math.cos(a) * speed + bvx * 0.8, Math.sin(a) * speed + bvy * 0.8, 210, a, 2.2);
       sfx.throwIt();
     } else {
-      this.projs.push({ kind: "bomb", from: "player", dmg: 0, x: ox, y: oy, z: oz, vx: Math.cos(a) * speed + bvx * 0.9, vy: Math.sin(a) * speed + bvy * 0.9, vz: 170, a, life: d.range, px: ox, py: oy });
+      this.addProj("bomb", "player", "player", -1, 0, ox, oy, oz, Math.cos(a) * speed + bvx * 0.9, Math.sin(a) * speed + bvy * 0.9, 170, a, d.range);
       sfx.throwIt();
       this.setHint("G / 💥 zum Zünden", 2);
     }
@@ -753,11 +772,7 @@ export class Game {
     this.stats.pedsHit++;
     this.peds.alarm(c.x, c.y, 400, "blast");
     this.crime(c.role === "cop" || c.role === "swat" ? "copTakedown" : "pedShot");
-    if (c.faction) {
-      // hurting a gang member makes the whole gang angry for a while
-      this.progress.rep[c.faction] = Math.max(-100, this.progress.rep[c.faction] - 8);
-      this.gangAggro[c.faction] = 60;
-    }
+    if (c.faction) this.gangs.angered(c.faction); // hurting a gang member makes the whole gang angry for a while
     this.onPedKnocked?.(c);
   }
   // hooks for systems that care about knocked-out pedestrians / stolen cars (gangs, missions)
@@ -804,15 +819,20 @@ export class Game {
         const gz = Math.max(gh, this.world.roofAt(q.x, q.y));
         if (q.z < gz + 2) { q.z = gz + 2; if (q.vz < 0) q.vz = -q.vz * 0.35; q.vx *= 0.6; q.vy *= 0.6; }
         if (this.world.isSolid(q.x, q.y, 2) && q.z < this.world.roofAt(q.x, q.y)) { q.x = q.px; q.y = q.py; q.vx *= -0.4; q.vy *= -0.4; }
-        if (q.life <= 0) { this.explode(q.x, q.y, 1.15, 3); this.projs.splice(i, 1); }
+        if (q.life <= 0) { this.explode(q.x, q.y, 1.15, 3); this.dropProj(i); }
         continue;
       }
-      // enemy bullets only hit the player (on foot or in the car)
+      // enemy bullets hit the player (on foot or in the car) and pedestrians of the other side (police vs gangs)
       if (q.from === "enemy") {
         let hit = false;
-        if (this.onFoot) { const pd = this.ped; if (Math.hypot(q.x - pd.x, q.y - pd.y) < 9 && Math.abs(q.z - pd.z - 12) < 16) { this.damagePed(q.dmg); hit = true; } }
+        if (this.rules.city) {
+          const cv = this.peds.hitTest(q.x, q.y, q.z, 7);
+          if (cv && cv.id !== q.src && PedSystem.hostile(q.team, cv)) { this.peds.damage(cv, q.dmg, q.px, q.py, 90, q.src); hit = true; }
+        }
+        if (hit) { /* already hit somebody */ }
+        else if (this.onFoot) { const pd = this.ped; if (Math.hypot(q.x - pd.x, q.y - pd.y) < 9 && Math.abs(q.z - pd.z - 12) < 16) { this.damagePed(q.dmg); hit = true; } }
         else { const p = this.player; if (Math.hypot(q.x - p.x, q.y - p.y) < 24 && Math.abs(q.z - p.z) < 30) { this.damagePlayerCar(q.dmg * 0.35); this.sparks(q.x, q.y, q.z, 4, -q.vx, -q.vy, 0.5); hit = true; } }
-        if (hit || q.life <= 0 || this.world.isSolid(q.x, q.y, 2) || q.z < gh) this.projs.splice(i, 1);
+        if (hit || q.life <= 0 || this.world.isSolid(q.x, q.y, 2) || q.z < gh) this.dropProj(i);
         continue;
       }
       let remove = false;
@@ -821,7 +841,7 @@ export class Game {
         const h = this.police.heli;
         if (h) this.sparks(h.x, h.y, h.z, 6, -q.vx, -q.vy, 0.6);
         if (q.kind === "rocket" && h) { this.flashes.push({ x: h.x, y: h.y, z: h.z, life: 0.5, max: 0.5, size: 400 }); sfx.explosion(); }
-        this.projs.splice(i, 1);
+        this.dropProj(i);
         continue;
       }
       // cars
@@ -875,7 +895,7 @@ export class Game {
           remove = true;
         }
       }
-      if (remove) this.projs.splice(i, 1);
+      if (remove) this.dropProj(i);
     }
     for (const b of this.bombs) {
       b.t += dt;
@@ -1245,7 +1265,7 @@ export class Game {
       if (c.kind === "cop") {
         c.calm = this.wanted.stars === 0;
         if (c.calm) this.traffic.patrol(this, c, dt); else this.police.copAI(c, dt);
-      } else this.traffic.patrol(this, c, dt); // sets up a route first if the car has none
+      } else if (!this.gangs.carAI(c, dt)) this.traffic.patrol(this, c, dt); // sets up a route first if the car has none
     }
 
     const def = this.carDef;
@@ -1264,7 +1284,8 @@ export class Game {
       else if (c.kind === "cop") {
         const maxV = D.copV + this.stars * D.copVStar;
         this.drive(c, dt, 560, grass ? maxV * 0.85 : maxV, 9, 2);
-      } else this.drive(c, dt, 300, c.cruise + 20, 12, 3);
+      } else if (c.hunt) this.drive(c, dt, 520, 480, 10, 3);
+      else this.drive(c, dt, 300, c.cruise + 20, 12, 3);
       this.collideWorld(c);
     }
     this.collideCars();
@@ -1363,8 +1384,7 @@ export class Game {
       if (nearCash < 6) this.spawnPickup("cash");
       if (this.pickups.length > 70) this.pickups.shift();
 
-      this.gangAggro.halcones = Math.max(0, this.gangAggro.halcones - dt);
-      this.gangAggro.kings = Math.max(0, this.gangAggro.kings - dt);
+      this.gangs.update(dt);
       if (rules.cops && this.wanted.stars > 0) {
         let close = this.onFoot ? this.peds.copsNear(fx, fy, 30) : 0; // police on foot grabs you
         for (const c of this.cars) if (c.kind === "cop" && !c.calm && !c.dead && Math.hypot(c.x - fx, c.y - fy) < 85) close++;

@@ -493,7 +493,7 @@ export class Renderer3D {
   private nearCops: Car[] = [];
   private dmgMat!: THREE.MeshStandardMaterial;
   private pickObjs = new Map<Pickup, THREE.Group>();
-  private projObjs = new Map<Proj, THREE.Object3D>();
+  private projObjs = new Map<Proj, THREE.Mesh>();
   private bombObjs = new Map<Bomb, THREE.Mesh>();
   private bodyMat!: THREE.MeshStandardMaterial; private wreckMat!: THREE.MeshStandardMaterial; private glassMat!: THREE.MeshStandardMaterial; private wheelMat!: THREE.MeshStandardMaterial;
   private flashMat!: THREE.MeshBasicMaterial; private lightMat!: THREE.MeshBasicMaterial;
@@ -1276,14 +1276,12 @@ export class Renderer3D {
     for (const q of g.projs) {
       seen.add(q);
       let o = this.projObjs.get(q);
-      if (!o) {
-        if (q.kind === "bullet") o = new THREE.Mesh(this.bulletGeo, q.from === "enemy" ? this.enemyBulletMat : this.bulletMat);
-        else if (q.kind === "rocket") o = new THREE.Mesh(this.rocketGeo, this.rocketMat);
-        else if (q.kind === "grenade") o = new THREE.Mesh(this.bombGeo, this.grenadeMat);
-        else o = new THREE.Mesh(this.bombGeo, this.bombMat);
-        this.scene.add(o);
-        this.projObjs.set(q, o);
-      }
+      if (!o) { o = new THREE.Mesh(this.bulletGeo, this.bulletMat); this.scene.add(o); this.projObjs.set(q, o); }
+      // projectiles are pooled: the same object can come back as another kind
+      if (q.kind === "bullet") { o.geometry = this.bulletGeo; o.material = q.from === "enemy" ? this.enemyBulletMat : this.bulletMat; }
+      else if (q.kind === "rocket") { o.geometry = this.rocketGeo; o.material = this.rocketMat; }
+      else if (q.kind === "grenade") { o.geometry = this.bombGeo; o.material = this.grenadeMat; }
+      else { o.geometry = this.bombGeo; o.material = this.bombMat; }
       o.position.set(q.x, q.z, q.y);
       const a = Math.atan2(q.vy, q.vx);
       o.rotation.set(0, -a, q.kind === "bomb" || q.kind === "grenade" ? g.t * 8 : Math.atan2(q.vz, Math.hypot(q.vx, q.vy)));

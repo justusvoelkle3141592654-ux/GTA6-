@@ -6,9 +6,9 @@ import { STATIONS } from "./radio";
 export type SaveDifficulty = "easy" | "normal" | "hard";
 const DIFFICULTIES: SaveDifficulty[] = ["easy", "normal", "hard"];
 
-export const SAVE_KEY = "solarabay.save.v2";
-const LEGACY_KEY = "solarabay.save.v1"; // read once and converted
-export const SAVE_VERSION = 2;
+export const SAVE_KEY = "solarabay.save.v3";
+const LEGACY_KEYS = ["solarabay.save.v2", "solarabay.save.v1"]; // older versions: read and converted
+export const SAVE_VERSION = 3;
 export const AUTOSAVE_EVERY = 60; // seconds
 
 export interface SaveCar { model: CarModel; color: string; hp: number; maxHp: number; mass: number; x: number; y: number; a: number; tune: Tune; }
@@ -27,8 +27,10 @@ export interface SaveData {
   difficulty: SaveDifficulty;
   onFoot: boolean;
   ped: { x: number; y: number; a: number; hp: number; armor: number };
-  car: SaveCar | null; // null: the player's car was destroyed
+  car: SaveCar | null; // null: the player's car was destroyed or is in the garage
+  carStored: boolean;  // the player's car is in the garage (since version 3)
   cash: number;
+  bank: number;        // money on the account (since version 3)
   inventory: InventorySave;
   outfit: number;
   garage: OwnedCar[];
@@ -64,12 +66,16 @@ export function writeSave(d: SaveData): "saved" | "memory" {
 
 export function clearSave() {
   memory = null;
-  try { window.localStorage.removeItem(SAVE_KEY); window.localStorage.removeItem(LEGACY_KEY); } catch { /* ignore */ }
+  try { window.localStorage.removeItem(SAVE_KEY); for (const k of LEGACY_KEYS) window.localStorage.removeItem(k); } catch { /* ignore */ }
 }
 
 export function loadSave(): SaveData | null {
   let raw: string | null = null;
-  try { raw = window.localStorage.getItem(SAVE_KEY) ?? window.localStorage.getItem(LEGACY_KEY); } catch { /* ignore */ }
+  try {
+    const s = window.localStorage;
+    raw = s.getItem(SAVE_KEY);
+    for (const k of LEGACY_KEYS) raw = raw ?? s.getItem(k);
+  } catch { /* ignore */ }
   raw = raw ?? memory;
   if (!raw) return null;
   try { return validate(JSON.parse(raw)); } catch { return null; }
@@ -125,7 +131,7 @@ function inventoryOf(d: Obj): InventorySave {
 }
 
 function validate(d: unknown): SaveData | null {
-  if (!isObj(d) || (d.v !== SAVE_VERSION && d.v !== 1)) return null;
+  if (!isObj(d) || (d.v !== SAVE_VERSION && d.v !== 2 && d.v !== 1)) return null;
   const p = d.ped, st = d.stats, pr = d.progress;
   if (!isObj(p) || !num(p.x) || !num(p.y) || !num(p.a) || !num(p.hp)) return null;
   if (!num(d.savedAt) || !num(d.cash) || typeof d.onFoot !== "boolean" || !oneOf(d.difficulty, DIFFICULTIES)) return null;
@@ -145,7 +151,9 @@ function validate(d: unknown): SaveData | null {
   return {
     v: SAVE_VERSION, savedAt: d.savedAt, difficulty: d.difficulty, onFoot: d.onFoot,
     ped: { x: p.x, y: p.y, a: p.a, hp: p.hp, armor: clampN(p.armor, 0, 100, 0) }, car,
-    cash: Math.max(0, d.cash), inventory: inventoryOf(d),
+    // before version 3 "no car + cars in the garage" meant: parked in the garage
+    carStored: !car && (typeof d.carStored === "boolean" ? d.carStored : garage.length > 0),
+    cash: Math.max(0, d.cash), bank: clampN(d.bank, 0, 1e9, 0), inventory: inventoryOf(d),
     outfit: Math.round(clampN(d.outfit, 0, 99, 0)), garage: garage.slice(0, 8),
     radio: Math.round(clampN(d.radio, -1, STATIONS.length - 1, -1)),
     stats, progress,

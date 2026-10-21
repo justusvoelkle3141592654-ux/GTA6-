@@ -6,6 +6,8 @@ export type CivState = "walk" | "wait" | "flee" | "cower" | "down" | "attack" | 
 export type AlarmKind = "shot" | "blast";
 // civ: passer-by; cop/swat: police on foot; gang: gang member; fare: taxi customer; target: mission target
 export type PedRole = "civ" | "cop" | "swat" | "gang" | "fare" | "target";
+// who fired a shot: the player, the police or a gang (gangs and police fight each other)
+export type Team = "player" | "cop" | FactionId;
 
 export interface Civilian {
   active: boolean;
@@ -25,6 +27,8 @@ export interface Civilian {
   armed: boolean; shootT: number; // carries a gun / time to the next shot
   shirt: string; pants: string;   // fixed colours (uniforms, gang colours); "" = random look
   tag: string;                    // mission marker
+  id: number;                     // index in the pool
+  target: number;                 // ped it fights (-1: the player)
 }
 
 // what the pedestrian system needs from the game
@@ -35,7 +39,7 @@ export interface PedHost {
   readonly ped: { x: number; y: number };
   readonly stars: number;
   pedHit(c: Civilian, by: Car, speed: number): void;
-  enemyShot(x: number, y: number, z: number, a: number, dmg: number): void;
+  enemyShot(x: number, y: number, z: number, a: number, dmg: number, team: Team, src: number): void;
   gangHostile(f: FactionId): boolean;
 }
 
@@ -59,6 +63,8 @@ const DOWN_TIME = 10;                    // knocked-down peds disappear after th
 const CAR_HALF_L = 25, CAR_HALF_W = 13, PED_R = 5;
 const DODGE_DIST = 110, DODGE_SPEED = 110;
 const GRAV = 620;
+const TURNS = [0.9, -0.9, 1.6, -1.6];     // directions tried when something blocks the way
+const FIGHT_RANGE = 280;                 // gang members open fire on police officers this close
 
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
@@ -81,12 +87,13 @@ function cornerPos(bx: number, by: number, k: number, out: { x: number; y: numbe
   return out;
 }
 
-function newCiv(): Civilian {
+function newCiv(id: number): Civilian {
   return {
     active: false, x: 0, y: 0, z: 0, a: 0, vx: 0, vy: 0, vz: 0, state: "walk", t: 0, dur: 0,
     bx: 0, by: 0, corner: 0, dir: 1, cross: false, offPath: false, tx: 0, ty: 0,
     speed: 30, walk: 0, look: 0, scale: 1, threatX: 0, threatY: 0,
     role: "civ", faction: null, hp: 30, maxHp: 30, armed: false, shootT: 0, shirt: "", pants: "", tag: "",
+    id, target: -1,
   };
 }
 
@@ -96,7 +103,7 @@ export class PedSystem {
   private cars: readonly Car[] = [];
 
   constructor(private world: World) {
-    for (let i = 0; i < MAX_PEDS; i++) this.list.push(newCiv());
+    for (let i = 0; i < MAX_PEDS; i++) this.list.push(newCiv(i));
   }
 
   get count() { let n = 0; for (const c of this.list) if (c.active) n++; return n; }
@@ -121,7 +128,7 @@ export class PedSystem {
     c.state = "walk"; c.t = 0; c.dur = 0; c.cross = false; c.offPath = false;
     c.speed = rnd(WALK_V[0], WALK_V[1]); c.walk = Math.random() * 10;
     c.look = Math.floor(Math.random() * 1e6); c.scale = rnd(0.9, 1.06);
-    c.role = "civ"; c.faction = null; c.hp = c.maxHp = 30; c.armed = false; c.shootT = 0; c.shirt = ""; c.pants = ""; c.tag = "";
+    c.role = "civ"; c.faction = null; c.hp = c.maxHp = 30; c.armed = false; c.shootT = 0; c.shirt = ""; c.pants = ""; c.tag = ""; c.target = -1;
   }
 
   // police on foot, gang members, mission peds
@@ -285,21 +292,23 @@ export class PedSystem {
     return null;
   }
 
-  // something walks in front of car c (traffic brakes for it)
-  blocking(c: Car): boolean {
+  // distance to the nearest pedestrian walking in front of car c (traffic brakes for it), Infinity if none
+  blockDist(c: Car, range: number): number {
     const ca = Math.cos(c.a), sa = Math.sin(c.a);
+    let best = Infinity;
     for (const p of this.list) {
       if (!p.active) continue;
       const ox = p.x - c.x, oy = p.y - c.y;
       const fwd = ox * ca + oy * sa;
-      if (fwd < 0 || fwd > 85) continue;
-      if (Math.abs(-ox * sa + oy * ca) < 18) return true;
+      if (fwd < 0 || fwd > range || fwd >= best) continue;
+      if (Math.abs(-ox * sa + oy * ca) < 18) best = fwd;
     }
-    return false;
+    return best;
   }
 
   // projectile hit / punch; returns true when the ped goes down
-  damage(c: Civilian, dmg: number, fromX: number, fromY: number, push: number): boolean {
+  // by: ped that fired (-1: the player or nobody); armed peds fight back against it
+  damage(c: Civilian, dmg: number, fromX: number, fromY: number, push: number, by = -1): boolean {
     if (!c.active || c.state === "down") return false;
     c.hp -= dmg;
     if (c.hp <= 0) {
@@ -307,7 +316,8 @@ export class PedSystem {
       this.knockDown(c, (dx / d) * push, (dy / d) * push, 50);
       return true;
     }
-    if (c.role === "gang") { c.state = "attack"; c.t = 0; }
+    if (by >= 0 && by !== c.id && c.armed) { c.target = by; c.state = "attack"; c.t = 0; } // fight back against that ped
+    else if (by < 0 && c.role === "gang") { c.target = -1; c.state = "attack"; c.t = 0; } // the player hurt a gang member
     else if (!c.armed) this.scare(c, fromX, fromY);
     return false;
   }
@@ -342,6 +352,25 @@ export class PedSystem {
     return false;
   }
 
+  // police and gangs are enemies
+  static hostile(team: Team, c: Civilian): boolean {
+    if (team === "player") return false;
+    if (team === "cop") return c.role === "gang";
+    return c.role === "cop" || c.role === "swat";
+  }
+  static teamOf(c: Civilian): Team { return c.role === "gang" && c.faction ? c.faction : "cop"; }
+
+  // a gang member looks for police officers close by (gang turf firefights)
+  private findOpponent(c: Civilian): number {
+    let best = -1, bd = FIGHT_RANGE;
+    for (const o of this.list) {
+      if (!o.active || o.state === "down" || (o.role !== "cop" && o.role !== "swat")) continue;
+      const d = Math.hypot(o.x - c.x, o.y - c.y);
+      if (d < bd && this.world.lineClear(c.x, c.y, o.x, o.y, 40)) { bd = d; best = o.id; }
+    }
+    return best;
+  }
+
   private civCount() { let n = 0; for (const c of this.list) if (c.active && c.role === "civ") n++; return n; }
 
   update(dt: number, h: PedHost) {
@@ -357,9 +386,15 @@ export class PedSystem {
       if ((c.state === "down" && c.t > DOWN_TIME && !c.tag) || (dist > far && c.state !== "down")) { c.active = false; continue; }
       if (c.state === "down") { this.fall(c, dt); continue; }
       const cop = c.role === "cop" || c.role === "swat";
-      if (cop && c.state === "attack" && h.stars === 0) { c.state = "walk"; c.speed = rnd(WALK_V[0], WALK_V[1]); this.targetSidewalk(c); }
+      if (cop && c.state === "attack" && h.stars === 0 && c.target < 0) { c.state = "walk"; c.speed = rnd(WALK_V[0], WALK_V[1]); this.targetSidewalk(c); }
       else if (cop && c.state !== "attack" && h.stars > 0 && dist < 500) { c.state = "attack"; c.t = 0; }
       if (c.role === "gang" && c.state === "idle" && c.faction && h.gangHostile(c.faction) && dist < 320) { c.state = "attack"; c.t = 0; }
+      if (c.target >= 0) { const o = this.list[c.target]; if (!o.active || o.state === "down") c.target = -1; }
+      // gangs shoot at police in their turf (checked about once a second)
+      if (c.role === "gang" && c.target < 0 && (c.state === "idle" || c.state === "attack") && Math.random() < dt) {
+        const o = this.findOpponent(c);
+        if (o >= 0) { c.target = o; c.state = "attack"; c.t = 0; const cop = this.list[o]; if (cop.target < 0) { cop.target = c.id; cop.state = "attack"; } }
+      }
       switch (c.state) {
         case "idle":
           c.vx = 0; c.vy = 0;
@@ -391,16 +426,18 @@ export class PedSystem {
   }
 
   // police and gang members: close in on the player and shoot when they have a clear line
-  private attack(c: Civilian, dt: number, h: PedHost, d: number) {
+  private attack(c: Civilian, dt: number, h: PedHost, dPlayer: number) {
     const cop = c.role === "cop" || c.role === "swat";
-    const dx = h.fx - c.x, dy = h.fy - c.y;
+    const foe = c.target >= 0 ? this.list[c.target] : null;
+    const fx = foe ? foe.x : h.fx, fy = foe ? foe.y : h.fy, fz = foe ? foe.z : h.fz;
+    const dx = fx - c.x, dy = fy - c.y, d = foe ? Math.max(1, Math.hypot(dx, dy)) : dPlayer;
     c.a = Math.atan2(dy, dx);
     const speed = c.role === "swat" ? 125 : cop ? 135 : 115;
-    const arrest = cop && h.stars <= 1; // 1 star: they want to cuff you, not shoot
+    const arrest = cop && !foe && h.stars <= 1; // 1 star: they want to cuff you, not shoot
     if (d > (arrest ? 18 : ATTACK_KEEP)) {
       const nx = c.x + (dx / d) * speed * dt, ny = c.y + (dy / d) * speed * dt;
-      if (!this.world.isSolid(nx, c.y, 5)) c.x = nx;
-      if (!this.world.isSolid(c.x, ny, 5)) c.y = ny;
+      if (!this.blocked(nx, c.y)) c.x = nx;
+      if (!this.blocked(c.x, ny)) c.y = ny;
       c.vx = (dx / d) * speed; c.vy = (dy / d) * speed;
       c.walk += dt * speed * 0.05;
     } else { c.vx = 0; c.vy = 0; }
@@ -408,10 +445,14 @@ export class PedSystem {
     c.shootT -= dt;
     if (c.shootT > 0) return;
     c.shootT = c.role === "swat" ? rnd(0.35, 0.7) : rnd(0.7, 1.4);
-    if (!this.world.lineClear(c.x, c.y, h.fx, h.fy, 30)) return;
+    if (!this.world.lineClear(c.x, c.y, fx, fy, 30)) return;
     const dmg = c.role === "swat" ? ENEMY_DMG.swat : cop ? ENEMY_DMG.cop : ENEMY_DMG.gang;
-    h.enemyShot(c.x + Math.cos(c.a) * 8, c.y + Math.sin(c.a) * 8, c.z + 15, c.a + rnd(-0.1, 0.1), dmg);
+    const za = Math.atan2(fz + 12 - (c.z + 15), d);
+    h.enemyShot(c.x + Math.cos(c.a) * 8, c.y + Math.sin(c.a) * 8, c.z + 15 + Math.sin(za) * 8, c.a + rnd(-0.1, 0.1), dmg, PedSystem.teamOf(c), c.id);
   }
+
+  // buildings, harbour containers and tree trunks block pedestrians
+  private blocked(x: number, y: number) { return this.world.isSolid(x, y, 5) || this.world.treeHit(x, y, PED_R); }
 
   // move towards the target; true when it is reached
   private move(c: Civilian, dt: number) {
@@ -419,7 +460,19 @@ export class PedSystem {
     if (d > 0.01) c.a += wrap(Math.atan2(dy, dx) - c.a) * Math.min(1, dt * 10);
     if (d <= step) { c.x = c.tx; c.y = c.ty; c.vx = 0; c.vy = 0; c.walk += step * 0.05; return true; }
     c.vx = (dx / d) * c.speed; c.vy = (dy / d) * c.speed;
-    c.x += c.vx * dt; c.y += c.vy * dt;
+    let nx = c.x + c.vx * dt, ny = c.y + c.vy * dt;
+    if (this.blocked(nx, ny)) {
+      // step around the obstacle: try turning left or right, keep the side that works
+      let ok = false;
+      for (const turn of TURNS) {
+        const a = Math.atan2(dy, dx) + turn;
+        const sx = c.x + Math.cos(a) * step, sy = c.y + Math.sin(a) * step;
+        if (!this.blocked(sx, sy)) { nx = sx; ny = sy; ok = true; break; }
+      }
+      if (!ok && this.world.isSolid(nx, ny, 2)) { nx = c.x; ny = c.y; } // a wall: wait; a tree: squeeze past
+    }
+    c.x = nx; c.y = ny;
+    c.z = this.world.rampH(c.x, c.y); // walk up and over ramps
     c.walk += dt * c.speed * 0.05;
     return false;
   }
@@ -507,6 +560,7 @@ export class PedSystem {
     const nx = c.x + c.vx * dt, ny = c.y + c.vy * dt;
     if (!this.world.isSolid(nx, ny, 4)) { c.x = nx; c.y = ny; } else { c.vx = 0; c.vy = 0; }
     c.vz -= GRAV * dt; c.z += c.vz * dt;
-    if (c.z < 0) { c.z = 0; c.vz = c.vz < -150 ? -c.vz * 0.25 : 0; }
+    const gz = this.world.rampH(c.x, c.y);
+    if (c.z < gz) { c.z = gz; c.vz = c.vz < -150 ? -c.vz * 0.25 : 0; }
   }
 }

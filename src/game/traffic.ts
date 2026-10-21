@@ -17,6 +17,9 @@ const PARK_SPAWN_MIN = 380, PARK_SPAWN_MAX = 1100, PARK_DESPAWN = 1350, PARK_FRE
 const PARKED_MODELS: CarModel[] = ["sedan", "sedan", "sedan", "suv", "van", "muscle", "taxi", "sport", "bike", "truck", "super"];
 const GANG_COLORS: Record<FactionId, string> = { halcones: "#c0392b", kings: "#7d3c98" };
 
+// braking for obstacles: look ahead, keep this gap, assumed comfortable deceleration
+const LOOK_CAR = 110, LOOK_PED = 120, GAP_CAR = 40, GAP_PED = 26, BRAKE_DECEL = 650;
+const safeSpeed = (dist: number, gap: number) => Math.sqrt(2 * BRAKE_DECEL * Math.max(0, dist - gap));
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 const wrap = (a: number) => { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; };
@@ -156,19 +159,23 @@ export class Traffic {
     const want = c.cruise * (Math.abs(diff) > 0.45 ? 0.55 : 1);
     c.throttle = c.vF < want ? 1 : c.vF > want + 40 ? -0.4 : 0;
     c.handbrake = false;
+    // obstacles ahead: slow down to a speed that still stops in time instead of slamming the brakes
     const ca = Math.cos(c.a), sa = Math.sin(c.a);
+    let vSafe = Infinity;
     for (const o of h.cars) {
       if (o === c) continue;
       const ox = o.x - c.x, oy = o.y - c.y;
       const fwd = ox * ca + oy * sa;
-      if (fwd > 0 && fwd < 80) { const lat = -ox * sa + oy * ca; if (Math.abs(lat) < 22) { c.throttle = c.vF > 40 ? -0.6 : 0; break; } }
+      if (fwd > 0 && fwd < LOOK_CAR && Math.abs(-ox * sa + oy * ca) < 22) vSafe = Math.min(vSafe, safeSpeed(fwd, GAP_CAR) + Math.max(0, o.vx * ca + o.vy * sa));
     }
     if (h.onFoot) {
       const ox = h.ped.x - c.x, oy = h.ped.y - c.y;
       const fwd = ox * ca + oy * sa;
-      if (fwd > 0 && fwd < 90 && Math.abs(-ox * sa + oy * ca) < 20) c.throttle = c.vF > 20 ? -1 : 0;
+      if (fwd > 0 && fwd < LOOK_PED && Math.abs(-ox * sa + oy * ca) < 20) vSafe = Math.min(vSafe, safeSpeed(fwd, GAP_PED));
     }
-    if (h.rules.city && h.peds.blocking(c)) c.throttle = c.vF > 20 ? -1 : 0;
+    if (h.rules.city) { const pd = h.peds.blockDist(c, LOOK_PED); if (pd < Infinity) vSafe = Math.min(vSafe, safeSpeed(pd, GAP_PED)); }
+    if (c.vF > vSafe) c.throttle = -clamp((c.vF - vSafe) / 150, 0.2, 1);
+    else if (c.vF > vSafe - 30) c.throttle = Math.min(c.throttle, 0);
     stuck(c, dt);
   }
 

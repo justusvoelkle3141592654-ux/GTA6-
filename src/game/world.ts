@@ -326,6 +326,21 @@ export class World {
     return false;
   }
 
+  // tree trunk (and a bit of the canopy) at (x, y)? pedestrians walk around them
+  treeHit(x: number, y: number, pad = 0): boolean {
+    const b = this.blockAt(x, y);
+    if (!b) return false;
+    for (const t of b.trees) { const r = t.r * 0.4 + pad, dx = x - t.x, dy = y - t.y; if (dx * dx + dy * dy < r * r) return true; }
+    return false;
+  }
+  // nearest tree whose canopy covers (x, y) (hiding spots), null if none
+  treeAt(x: number, y: number): Tree | null {
+    const b = this.blockAt(x, y);
+    if (!b) return null;
+    for (const t of b.trees) { const dx = x - t.x, dy = y - t.y; if (dx * dx + dy * dy < t.r * t.r) return t; }
+    return null;
+  }
+
   lineClear(x0: number, y0: number, x1: number, y1: number, step = 40): boolean {
     const d = Math.hypot(x1 - x0, y1 - y0);
     const n = Math.ceil(d / step);
