@@ -63,6 +63,7 @@ export default function App() {
   const [modal, setModal] = useState<ModalInfo | null>(null);
   const [pauseTab, setPauseTab] = useState<PauseTab>("menu");
   const startKeyRef = useRef<() => void>(() => {});
+  const backRef = useRef<() => boolean>(() => false);
 
   useEffect(() => {
     // wait for the bundled fonts (signs in the 3D world are drawn once with them), at most 1.5 s
@@ -135,6 +136,23 @@ export default function App() {
   const cycleCam = () => gameRef.current?.cycleCamera();
 
   useEffect(() => { if (state !== "paused") setPauseTab("menu"); }, [state]);
+
+  // Android back button (called by the app wrapper); false = nothing to go back to, the app may close
+  backRef.current = () => {
+    const g = gameRef.current;
+    if (!g) return false;
+    if (g.state === "playing") g.pause();
+    else if (g.state === "paused") { if (pauseTab !== "menu") setPauseTab("menu"); else g.resume(); }
+    else if (g.state === "modal") { if (modal?.kind === "dialog") g.dialogNext(); else g.closeModal(); }
+    else if (g.state === "over") toMenu();
+    else return false;
+    return true;
+  };
+  useEffect(() => {
+    const w = window as unknown as { solaraBack?: () => boolean };
+    w.solaraBack = () => backRef.current();
+    return () => { delete w.solaraBack; };
+  }, []);
 
   const g = gameRef.current;
   const playing = state === "playing";

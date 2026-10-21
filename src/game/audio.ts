@@ -299,3 +299,13 @@ export class Sfx {
 }
 
 export const sfx = new Sfx();
+
+// silence the engine/siren drones while the tab or the Android app is in the background
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    const ctx = sfx.ctx;
+    if (!ctx) return;
+    if (document.hidden) { if (ctx.state === "running") ctx.suspend(); }
+    else if (ctx.state === "suspended") ctx.resume();
+  });
+}

@@ -1,0 +1,61 @@
+plugins {
+    id "com.android.application"
+}
+
+// the game is built by Vite into one self-contained file (../dist/index.html)
+def webDist = file("../../dist")
+def webAssets = layout.buildDirectory.dir("web-assets")
+
+def copyWeb = tasks.register("copyWebBuild", Copy) {
+    doFirst {
+        if (!new File(webDist, "index.html").exists()) {
+            throw new GradleException("dist/index.html fehlt – zuerst im Projektordner 'npm run build' ausführen.")
+        }
+    }
+    from webDist
+    into webAssets
+}
+
+android {
+    namespace "de.solarabay.game"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "de.solarabay.game"
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+    }
+
+    signingConfigs {
+        // fixed hobby key in the repo, so every build can be installed over the previous one
+        shared {
+            storeFile file("solarabay.keystore")
+            storePassword "android"
+            keyAlias "solarabay"
+            keyPassword "android"
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.shared
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.shared
+        }
+    }
+
+    sourceSets {
+        main.assets.srcDirs += webAssets
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+tasks.named("preBuild") { dependsOn copyWeb }
