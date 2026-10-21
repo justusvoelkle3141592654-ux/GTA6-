@@ -101,6 +101,24 @@ export class World {
     this.generate();
     this.generateRamps();
     this.generateExtras(seed + 99);
+    this.indexRamps();
+  }
+
+  // ramps sorted into grid cells (one block wide) so height queries only test a few of them
+  private rampCells: number[][] = [];
+  private static readonly RC = GRID + 2; // cells per axis, the city plus one ring
+  private indexRamps() {
+    const n = World.RC;
+    this.rampCells = Array.from({ length: n * n }, () => []);
+    this.ramps.forEach((rp, i) => {
+      const x1 = rp.x0 + (rp.alongX ? rp.l : rp.w), y1 = rp.y0 + (rp.alongX ? rp.w : rp.l);
+      for (let cy = this.rampCell(rp.y0); cy <= this.rampCell(y1); cy++) for (let cx = this.rampCell(rp.x0); cx <= this.rampCell(x1); cx++) this.rampCells[cy * n + cx].push(i);
+    });
+  }
+  private rampCell(v: number) { return Math.max(0, Math.min(World.RC - 1, Math.floor(v / BLOCK) + 1)); }
+  private rampsAt(x: number, y: number): number[] | null {
+    if (x < -BLOCK || y < -BLOCK || x > WORLD + BLOCK || y > WORLD + BLOCK) return null;
+    return this.rampCells[this.rampCell(y) * World.RC + this.rampCell(x)];
   }
 
   // harbour quay east of the city: container stacks between the highways (own seed: the city stays the same)
@@ -175,7 +193,10 @@ export class World {
   // height of the ramp surface at (x, y), 0 if no ramp is there
   rampH(x: number, y: number): number {
     let best = 0;
-    for (const rp of this.ramps) {
+    const ids = this.rampsAt(x, y);
+    if (!ids) return 0;
+    for (const id of ids) {
+      const rp = this.ramps[id];
       const s = rp.alongX ? x : y, v = rp.alongX ? y : x;
       const sA = rp.alongX ? rp.x0 : rp.y0, vA = rp.alongX ? rp.y0 : rp.x0;
       if (s < sA || s > sA + rp.l || v < vA || v > vA + rp.w) continue;
@@ -188,7 +209,9 @@ export class World {
 
   // index of the ramp under (x, y), -1 if none
   rampIndexAt(x: number, y: number): number {
-    for (let i = 0; i < this.ramps.length; i++) {
+    const ids = this.rampsAt(x, y);
+    if (!ids) return -1;
+    for (const i of ids) {
       const rp = this.ramps[i];
       const s = rp.alongX ? x : y, v = rp.alongX ? y : x;
       const sA = rp.alongX ? rp.x0 : rp.y0, vA = rp.alongX ? rp.y0 : rp.x0;

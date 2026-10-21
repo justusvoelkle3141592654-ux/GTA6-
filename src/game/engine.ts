@@ -5,14 +5,14 @@ import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, CRIMES, type Crime } from "./wanted";
 import { buildPlaces, respawnCost, RESPAWN_RULES, type Place } from "./places";
 import { PedSystem, PED_LIMIT, type Civilian } from "./peds";
-import { Car, CARS, MODEL_STATS, MODEL_NAME, type CarDef, type FactionId } from "./vehicles";
-import { Inventory, WEAPONS, WEAPON_DEFS, type Weapon } from "./weapons";
+import { Car, CARS, MODEL_STATS, type CarDef, type FactionId } from "./vehicles";
+import { Inventory, WEAPONS, type Weapon } from "./weapons";
 import { AUTOSAVE_EVERY, emptyProgress, emptyStats, writeSave, type Progress, type SaveData, type SaveResult, type SaveStats } from "./save";
 import { Traffic, PARKED_LIMIT } from "./traffic";
 import { DISTRICTS, districtAt, type DistrictId } from "./districts";
 import { Radio } from "./radio";
-import { GARAGE_SLOTS, MAX_TUNE, PAINTS, TUNE_DEFS, tuneAcc, tuneDamage, tuneGrip, tuneHp, tuneSpeed, type OwnedCar, type TunePart } from "./garage";
-import { AMMO_FOR_SALE, ARMOR_PRICE, FOOD, GUNS_FOR_SALE, OUTFITS, PAINT_PRICE, REPAIR_PER_HP, ROB_COOLDOWN, ROB_HEAT, ROB_REWARD, type ShopAction } from "./economy";
+import { tuneAcc, tuneDamage, tuneGrip, tuneSpeed, type OwnedCar, type TunePart } from "./garage";
+import type { ShopAction } from "./economy";
 import { PLACE_RADIUS } from "./places";
 import { Bindings } from "./input";
 import { Missions } from "./missions";
@@ -21,6 +21,7 @@ import { currentSettings } from "./settings";
 import { findRoute, MAX_ROUTE } from "./route";
 import { Tips } from "./tips";
 import { Police } from "./police";
+import { Shops } from "./shops";
 
 export type GameState = "menu" | "playing" | "paused" | "over" | "modal";
 // overlays that stop the game while open (shops, dialogs, weapon wheel)
@@ -87,7 +88,7 @@ interface Callbacks {
 
 export interface Ped { x: number; y: number; z: number; a: number; vx: number; vy: number; hp: number; maxHp: number; armor: number; walk: number; moving: boolean; sprint: boolean; shootT: number; hitFlash: number; dead: boolean; }
 export const MAX_ARMOR = 100;
-const newPed = (x: number, y: number, a = 0): Ped => ({ x, y, z: terrainH(x, y), a, vx: 0, vy: 0, hp: 100, maxHp: 100, armor: 0, walk: 0, moving: false, sprint: false, shootT: 0, hitFlash: 0, dead: false });
+export const newPed = (x: number, y: number, a = 0): Ped => ({ x, y, z: terrainH(x, y), a, vx: 0, vy: 0, hp: 100, maxHp: 100, armor: 0, walk: 0, moving: false, sprint: false, shootT: 0, hitFlash: 0, dead: false });
 export interface Proj { kind: "bullet" | "rocket" | "bomb" | "grenade"; from: "player" | "enemy"; dmg: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; a: number; life: number; px: number; py: number; }
 export interface Bomb { car: Car | null; ox: number; oy: number; x: number; y: number; z: number; t: number; }
 export interface Particle { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; size: number; grow: number; color: string; type: number; drag: number; }
@@ -121,6 +122,7 @@ export class Game {
   jobs: Jobs = new Jobs(this);
   tips: Tips = new Tips(this);
   police: Police = new Police(this);
+  shops: Shops = new Shops(this);
   state: GameState = "menu";
   dpr = 1; cw = 0; ch = 0; mobile = false;
 
@@ -147,7 +149,6 @@ export class Game {
   nearPlace: Place | null = null;
   modal: ModalInfo | null = null;
   radio = new Radio();
-  private robbedAt = new Map<string, number>();
   private placeLatch = ""; // car places open once per visit
   get weapon(): Weapon { return this.inv.current; }
 
@@ -327,7 +328,7 @@ export class Game {
     // open world: fists and a pistol; arcade modes: endless pistol, rockets and sticky bombs
     if (rules.respawn) this.inv.reset(["pistol"], { pistol: 48 });
     else this.inv.reset(["pistol", "rocket", "bomb"], { rocket: 30, bomb: 30 }, ["pistol"], false);
-    this.outfit = 0; this.garage = []; this.robbedAt.clear(); this.placeLatch = "";
+    this.outfit = 0; this.garage = []; this.shops.reset(); this.placeLatch = "";
     this.district = districtAt(this.player.x, this.player.y);
     this.copSpawnT = this.diff.firstCop;
     const p = this.player;
@@ -436,9 +437,14 @@ export class Game {
 
   // ---------- feedback ----------
   shake(a: number) { if (currentSettings.shake) this.trauma = Math.min(1, this.trauma + a); }
+  // particles come from a pool (no allocations while playing); when the limit is reached new ones are skipped
+  private pFree: Particle[] = [];
   private emit(x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number, size: number, grow: number, color: string, type: number, drag = 2) {
-    if (this.particles.length >= MAX_PARTICLES) this.particles.shift();
-    this.particles.push({ x, y, z, vx, vy, vz, life, max: life, size, grow, color, type, drag });
+    if (this.particles.length >= MAX_PARTICLES) return;
+    const q = this.pFree.pop();
+    if (!q) { this.particles.push({ x, y, z, vx, vy, vz, life, max: life, size, grow, color, type, drag }); return; }
+    q.x = x; q.y = y; q.z = z; q.vx = vx; q.vy = vy; q.vz = vz; q.life = life; q.max = life; q.size = size; q.grow = grow; q.color = color; q.type = type; q.drag = drag;
+    this.particles.push(q);
   }
   private sparks(x: number, y: number, z: number, n: number, nx = 0, ny = 0, power = 1) {
     for (let i = 0; i < n; i++) {
@@ -591,7 +597,7 @@ export class Game {
   gangHostile(f: FactionId) { return this.rules.city && (this.progress.rep[f] <= -30 || this.gangAggro[f] > 0); }
 
   // a cop with a wanted level sees the player (close, in line of sight, or from the helicopter)
-  private copSeesPlayer() { return this.police.copSees(this.fx, this.fy); }
+  copSeesPlayer() { return this.police.copSees(this.fx, this.fy); }
   explodeAt(x: number, y: number, big: number) { this.explode(x, y, big, 2); }
 
   // crimes in the open world need a witness: police nearby sees it at once, a passer-by calls them (delayed)
@@ -946,149 +952,9 @@ export class Game {
   // the player's own car was put into the garage (it is not in the car list until you drive another one)
   playerCarStored = false;
 
-  shopView(): ShopView {
-    const p = this.player, pd = this.ped;
-    const pl = this.modal?.kind === "shop" ? this.modal.place : null;
-    const inCar = !this.onFoot && !this.playerCarStored;
-    return {
-      cash: this.cash, hp: pd.hp, maxHp: pd.maxHp, armor: pd.armor, outfit: this.outfit, stars: this.wanted.stars,
-      weapons: GUNS_FOR_SALE.map((w) => ({ w, owned: this.inv.has(w), total: this.inv.total(w), canAmmo: AMMO_FOR_SALE.includes(w) })),
-      car: inCar ? { name: MODEL_NAME[p.model], hp: p.hp, maxHp: p.maxHp, color: p.color, tune: { ...p.tune }, repair: Math.ceil(Math.max(0, p.maxHp - p.hp) * REPAIR_PER_HP) } : null,
-      garage: this.garage.map((c) => ({ name: MODEL_NAME[c.model], color: c.color, tune: { ...c.tune }, value: Math.round(MODEL_STATS[c.model].price * 0.6) })),
-      slots: GARAGE_SLOTS,
-      robWait: pl ? Math.max(0, Math.ceil(ROB_COOLDOWN - (this.time - (this.robbedAt.get(pl.id) ?? -1e9)))) : 0,
-    };
-  }
-
-  private pay(price: number): boolean {
-    if (this.cash < price) { sfx.empty(); return false; }
-    this.cash -= price; sfx.cashier();
-    return true;
-  }
-
+  shopView(): ShopView { return this.shops.view(); }
   // a shop button was pressed; returns the message to show
-  shopAction(a: ShopAction): string {
-    const p = this.player, pd = this.ped;
-    const pl = this.modal?.kind === "shop" ? this.modal.place : null;
-    const broke = "Zu wenig Geld";
-    switch (a.t) {
-      case "weapon": {
-        const d = WEAPON_DEFS[a.w];
-        if (this.inv.has(a.w)) return "Hast du schon";
-        if (!this.pay(d.price)) return broke;
-        this.inv.give(a.w, d.ammoPack); this.inv.select(a.w);
-        return `${d.name} gekauft`;
-      }
-      case "ammo": {
-        const d = WEAPON_DEFS[a.w];
-        if (!this.inv.has(a.w)) return "Erst die Waffe kaufen";
-        if (this.inv.total(a.w) >= d.maxAmmo) return "Munition ist voll";
-        if (!this.pay(d.ammoPrice)) return broke;
-        this.inv.give(a.w, d.ammoPack);
-        return `+${d.ammoPack} Schuss ${d.name}`;
-      }
-      case "armor": {
-        if (pd.armor >= MAX_ARMOR) return "Weste ist schon voll";
-        const price = Math.ceil(((MAX_ARMOR - pd.armor) / MAX_ARMOR) * ARMOR_PRICE);
-        if (!this.pay(price)) return broke;
-        pd.armor = MAX_ARMOR;
-        return "Schutzweste angezogen";
-      }
-      case "food": {
-        const f = FOOD[a.i];
-        if (!f) return "";
-        if (pd.hp >= pd.maxHp) return "Du bist satt";
-        if (!this.pay(f.price)) return broke;
-        pd.hp = Math.min(pd.maxHp, pd.hp + f.heal);
-        return `${f.name} – lecker (+${f.heal})`;
-      }
-      case "outfit": {
-        const o = OUTFITS[a.i];
-        if (!o || a.i === this.outfit) return "";
-        if (!this.pay(o.price)) return broke;
-        this.outfit = a.i;
-        // a new look throws off the police (up to 2 stars, if nobody sees you right now)
-        if (this.wanted.stars > 0 && this.wanted.stars <= 2 && !this.copSeesPlayer()) { this.wanted.clear(); return `${o.name} – die Cops erkennen dich nicht mehr`; }
-        return `${o.name} steht dir`;
-      }
-      case "repair": {
-        if (!pl || this.onFoot) return "";
-        const cost = Math.ceil(Math.max(0, p.maxHp - p.hp) * REPAIR_PER_HP);
-        if (cost <= 0) return "Der Wagen ist in Ordnung";
-        if (!this.pay(cost)) return broke;
-        p.hp = p.maxHp;
-        return "Repariert";
-      }
-      case "paint": {
-        if (this.onFoot || !PAINTS.includes(a.color) || a.color === p.color) return "";
-        if (!this.pay(PAINT_PRICE)) return broke;
-        p.color = a.color; p.hp = p.maxHp;
-        if (this.wanted.stars > 0 && !this.copSeesPlayer()) { this.wanted.clear(); return "Neue Farbe – die Polizei sucht jetzt ein anderes Auto"; }
-        return "Frisch lackiert";
-      }
-      case "tune": {
-        if (this.onFoot) return "";
-        const lvl = p.tune[a.part];
-        if (lvl >= MAX_TUNE) return "Maximal getunt";
-        if (!this.pay(TUNE_DEFS[a.part].prices[lvl])) return broke;
-        const next = { ...p.tune, [a.part]: lvl + 1 };
-        if (a.part === "armor") { const f = tuneHp(next) / tuneHp(p.tune); p.maxHp *= f; p.hp *= f; }
-        p.tune = next;
-        return `${TUNE_DEFS[a.part].name} Stufe ${lvl + 1}`;
-      }
-      case "save": {
-        pd.hp = pd.maxHp;
-        const r = this.saveGame();
-        return r === "saved" ? "Ausgeruht und gespeichert" : r === "memory" ? "Ausgeruht – nur vorübergehend gespeichert" : r === "wanted" ? "Mit Fahndung kannst du nicht speichern" : "Gerade nicht möglich";
-      }
-      case "store": {
-        if (this.onFoot || this.playerCarStored || !pl) return "Fahr mit dem Auto in die Garage";
-        if (this.garage.length >= GARAGE_SLOTS) return "Garage ist voll";
-        if (p.kind === "player" && (p.model === "police" || p.model === "swat")) return "Polizeiautos nimmt die Garage nicht";
-        this.garage.push({ model: p.model, color: p.color, hp: p.hp, maxHp: p.maxHp, mass: p.mass, tune: { ...p.tune } });
-        this.cars.splice(this.cars.indexOf(p), 1);
-        this.playerCarStored = true;
-        this.ped = newPed(pl.x, pl.y, pl.a); this.ped.armor = pd.armor; this.ped.hp = pd.hp;
-        this.onFoot = true;
-        this.closeModal();
-        return "Eingeparkt";
-      }
-      case "takeCar": {
-        const c = this.garage[a.i];
-        if (!c || !pl) return "";
-        const car = new Car("civ", c.model, c.color);
-        car.x = pl.cx; car.y = pl.cy; car.a = -Math.PI / 2; car.z = terrainH(car.x, car.y);
-        for (const o of this.cars) if (Math.hypot(o.x - car.x, o.y - car.y) < 45) car.y += 60; // free spot
-        car.hp = c.hp; car.maxHp = c.maxHp; car.mass = c.mass; car.tune = { ...c.tune };
-        car.parked = true; car.handbrake = true; car.owned = true; car.keep = true;
-        this.cars.push(car);
-        this.garage.splice(a.i, 1);
-        return `${MODEL_NAME[c.model]} steht vor der Tür`;
-      }
-      case "sellCar": {
-        const c = this.garage[a.i];
-        if (!c) return "";
-        const v = Math.round(MODEL_STATS[c.model].price * 0.6);
-        this.garage.splice(a.i, 1); this.cash += v; this.stats.earned += v; sfx.cashier();
-        return `Verkauft für $${v.toLocaleString("de-DE")}`;
-      }
-      case "rob": {
-        if (!pl?.robbable) return "";
-        const last = this.robbedAt.get(pl.id) ?? -1e9;
-        if (this.time - last < ROB_COOLDOWN) return "Die Kasse ist noch leer";
-        const v = Math.round(rnd(ROB_REWARD[0], ROB_REWARD[1]));
-        this.robbedAt.set(pl.id, this.time);
-        this.cash += v; this.stats.earned += v;
-        this.wanted.heat = Math.max(this.wanted.heat, ROB_HEAT);
-        this.wanted.lostT = 0;
-        this.peds.alarm(pl.x, pl.y, 500, "shot");
-        sfx.cashier();
-        this.closeModal();
-        this.banner("ÜBERFALL", `+$${v.toLocaleString("de-DE")} – die Polizei ist alarmiert`, "#ff9f43", 2);
-        return "";
-      }
-    }
-  }
+  shopAction(a: ShopAction): string { return this.shops.act(a); }
 
   cycleRadio() {
     if (this.onFoot) { this.setHint("Radio gibt's nur im Auto", 1.2); return; }
@@ -1841,10 +1707,11 @@ export class Game {
   }
 
   private updateFx(dt: number) {
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const q = this.particles[i];
+    const ps = this.particles;
+    for (let i = ps.length - 1; i >= 0; i--) {
+      const q = ps[i];
       q.life -= dt;
-      if (q.life <= 0) { this.particles.splice(i, 1); continue; }
+      if (q.life <= 0) { ps[i] = ps[ps.length - 1]; ps.pop(); this.pFree.push(q); continue; } // swap-remove, back to the pool
       const f = Math.exp(-q.drag * dt);
       q.vx *= f; q.vy *= f;
       q.x += q.vx * dt; q.y += q.vy * dt;

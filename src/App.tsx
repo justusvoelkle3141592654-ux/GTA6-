@@ -65,6 +65,15 @@ export default function App() {
   const startKeyRef = useRef<() => void>(() => {});
 
   useEffect(() => {
+    // wait for the bundled fonts (signs in the 3D world are drawn once with them), at most 1.5 s
+    let game: Game | null = null, gone = false;
+    const fontsReady = document.fonts ? Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 1500))]) : Promise.resolve();
+    fontsReady.then(() => { if (!gone) game = createGame(); });
+    return () => { gone = true; game?.destroy(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function createGame(): Game | null {
     let game: Game;
     applySettings(loadSettings());
     try {
@@ -91,13 +100,12 @@ export default function App() {
           if (navigator.vibrate && amt > 4) navigator.vibrate(Math.min(60, amt * 4));
         },
       }, cfgRef.current);
-    } catch (e) { console.error(e); setGlError(true); return; }
+    } catch (e) { console.error(e); setGlError(true); return null; }
     gameRef.current = game;
     if (import.meta.env.DEV) (window as unknown as { game?: Game }).game = game; // debugging / automated tests
     setTouchInput(game.touch);
-    return () => game.destroy();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    return game;
+  }
 
   function updateConfig(patch: Partial<GameConfig>, apply = true) {
     const next = { ...cfgRef.current, ...patch };
