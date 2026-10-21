@@ -480,6 +480,35 @@ export class World {
     return horiz ? { x: along, y: line * BLOCK + off } : { x: line * BLOCK + off, y: along };
   }
 
+  // valid points on the sidewalks next to the streets (taxi customers, suspects, drop-offs): never in a wall,
+  // never on or right in front of a ramp, never in the water; computed once
+  private curbs: { x: number; y: number }[] | null = null;
+  curbPoints() {
+    if (this.curbs) return this.curbs;
+    const out: { x: number; y: number }[] = [];
+    const IN = 9;
+    for (const b of this.blocks) {
+      const x0 = b.bx * BLOCK + ROAD + IN, y0 = b.by * BLOCK + ROAD + IN, s = BLOCK - ROAD - IN * 2;
+      for (let t = 30; t < s - 30; t += 40) for (const [x, y] of [[x0 + t, y0], [x0 + t, y0 + s], [x0, y0 + t], [x0 + s, y0 + t]]) {
+        if (this.isSolid(x, y, 7) || this.treeHit(x, y, 6) || this.nearRamp(x, y, 30) || isWater(x, y)) continue;
+        out.push({ x, y });
+      }
+    }
+    this.curbs = out;
+    return out;
+  }
+  // a random curb point between minD and maxD away from (x, y)
+  curbPoint(x: number, y: number, minD: number, maxD: number, r = Math.random) {
+    const pts = this.curbPoints();
+    for (let k = 0; k < 60; k++) {
+      const p = pts[Math.floor(r() * pts.length)], d = Math.hypot(p.x - x, p.y - y);
+      if (d > minD && d < maxD) return p;
+    }
+    let best = pts[0], bd = Infinity;
+    for (const p of pts) { const d = Math.abs(Math.hypot(p.x - x, p.y - y) - (minD + maxD) / 2); if (d < bd) { bd = d; best = p; } }
+    return best;
+  }
+
   // nearest safe point on a street (respawns after a fall, old saves): on land, not in a wall, not on a ramp
   nearestSafeRoad(x: number, y: number): { x: number; y: number; a: number } {
     let best = { x: lineC(8), y: lineC(8), a: 0 }, bd = Infinity;

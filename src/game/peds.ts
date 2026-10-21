@@ -63,7 +63,7 @@ const SPAWN_MIN = 300, SPAWN_MAX = 950, DESPAWN = 1150;
 const WALK_V: [number, number] = [26, 36], FLEE_V: [number, number] = [120, 150];
 const CROSS_CHANCE = 0.3, MAX_WAIT = 5;
 const DOWN_TIME = 10;                    // knocked-down peds disappear after this
-const CAR_HALF_L = 25, CAR_HALF_W = 13, PED_R = 5;
+const PED_R = 5;
 const DODGE_DIST = 110, DODGE_SPEED = 110;
 const GRAV = 620;
 const TURNS = [0.9, -0.9, 1.6, -1.6];     // directions tried when something blocks the way
@@ -555,11 +555,12 @@ export class PedSystem {
   private hitByCars(c: Civilian, h: PedHost) {
     for (const car of h.cars) {
       const dx = c.x - car.x, dy = c.y - car.y;
-      if (dx * dx + dy * dy > 40 * 40) continue;
+      const R = car.hl + PED_R + 2;
+      if (dx * dx + dy * dy > R * R) continue;
       if (Math.abs(car.z - c.z) > 20) continue;
       const ca = Math.cos(car.a), sa = Math.sin(car.a);
       const lx = dx * ca + dy * sa, ly = -dx * sa + dy * ca;
-      if (Math.abs(lx) > CAR_HALF_L + PED_R || Math.abs(ly) > CAR_HALF_W + PED_R) continue;
+      if (Math.abs(lx) > car.hl + PED_R || Math.abs(ly) > car.hw + PED_R) continue; // the real size of this car
       const sp = car.speed;
       if (sp > 60 && !car.dead && (c.role !== "seeker" || (car.kind === "player" && !h.onFoot))) { // traffic never runs over the hide-and-seek players
         const s = sp * 0.7;
@@ -570,7 +571,7 @@ export class PedSystem {
         return;
       }
       // slow car: just step aside
-      const px = CAR_HALF_W + PED_R - Math.abs(ly);
+      const px = car.hw + PED_R - Math.abs(ly);
       const side = ly >= 0 ? 1 : -1;
       c.x += -sa * side * px; c.y += ca * side * px;
     }

@@ -155,8 +155,8 @@ export class Jobs {
     const a = this.active!, g = this.g;
     if (a.kind === "taxi") {
       a.stage = "pickup";
-      const p = this.randomNode(250, 650);
-      a.fare = g.peds.spawnRole("fare", p.x + 75 + 4, p.y + 75 + 4);
+      const p = g.world.curbPoint(g.fx, g.fy, 250, 650);
+      a.fare = g.peds.spawnRole("fare", p.x, p.y);
       if (a.fare) a.fare.tag = "fare";
       a.timer = 60;
     } else if (a.kind === "delivery") {
@@ -167,8 +167,8 @@ export class Jobs {
       g.hintMsg(`Lieferung für ${pl.name}`);
     } else if (Math.random() < 0.35) {
       // pickpocket on the run: starts on a sidewalk near a crossing
-      const p = this.randomNode(350, 650);
-      this.spawnSuspect(p.x + 75 + 12, p.y + 75 + 12);
+      const p = g.world.curbPoint(g.fx, g.fy, 350, 650);
+      this.spawnSuspect(p.x, p.y);
       g.hintMsg("Zentrale: Taschendieb flüchtet zu Fuß – schnapp ihn dir!");
     } else {
       const p = this.randomNode(450, 800);
@@ -229,14 +229,14 @@ export class Jobs {
         this.markers.push({ x: f.x, y: f.y, color: "#2bf0ff", kind: "goal", label: "" });
         if (Math.hypot(f.x - p.x, f.y - p.y) < 55 && p.speed < 45) {
           f.active = false; f.tag = "";
-          a.dest = this.randomNode(700, 1700);
+          a.dest = g.world.curbPoint(p.x, p.y, 700, 1700);
           a.timer = Math.hypot(a.dest.x - p.x, a.dest.y - p.y) / 7 + 20;
           a.stage = "drive"; sfx.door();
         }
       } else {
         g.objective = "Taxi: Bring den Fahrgast ans Ziel";
         this.markers.push({ x: a.dest.x, y: a.dest.y, color: "#ffd23f", kind: "goal", label: "" });
-        if (Math.hypot(a.dest.x - p.x, a.dest.y - p.y) < 60 && p.speed < 70) { this.pay(60 + Math.round(a.timer * 3)); this.nextTask(); }
+        if (Math.hypot(a.dest.x - p.x, a.dest.y - p.y) < 75 && p.speed < 70) { this.pay(60 + Math.round(a.timer * 3)); this.nextTask(); }
       }
     } else if (a.kind === "delivery") {
       g.objective = "Lieferung: Bring die Ware zum Laden";

@@ -11,7 +11,7 @@ import { AUTOSAVE_EVERY, SAVE_VERSION, emptyProgress, emptyStats, writeSave, typ
 import { Traffic, PARKED_LIMIT } from "./traffic";
 import { DISTRICTS, districtAt, type DistrictId } from "./districts";
 import { Radio } from "./radio";
-import { tuneAcc, tuneDamage, tuneGrip, tuneSpeed, type OwnedCar, type TunePart } from "./garage";
+import { GARAGE_SLOTS, tuneAcc, tuneDamage, tuneGrip, tuneSpeed, type OwnedCar, type TunePart } from "./garage";
 import type { ShopAction } from "./economy";
 import { PLACE_RADIUS } from "./places";
 import { Bindings } from "./input";
@@ -695,6 +695,7 @@ export class Game {
     this.copSpawnT = this.diff.firstCop;
     const p = this.player;
     p.throttle = 0; p.steer = 0; p.nitro = false; p.handbrake = true;
+    this.releasePlayerCar();
     const n = this.world.nodePos(8, 7);
     const x = place ? place.x : n.x, y = place ? place.y : n.y;
     this.ped = newPed(x, y, place ? place.a : 0);
@@ -703,6 +704,26 @@ export class Game {
     this.banners.length = 0;
     this.autosaveT = 1; // save the new state right after waking up
     this.banner(rule.title, `${place ? place.name + " · " : ""}−$${cost.toLocaleString("de-DE")} ${rule.sub}`, place ? place.color : "#ffffff", 3.2);
+  }
+
+  // there is only one player car: the one left behind goes back into the garage (if it came from there)
+  // or stays where it is as an ordinary parked car
+  private releasePlayerCar() {
+    const p = this.player;
+    if (this.playerCarStored) return;
+    if (!p.dead) {
+      if (p.keep && this.garage.length < GARAGE_SLOTS) this.garage.push({ model: p.model, color: p.color, hp: p.hp, maxHp: p.maxHp, mass: p.mass, tune: { ...p.tune } });
+      else if (!isCraft(p.model)) {
+        const old = new Car("civ", p.model, p.color);
+        old.x = p.x; old.y = p.y; old.z = p.z; old.a = p.a;
+        old.hp = p.hp; old.maxHp = p.maxHp; old.mass = p.mass; old.parked = true; old.owned = true; old.tune = p.tune; old.flat = p.flat;
+        this.cars.push(old);
+        for (const b of this.bombs) if (b.car === p) b.car = old;
+      }
+    }
+    const i = this.cars.indexOf(p);
+    if (i >= 0) this.cars.splice(i, 1);
+    this.playerCarStored = true;
   }
 
   // ---------- weapons ----------
@@ -1675,6 +1696,7 @@ export class Game {
       }
       c.vz -= GRAV * dt * (boostAir ? 0.45 : 1);
       c.x += c.vx * dt; c.y += c.vy * dt; c.z += c.vz * dt;
+      this.sweep(c, dt);
       c.av *= Math.exp(-1.5 * dt);
       c.a += c.av * dt;
       const gh = this.carGround(c);
@@ -1707,8 +1729,20 @@ export class Game {
     c.a += c.av * dt;
     c.vx = ca * vF - sa * vR; c.vy = sa * vF + ca * vR;
     c.x += c.vx * dt; c.y += c.vy * dt;
+    this.sweep(c, dt);
     c.vF = vF; c.vR = vR;
     this.followTerrain(c, dt);
+  }
+
+  // swept test for fast cars: a ray along this step's movement, the car stops at the last free point before a wall
+  private sweep(c: Car, dt: number) {
+    const dx = c.vx * dt, dy = c.vy * dt, L = Math.hypot(dx, dy);
+    if (L < 5) return;
+    const w = this.world, ox = c.x - dx, oy = c.y - dy, n = Math.ceil(L / 3);
+    for (let k = 1; k <= n; k++) {
+      const px = ox + (dx * k) / n, py = oy + (dy * k) / n;
+      if (w.isSolid(px, py, 1) && c.z < w.roofAt(px, py) - 25) { c.x = ox + (dx * (k - 1)) / n; c.y = oy + (dy * (k - 1)) / n; return; }
+    }
   }
 
   private followTerrain(c: Car, dt: number) {
