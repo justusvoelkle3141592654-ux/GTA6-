@@ -11,7 +11,7 @@ export interface JobDef { kind: JobKind; name: string; models: CarModel[]; desc:
 export const JOB_DEFS: Record<JobKind, JobDef> = {
   taxi: { kind: "taxi", name: "Taxi", models: ["taxi"], desc: "Fahrgäste einsammeln und pünktlich absetzen" },
   delivery: { kind: "delivery", name: "Lieferung", models: ["van", "truck"], desc: "Ware rechtzeitig zum Laden bringen" },
-  bounty: { kind: "bounty", name: "Kopfgeld", models: ["police", "swat"], desc: "Gesuchte Bandenautos stoppen" },
+  bounty: { kind: "bounty", name: "Streife", models: ["police", "swat"], desc: "Flüchtige stoppen und zu Fuß festnehmen" },
 };
 export const JOB_KINDS: JobKind[] = ["taxi", "delivery", "bounty"];
 export const jobFor = (m: CarModel): JobKind | null => JOB_KINDS.find((k) => JOB_DEFS[k].models.includes(m)) ?? null;
@@ -64,11 +64,15 @@ export function buildShells(world: World): Shell[] {
 }
 
 // ---------------------------------------------------------------- runner
+// patrol (bounty): hunt = stop the getaway car, catch = arrest the suspect on foot, back = return to the patrol car
 interface ActiveJob {
-  kind: JobKind; stage: "pickup" | "drive" | "hunt";
+  kind: JobKind; stage: "pickup" | "drive" | "hunt" | "catch" | "back";
   timer: number; count: number;
-  fare: Civilian | null; dest: { x: number; y: number }; target: Car | null;
+  fare: Civilian | null; dest: { x: number; y: number }; target: Car | null; suspect: Civilian | null;
 }
+const SUSPECT_LOOK = { shirt: "#f39c12", pants: "#2c3e50" };
+const STOP_HP = 0.35;     // the getaway car gives up below this share of its health
+const ARREST_DIST = 20;   // on foot this close = handcuffs
 interface ActiveRace { def: RaceDef; i: number; t: number; }
 
 export class Jobs {
@@ -93,8 +97,8 @@ export class Jobs {
     if (g.missions.active || this.race) { g.hintMsg("Erst die laufende Mission beenden"); return; }
     const kind = jobFor(g.player.model);
     if (!kind) { g.hintMsg("In diesem Auto gibt's keinen Job – Taxi, Lieferwagen/LKW oder Streifenwagen"); return; }
-    if (kind === "bounty" && g.wanted.stars > 0) { g.hintMsg("Mit Fahndung bekommst du keine Kopfgeld-Aufträge"); return; }
-    this.active = { kind, stage: kind === "taxi" ? "pickup" : kind === "bounty" ? "hunt" : "drive", timer: 0, count: 0, fare: null, dest: { x: 0, y: 0 }, target: null };
+    if (kind === "bounty" && g.wanted.stars > 0) { g.hintMsg("Mit Fahndung gibt dir die Zentrale keine Einsätze"); return; }
+    this.active = { kind, stage: kind === "taxi" ? "pickup" : kind === "bounty" ? "hunt" : "drive", timer: 0, count: 0, fare: null, dest: { x: 0, y: 0 }, target: null, suspect: null };
     g.banner(JOB_DEFS[kind].name.toUpperCase(), JOB_DEFS[kind].desc, "#2bf0ff", 2);
     this.nextTask();
   }
@@ -104,12 +108,24 @@ export class Jobs {
     if (!a) return;
     if (a.fare && a.fare.active && a.fare.tag) a.fare.tag = "";
     if (a.target) { a.target.tag = ""; a.target.flee = false; a.target.keep = false; }
+    if (a.suspect && a.suspect.active) a.suspect.tag = "";
     this.active = null;
     this.g.objective = ""; this.g.objTimer = -1;
     this.g.banner("JOB ENDE", `${reason} · ${a.count} erledigt`, "#2bf0ff", 2);
   }
 
   private lvl(k: JobKind) { return this.g.progress.jobs[k] ?? 0; }
+  // on patrol: shooting and ramming the suspects is your job, not a crime
+  get onDuty() { return this.active?.kind === "bounty"; }
+
+  private spawnSuspect(x: number, y: number) {
+    const a = this.active!, g = this.g;
+    const s = g.peds.spawnRole("target", x, y);
+    if (!s) { this.nextTask(); return; }
+    s.tag = "suspect"; s.shirt = SUSPECT_LOOK.shirt; s.pants = SUSPECT_LOOK.pants; s.hp = s.maxHp = 40;
+    g.peds.panic(s, g.fx, g.fy, 30);
+    a.suspect = s; a.stage = "catch"; a.timer = 50;
+  }
 
   private randomNode(minD: number, maxD: number) {
     const g = this.g;
@@ -135,6 +151,11 @@ export class Jobs {
       a.dest = { x: pl.cx, y: pl.cy };
       a.timer = Math.hypot(a.dest.x - g.fx, a.dest.y - g.fy) / 7 + 25;
       g.hintMsg(`Lieferung für ${pl.name}`);
+    } else if (Math.random() < 0.35) {
+      // pickpocket on the run: starts on a sidewalk near a crossing
+      const p = this.randomNode(350, 650);
+      this.spawnSuspect(p.x + 75 + 12, p.y + 75 + 12);
+      g.hintMsg("Zentrale: Taschendieb flüchtet zu Fuß – schnapp ihn dir!");
     } else {
       const p = this.randomNode(450, 800);
       const f = Math.random() < 0.5 ? "halcones" : "kings";
@@ -142,7 +163,8 @@ export class Jobs {
       c.x = p.x + 10; c.y = p.y + 34; c.z = terrainH(c.x, c.y); c.hp = c.maxHp = 140 + this.lvl("bounty") * 15; c.mass = 1.3;
       c.flee = true; c.driver = true; c.cruise = 240 + Math.min(80, this.lvl("bounty") * 8); c.tag = "target"; c.keep = true; c.faction = f;
       g.cars.push(c);
-      a.target = c; a.stage = "hunt"; a.timer = 120;
+      a.target = c; a.stage = "hunt"; a.timer = 120; a.suspect = null;
+      g.hintMsg("Zentrale: Fluchtwagen gesichtet – stoppen!");
     }
   }
 
@@ -167,10 +189,12 @@ export class Jobs {
     this.updateRace(dt, inCar);
     const a = this.active;
     if (!a) return;
-    if (!inCar || jobFor(g.player.model) !== a.kind) { this.stop("Du hast das Fahrzeug verlassen"); return; }
+    const footOk = a.kind === "bounty" && (a.stage === "catch" || a.stage === "back"); // patrol: you chase suspects on foot
+    if (!footOk && (!inCar || jobFor(g.player.model) !== a.kind)) { this.stop("Du hast das Fahrzeug verlassen"); return; }
+    if (footOk && inCar && jobFor(g.player.model) !== "bounty") { this.stop("Du bist in ein anderes Auto gestiegen"); return; }
     a.timer -= dt;
     g.objTimer = Math.max(0, a.timer);
-    if (a.timer <= 0) { this.stop(a.kind === "taxi" && a.stage === "drive" ? "Der Fahrgast ist sauer ausgestiegen" : "Zu spät"); return; }
+    if (a.timer <= 0) { this.stop(a.kind === "taxi" && a.stage === "drive" ? "Der Fahrgast ist sauer ausgestiegen" : a.stage === "catch" ? "Der Verdächtige ist entkommen" : "Zu spät"); return; }
     const p = g.player;
     if (a.kind === "taxi") {
       if (a.stage === "pickup") {
@@ -193,13 +217,39 @@ export class Jobs {
       g.objective = "Lieferung: Bring die Ware zum Laden";
       this.markers.push({ x: a.dest.x, y: a.dest.y, color: "#ffd23f", kind: "goal", label: "" });
       if (Math.hypot(a.dest.x - p.x, a.dest.y - p.y) < 50 && p.speed < 70) { this.pay(140 + Math.round(a.timer * 4)); this.nextTask(); }
-    } else {
+    } else if (a.stage === "hunt") {
       const c = a.target;
       if (!c || !g.cars.includes(c)) { this.stop("Das Ziel ist entkommen"); return; }
-      g.objective = "Kopfgeld: Stopp das Bandenauto";
+      g.objective = "Streife: Stopp den Fluchtwagen (rammen oder schießen)";
       this.markers.push({ x: c.x, y: c.y, color: "#ff4d4d", kind: "enemy", label: "" });
-      if (c.dead) { c.keep = false; c.tag = ""; this.pay(350 + this.lvl("bounty") * 40); this.nextTask(); }
-      else if (Math.hypot(c.x - p.x, c.y - p.y) > 1700) this.stop("Das Ziel ist entkommen");
+      if (c.dead || c.hp < c.maxHp * STOP_HP) {
+        // the car gives up: the driver jumps out and runs
+        c.flee = false; c.driver = false; c.parked = true; c.handbrake = true; c.tag = ""; c.keep = false; c.faction = null;
+        c.vx *= 0.1; c.vy *= 0.1; c.av = 0; // it stops before he gets out
+        const ca = Math.cos(c.a), sa = Math.sin(c.a);
+        let x = c.x + sa * 28, y = c.y - ca * 28;
+        if (g.world.isSolid(x, y, 6)) { x = c.x - sa * 28; y = c.y + ca * 28; }
+        a.target = null;
+        this.spawnSuspect(x, y);
+        g.banner("FAHRER FLÜCHTET", "Raus aus dem Wagen und festnehmen!", "#ffd23f", 1.8);
+      } else if (Math.hypot(c.x - p.x, c.y - p.y) > 1700) this.stop("Das Ziel ist entkommen");
+    } else if (a.stage === "catch") {
+      const s = a.suspect;
+      if (!s || !s.active) { this.stop("Der Verdächtige ist entkommen"); return; }
+      g.objective = g.onFoot ? "Streife: Fang den Flüchtigen (berühren oder niederschlagen)" : "Streife: Steig aus und fang den Flüchtigen";
+      this.markers.push({ x: s.x, y: s.y, color: "#ffd23f", kind: "enemy", label: "" });
+      const d = Math.hypot(s.x - g.fx, s.y - g.fy);
+      if (s.state !== "down" && s.state !== "flee") g.peds.panic(s, g.fx, g.fy, 30); // keeps running
+      if (s.state === "down" || (g.onFoot && d < ARREST_DIST)) {
+        s.active = false; s.tag = "";
+        sfx.success();
+        g.banner("FESTGENOMMEN", "Zurück zum Streifenwagen", "#3d8bff", 1.6);
+        this.pay(s.state === "down" ? 250 + this.lvl("bounty") * 30 : 400 + this.lvl("bounty") * 40);
+        a.suspect = null; a.stage = "back"; a.timer = 60;
+      } else if (d > 1400) this.stop("Der Verdächtige ist entkommen");
+    } else {
+      g.objective = "Streife: Zurück in den Streifenwagen";
+      if (inCar) this.nextTask();
     }
   }
 

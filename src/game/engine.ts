@@ -575,7 +575,7 @@ export class Game {
   // a pedestrian was run over (PedSystem callback)
   pedHit(c: Civilian, by: Car, speed: number) {
     this.peds.alarm(c.x, c.y, 350, "blast");
-    if (by !== this.player || this.onFoot) return;
+    if (by !== this.player || this.onFoot || c.tag === "suspect") return;
     this.crime("pedHit");
     this.stats.pedsHit++;
     sfx.crash(Math.min(0.5, speed / 900));
@@ -584,6 +584,7 @@ export class Game {
 
   crime(c: Crime, mul = 1) {
     if (this.state !== "playing" || this.ending) return;
+    if (this.jobs.onDuty && (c === "shot" || c === "civCrash" || c === "rocket" || c === "explosion")) return; // patrol: allowed while chasing suspects
     // arcade modes and an existing wanted level: every crime counts right away
     if (!this.rules.starsDecay || this.wanted.stars > 0) { this.wanted.crime(c, mul); return; }
     this.reportCrime(c, mul);
@@ -774,7 +775,7 @@ export class Game {
       pd.a = Math.atan2(c.y - pd.y, c.x - pd.x);
       sfx.punch(); this.shake(0.08);
       if (this.peds.damage(c, d.dmg, pd.x, pd.y, d.id === "bat" ? 220 : 120)) this.onPedDown(c);
-      else this.crime("shot");
+      else if (c.tag !== "suspect") this.crime("shot");
       return;
     }
     for (const car of this.cars) {
@@ -788,8 +789,9 @@ export class Game {
 
   // a pedestrian was knocked out by the player (weapon or fists)
   private onPedDown(c: Civilian) {
-    this.stats.pedsHit++;
     this.peds.alarm(c.x, c.y, 400, "blast");
+    if (c.tag === "suspect") return; // stopped on patrol: an arrest, not a crime
+    this.stats.pedsHit++;
     this.crime(isPolice(c.role) ? "copTakedown" : "pedShot");
     if (c.faction) this.gangs.angered(c.faction); // hurting a gang member makes the whole gang angry for a while
     this.onPedKnocked?.(c);

@@ -253,6 +253,13 @@ export class PedSystem {
     return !((onV && inY) || (onH && inX));
   }
 
+  // make a ped run away from (x, y) for dur seconds (fleeing suspects)
+  panic(c: Civilian, x: number, y: number, dur: number) {
+    if (!c.active || c.state === "down") return;
+    this.scare(c, x, y);
+    c.dur = dur;
+  }
+
   // gunshots and explosions scare everybody around
   alarm(x: number, y: number, radius: number, kind: AlarmKind) {
     for (const c of this.list) {
