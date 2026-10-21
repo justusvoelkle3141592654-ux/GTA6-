@@ -1,4 +1,4 @@
-import { BLOCK, ROAD, GRID, HIGHWAYS, mulberry32, type World } from "./world";
+import { BLOCK, ROAD, GRID, HIGHWAYS, mulberry32, isWater, type World } from "./world";
 import { Car, MODEL_STATS, type CarModel, type FactionId } from "./vehicles";
 import { DISTRICTS, districtAt } from "./districts";
 import type { PedSystem } from "./peds";
@@ -40,11 +40,14 @@ export function steerTo(c: Car, tx: number, ty: number) {
   c.steer = clamp(diff * 2.4, -1, 1);
   return diff;
 }
+// walls and the bay are in the way of cars
+const blocked = (w: World, x: number, y: number) => w.isSolid(x, y, 6) || isWater(x, y);
 export function avoid(c: Car, w: World) {
   const look = 46 + Math.abs(c.vF) * 0.28;
-  if (w.isSolid(c.x + Math.cos(c.a) * look, c.y + Math.sin(c.a) * look, 6)) {
-    const l = w.isSolid(c.x + Math.cos(c.a - 0.75) * look * 0.85, c.y + Math.sin(c.a - 0.75) * look * 0.85, 6);
-    const r = w.isSolid(c.x + Math.cos(c.a + 0.75) * look * 0.85, c.y + Math.sin(c.a + 0.75) * look * 0.85, 6);
+  if (blocked(w, c.x + Math.cos(c.a) * look, c.y + Math.sin(c.a) * look)) {
+    const l = blocked(w, c.x + Math.cos(c.a - 0.75) * look * 0.85, c.y + Math.sin(c.a - 0.75) * look * 0.85);
+    const r = blocked(w, c.x + Math.cos(c.a + 0.75) * look * 0.85, c.y + Math.sin(c.a + 0.75) * look * 0.85);
+    if (isWater(c.x + Math.cos(c.a) * look, c.y + Math.sin(c.a) * look) && Math.abs(c.vF) > 120) c.throttle = -1; // brake at the shore
     if (l && !r) c.steer = 1; else if (r && !l) c.steer = -1;
     if (Math.abs(c.vF) > 260) c.throttle = Math.min(c.throttle, 0.2);
   }

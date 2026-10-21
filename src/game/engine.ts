@@ -1,11 +1,11 @@
 import { sfx } from "./audio";
-import { World, MAP_MIN, MAP_MAX, inCity, terrainH, terrainGrad, roofOf, type Building } from "./world";
+import { World, MAP_MIN, MAP_MAX, WATER_Y, inCity, isWater, terrainH, terrainGrad, roofOf, type Building } from "./world";
 import { Renderer3D } from "./renderer3d";
 import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, CRIMES, type Crime } from "./wanted";
-import { buildPlaces, respawnCost, RESPAWN_RULES, type Place } from "./places";
+import { buildPlaces, onJetty, respawnCost, RESPAWN_RULES, type Place } from "./places";
 import { PedSystem, PED_LIMIT, isPolice, type Civilian, type Team } from "./peds";
-import { Car, CARS, MODEL_STATS, type CarDef, type FactionId } from "./vehicles";
+import { Car, CARS, MODEL_STATS, isCraft, type CarDef, type FactionId } from "./vehicles";
 import { Inventory, WEAPONS, type Weapon } from "./weapons";
 import { AUTOSAVE_EVERY, SAVE_VERSION, emptyProgress, emptyStats, writeSave, type Progress, type SaveData, type SaveResult, type SaveStats } from "./save";
 import { Traffic, PARKED_LIMIT } from "./traffic";
@@ -23,6 +23,7 @@ import { Tips } from "./tips";
 import { Police } from "./police";
 import { Shops } from "./shops";
 import { Gangs } from "./gangs";
+import { Craft } from "./craft";
 
 export type GameState = "menu" | "playing" | "paused" | "over" | "modal";
 // overlays that stop the game while open (shops, dialogs, weapon wheel)
@@ -88,9 +89,9 @@ interface Callbacks {
   onMapKey?: () => void; // M: open the big map (pause menu)
 }
 
-export interface Ped { x: number; y: number; z: number; a: number; vx: number; vy: number; hp: number; maxHp: number; armor: number; walk: number; moving: boolean; sprint: boolean; shootT: number; hitFlash: number; dead: boolean; }
+export interface Ped { x: number; y: number; z: number; a: number; vx: number; vy: number; hp: number; maxHp: number; armor: number; walk: number; moving: boolean; sprint: boolean; shootT: number; hitFlash: number; dead: boolean; swim: boolean; }
 export const MAX_ARMOR = 100;
-export const newPed = (x: number, y: number, a = 0): Ped => ({ x, y, z: terrainH(x, y), a, vx: 0, vy: 0, hp: 100, maxHp: 100, armor: 0, walk: 0, moving: false, sprint: false, shootT: 0, hitFlash: 0, dead: false });
+export const newPed = (x: number, y: number, a = 0): Ped => ({ x, y, z: terrainH(x, y), a, vx: 0, vy: 0, hp: 100, maxHp: 100, armor: 0, walk: 0, moving: false, sprint: false, shootT: 0, hitFlash: 0, dead: false, swim: false });
 // team: who fired (enemy bullets of the police and the gangs also hit each other); src: ped that fired (-1: none)
 export interface Proj { kind: "bullet" | "rocket" | "bomb" | "grenade"; from: "player" | "enemy"; team: Team; src: number; dmg: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; a: number; life: number; px: number; py: number; }
 export interface Bomb { car: Car | null; ox: number; oy: number; x: number; y: number; z: number; t: number; }
@@ -127,6 +128,7 @@ export class Game {
   police: Police = new Police(this);
   shops: Shops = new Shops(this);
   gangs: Gangs = new Gangs(this);
+  craft: Craft = new Craft(this);
   state: GameState = "menu";
   dpr = 1; cw = 0; ch = 0; mobile = false;
 
@@ -711,6 +713,8 @@ export class Game {
     const onFoot = this.onFoot;
     const p = this.player;
     const d = this.inv.def, w = d.id;
+    if (onFoot && this.ped.swim) { this.fireCd = 0.5; this.setHint("Beim Schwimmen kannst du nicht kämpfen", 1.2); return; }
+    if (!onFoot && p.model === "heli" && d.kind !== "gun") { this.fireCd = 0.5; this.setHint("Aus dem Hubschrauber nur mit Schusswaffen", 1.2); return; }
     if (d.kind === "melee") {
       if (!onFoot) { this.fireCd = 0.5; this.setHint("Nahkampf geht nur zu Fuß – wähl eine Schusswaffe (Q)", 1.4); return; }
       this.melee();
@@ -1015,7 +1019,9 @@ export class Game {
   toggleCar() {
     if (this.state !== "playing" || this.ending) return;
     if (!this.onFoot) {
-      if (this.player.speed > 220) { this.setHint("Zu schnell zum Aussteigen – erst bremsen!", 1.2); return; }
+      const p = this.player;
+      if (p.model === "heli" && p.z > this.groundAt(p.x, p.y) + 6) { this.setHint("Erst landen – dann aussteigen", 1.4); return; }
+      if (p.speed > 220) { this.setHint("Zu schnell zum Aussteigen – erst bremsen!", 1.2); return; }
       this.exitCar();
     } else {
       const c = this.nearestEnterable();
@@ -1040,7 +1046,7 @@ export class Game {
     let x = p.x + sa * 30, y = p.y - ca * 30;
     if (this.world.isSolid(x, y, 8)) { x = p.x - sa * 30; y = p.y + ca * 30; }
     const pd = this.ped;
-    pd.x = x; pd.y = y; pd.z = terrainH(x, y); pd.a = p.a; pd.vx = p.vx * 0.3; pd.vy = p.vy * 0.3; pd.dead = false;
+    pd.x = x; pd.y = y; pd.z = Math.max(terrainH(x, y), p.model === "heli" ? p.z : -Infinity); pd.a = p.a; pd.vx = p.vx * 0.3; pd.vy = p.vy * 0.3; pd.dead = false;
     this.onFoot = true;
     p.throttle = 0; p.steer = 0; p.handbrake = true; p.nitro = false;
     sfx.door();
@@ -1191,11 +1197,18 @@ export class Game {
       else if (this.config.camera !== "top") { p.steer = clamp(jx * 1.5, -1, 1); p.throttle = jy < -0.25 ? 1 : jy > 0.55 ? -1 : 0.85; }
       else { const diff = wrap(Math.atan2(jy, jx) - p.a); p.steer = clamp(diff * 2.6, -1, 1); p.throttle = m * (Math.abs(diff) > 1.9 ? 0.55 : 1); }
     } else { p.throttle = 0; p.steer = 0; }
+    if (p.model === "heli") {
+      // helicopter: Space / DRIFT climbs, Shift / NITRO descends (no nitro, no handbrake)
+      this.lift = (p.handbrake ? 1 : 0) - (wantNitro ? 1 : 0);
+      p.handbrake = false; p.nitro = false; this.nitroWasOn = false;
+      return;
+    }
     p.nitro = wantNitro && this.nitro > 0.02 && p.throttle >= 0;
     if (p.nitro && !this.nitroWasOn) { sfx.nitro(); this.shake(0.15); }
     this.nitroWasOn = p.nitro;
   }
 
+  lift = 0; // helicopter climb (+1) / descend (-1)
   private readPedInput(dt: number) {
     const pd = this.ped, k = this.keys, b = this.bind;
     const up = b.held("up", k), down = b.held("down", k), left = b.held("left", k), right = b.held("right", k);
@@ -1219,7 +1232,7 @@ export class Game {
       }
     }
     const L = Math.hypot(dx, dy);
-    const spd = pd.sprint ? 250 : 165;
+    const spd = pd.swim ? 75 : pd.sprint ? 250 : 165;
     const tvx = L > 0 ? (dx / L) * spd * Math.min(1, m / 0.8) : 0, tvy = L > 0 ? (dy / L) * spd * Math.min(1, m / 0.8) : 0;
     const kk = Math.min(1, dt * 10);
     pd.vx += (tvx - pd.vx) * kk; pd.vy += (tvy - pd.vy) * kk;
@@ -1227,14 +1240,27 @@ export class Game {
     if (pd.moving && pd.shootT <= 0 && cam !== "fp") pd.a += wrap(Math.atan2(pd.vy, pd.vx) - pd.a) * Math.min(1, dt * 12);
   }
 
+  // walls stop you, except the building you are standing on top of
+  private pedBlocked(x: number, y: number) {
+    const w = this.world;
+    if (!w.isSolid(x, y, 7)) return false;
+    return !(this.ped.z > 30 && w.roofAt(x, y) <= this.ped.z + 4);
+  }
+
   private updatePed(dt: number) {
     const pd = this.ped;
     const w = this.world;
     const nx = pd.x + pd.vx * dt, ny = pd.y + pd.vy * dt;
-    if (!w.isSolid(nx, pd.y, 7)) pd.x = nx; else pd.vx = 0;
-    if (!w.isSolid(pd.x, ny, 7)) pd.y = ny; else pd.vy = 0;
+    if (!this.pedBlocked(nx, pd.y)) pd.x = nx; else pd.vx = 0;
+    if (!this.pedBlocked(pd.x, ny)) pd.y = ny; else pd.vy = 0;
     pd.x = clamp(pd.x, MAP_MIN + 10, MAP_MAX - 10); pd.y = clamp(pd.y, MAP_MIN + 10, MAP_MAX - 10);
-    pd.z = terrainH(pd.x, pd.y);
+    const jetty = onJetty(pd.x, pd.y);
+    pd.swim = !jetty && isWater(pd.x, pd.y);
+    // swimming: head above the water; on a roof (after landing the helicopter there) you stay up until you walk off
+    const roof = pd.z > 30 ? w.roofAt(pd.x, pd.y) : -Infinity;
+    const z = pd.swim ? WATER_Y - 13 : jetty ? 2.5 : Math.max(terrainH(pd.x, pd.y), roof);
+    if (pd.z - z > 80) this.damagePed((pd.z - z - 80) * 0.25); // jumped off a roof
+    pd.z = z;
     pd.walk += dt * Math.hypot(pd.vx, pd.vy) * 0.05;
     pd.shootT = Math.max(0, pd.shootT - dt);
     pd.hitFlash = Math.max(0, pd.hitFlash - dt);
@@ -1284,13 +1310,14 @@ export class Game {
     } else { this.traffic.civAI(this, p, dt); p.nitro = false; }
 
     // nitro burns while boosting and refills slowly (pickups refill faster)
-    if (p.nitro && !this.onFoot) { this.nitro = Math.max(0, this.nitro - dt * NITRO_DRAIN); if (this.nitro <= 0) p.nitro = false; }
+    if (p.nitro && !this.onFoot && p.model !== "heli") { this.nitro = Math.max(0, this.nitro - dt * NITRO_DRAIN); if (this.nitro <= 0) p.nitro = false; }
     else this.nitro = Math.min(1, this.nitro + dt * NITRO_REGEN);
 
     for (const c of this.cars) {
       if (c === p) continue;
       if (c.dead || c.parked || (c.kind === "civ" && c.wrecked)) { c.throttle = 0; c.steer = 0; c.handbrake = true; continue; }
-      if (c.kind === "cop") {
+      if (c.model === "boat" || c.model === "heli") { if (c.kind === "cop") { c.calm = this.wanted.stars === 0; if (c.calm) { c.throttle = 0; c.steer = 0; } else this.craft.boatAI(c); } else { c.throttle = 0; c.steer = 0; } }
+      else if (c.kind === "cop") {
         c.calm = this.wanted.stars === 0;
         if (c.calm) this.traffic.patrol(this, c, dt); else this.police.copAI(c, dt);
       } else if (!this.gangs.carAI(c, dt)) this.traffic.patrol(this, c, dt); // sets up a route first if the car has none
@@ -1299,6 +1326,13 @@ export class Game {
     const def = this.carDef;
     for (const c of this.cars) {
       const grass = this.onGrass(c.x, c.y);
+      if (c.model === "heli" && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.fly(c, dt, mine ? this.lift : -1, mine); this.collideWorld(c); continue; }
+      if (c.model === "boat" && !c.dead) {
+        const st = MODEL_STATS.boat, mine = c === p && playing;
+        this.craft.boat(c, dt, st.acc + (mine && p.nitro ? 400 : 0), c.kind === "cop" ? st.maxV * 0.9 : st.maxV + (mine && p.nitro ? 200 : 0) + (mine ? st.maxV * (tuneSpeed(p.tune) - 1) : 0));
+        this.collideWorld(c);
+        continue;
+      }
       if (c.kind === "player") {
         if (p.dead) this.wreckPhysics(c, dt);
         else if (playing) {
@@ -1317,6 +1351,8 @@ export class Game {
       } else if (c.hunt) this.drive(c, dt, 520, 480, 10, 3);
       else this.drive(c, dt, 300, c.cruise + 20, 12, 3);
       this.collideWorld(c);
+      // cars that drive into the bay sink
+      if (this.rules.city && this.craft.sink(c, dt)) this.onSunk(c);
     }
     this.collideCars();
     if (this.onFoot && playing) this.updatePed(dt);
@@ -1381,6 +1417,7 @@ export class Game {
         }
       }
       if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) { this.mult = 1; this.comboT = 0; } }
+      if (rules.city) this.craft.update(dt);
       if (rules.save) {
         this.autosaveT -= dt;
         if (this.autosaveT <= 0 && !this.saveBlock()) { if (this.saveGame() === "saved") this.setHint("Automatisch gespeichert", 1.6); }
@@ -1540,10 +1577,29 @@ export class Game {
     else { c.vz = clamp((gh - c.z) / dt, -900, 900); c.z = gh; }
   }
 
-  // ground height under a car: terrain, ramps and building roofs
+  // ground height under a car: terrain (the sea floor in the bay), ramps and building roofs
   private groundH(x: number, y: number): number {
-    const w = this.world;
-    return Math.max(terrainH(x, y), w.rampH(x, y), w.roofAt(x, y));
+    const w = this.world, r = w.rampH(x, y);
+    return Math.max(terrainH(x, y), r > 0 ? r : -Infinity, w.roofAt(x, y));
+  }
+  groundAt(x: number, y: number) { return Math.max(this.groundH(x, y), WATER_Y); } // for the helicopter: the water surface counts
+
+  // water spray / wake (boats, sinking cars)
+  spray(x: number, y: number, z: number, vx: number, vy: number) { this.emit(x, y, z, vx + rnd(-25, 25), vy + rnd(-25, 25), rnd(30, 90), rnd(0.4, 0.8), rnd(4, 8), 18, "#e8f6ff", 0, 2.5); }
+
+  // the helicopter hit the ground too hard
+  heliCrash(dmg: number) { sfx.crash(0.8); this.shake(0.4); this.damagePlayerCar(dmg); }
+
+  // a car went down in the bay; the player swims out of it
+  private onSunk(c: Car) {
+    if (c !== this.player) return;
+    this.detachBombs(c);
+    if (!this.onFoot) {
+      const pd = this.ped;
+      pd.x = c.x; pd.y = c.y; pd.vx = 0; pd.vy = 0; pd.dead = false; pd.swim = true; pd.z = WATER_Y - 13;
+      this.onFoot = true;
+    }
+    this.banner("ABGESOFFEN", "Der Wagen ist im Wasser versunken – schwimm an Land", "#2bb3ff", 2.2);
   }
 
   private land(c: Car, gh: number) {
@@ -1724,7 +1780,7 @@ export class Game {
     const ca = Math.cos(c.a), sa = Math.sin(c.a);
     const rx = c.x - ca * 15, ry = c.y - sa * 15;
     const lx = rx + sa * 10, ly = ry - ca * 10, rrx = rx - sa * 10, rry = ry + ca * 10;
-    const sliding = !c.air && (Math.abs(c.vR) > 120 || (c.handbrake && Math.abs(c.vF) > 120) || (c.throttle < 0 && c.vF > 250));
+    const sliding = !c.air && !isCraft(c.model) && (Math.abs(c.vR) > 120 || (c.handbrake && Math.abs(c.vF) > 120) || (c.throttle < 0 && c.vF > 250));
     const near = Math.abs(c.x - this.fx) < 1100 && Math.abs(c.y - this.fy) < 1100;
     if (sliding && near && !c.wrecked) {
       if (!isNaN(c.rlx)) { this.addSkid(c.rlx, c.rly, lx, ly); this.addSkid(c.rrx, c.rry, rrx, rry); }

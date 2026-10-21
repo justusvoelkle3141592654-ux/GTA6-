@@ -1,5 +1,5 @@
 import { sfx } from "./audio";
-import { Car, MODEL_NAME, MODEL_STATS } from "./vehicles";
+import { Car, MODEL_NAME, MODEL_STATS, isCraft } from "./vehicles";
 import { WEAPON_DEFS } from "./weapons";
 import { terrainH } from "./world";
 import { GARAGE_SLOTS, MAX_TUNE, PAINTS, TUNE_DEFS, tuneHp } from "./garage";
@@ -119,6 +119,7 @@ export class Shops {
         if (g.onFoot || g.playerCarStored || !pl) return "Fahr mit dem Auto in die Garage";
         if (g.garage.length >= GARAGE_SLOTS) return "Garage ist voll";
         if (p.tag) return "Den Wagen brauchst du noch für den Auftrag";
+        if (isCraft(p.model)) return "Das passt nicht in die Garage";
         g.garage.push({ model: p.model, color: p.color, hp: p.hp, maxHp: p.maxHp, mass: p.mass, tune: { ...p.tune } });
         g.cars.splice(g.cars.indexOf(p), 1);
         g.playerCarStored = true;

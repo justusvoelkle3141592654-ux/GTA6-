@@ -1,4 +1,4 @@
-import { BLOCK, ROAD, GRID, inCity, type World } from "./world";
+import { BLOCK, ROAD, GRID, inCity, isWater, type World } from "./world";
 import type { Car, FactionId } from "./vehicles";
 import { DISTRICTS, blockDistrict } from "./districts";
 
@@ -462,7 +462,7 @@ export class PedSystem {
   }
 
   // buildings, harbour containers and tree trunks block pedestrians
-  private blocked(x: number, y: number) { return this.world.isSolid(x, y, 5) || this.world.treeHit(x, y, PED_R); }
+  private blocked(x: number, y: number) { return this.world.isSolid(x, y, 5) || this.world.treeHit(x, y, PED_R) || isWater(x, y); }
 
   // move towards the target; true when it is reached
   private move(c: Civilian, dt: number) {

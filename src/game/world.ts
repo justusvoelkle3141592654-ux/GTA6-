@@ -58,10 +58,26 @@ export function cityDist(x: number, y: number) {
   return Math.max(0, -x, x - WORLD, -y, y - WORLD);
 }
 
+// ---------------- the bay west of the city (real water) ----------------
+export const WATER_Y = -5;                  // sea level (the renderer's water plane)
+const BAY = { x0: -3400, x1: -260, y0: -1900, y1: WORLD + 1900 };
+const CAUSEWAY = 110;                       // the highways cross the bay on dams (half width)
+// distance to the coast: > 0 in the water, < 0 on land (very negative far away)
+export function seaDist(x: number, y: number): number {
+  if (x > BAY.x1 + 200 || x < BAY.x0 - 500 || y < BAY.y0 - 500 || y > BAY.y1 + 500) return -1000;
+  const wob = (vnoise(x / 420 + 3.7, y / 420 + 8.1) - 0.5) * 360 * sstep(500, 900, -x); // straight beach next to the city
+  let d = Math.min(x - BAY.x0, BAY.x1 - x, y - BAY.y0, BAY.y1 - y) + wob;
+  for (let i = 0; i < HIGHWAYS.length; i++) d = Math.min(d, Math.abs(y - (HIGHWAYS[i] * BLOCK + ROAD / 2)) - CAUSEWAY);
+  return d;
+}
+export const isWater = (x: number, y: number) => seaDist(x, y) > 0;
+
 export function terrainH(x: number, y: number): number {
   const d = cityDist(x, y);
   if (d < 220) return 0;
-  const ramp = sstep(220, 1100, d);
+  const sd = seaDist(x, y);
+  if (sd > 0) return WATER_Y - 3 - Math.min(35, sd * 0.08); // sea floor
+  const ramp = sstep(220, 1100, d), shore = sstep(0, 450, -sd); // flat shore along the bay
   const n1 = vnoise(x / 1500 + 7.1, y / 1500 + 3.3);
   const n2 = vnoise(x / 620 + 2.2, y / 620 + 11.7);
   const n3 = vnoise(x / 260 + 5.5, y / 260 + 0.4);
@@ -69,7 +85,7 @@ export function terrainH(x: number, y: number): number {
   const mnt = sstep(1700, 3600, d) * (0.4 + 0.6 * vnoise(x / 1900 + 1.3, y / 1900 + 9.1)) * 560;
   const ridge = sstep(1900, 3400, d) * Math.pow(vnoise(x / 700 + 4.4, y / 700 + 2.9), 2) * 340;
   const edge = 1 - sstep(EXT - 1000, EXT - 320, d);
-  return (hills * ramp + mnt + ridge) * edge;
+  return (hills * ramp + mnt + ridge) * edge * shore;
 }
 export function terrainGrad(x: number, y: number, e = 6) {
   return { x: (terrainH(x + e, y) - terrainH(x - e, y)) / (2 * e), y: (terrainH(x, y + e) - terrainH(x, y - e)) / (2 * e) };
@@ -415,6 +431,12 @@ export class World {
     const ox = -MAP_MIN * s;
     g.fillStyle = "#3a3550";
     g.fillRect(ox, ox, WORLD * s, WORLD * s);
+    // the bay
+    g.fillStyle = "#0b3a5c";
+    for (let py = 0; py < size; py += 3) for (let px = 0; px < size * 0.36; px += 3) {
+      const wx = MAP_MIN + (px + 1.5) / s, wy = MAP_MIN + (py + 1.5) / s;
+      if (isWater(wx, wy)) g.fillRect(px, py, 3, 3);
+    }
     for (const b of this.blocks) {
       const x0 = ox + (b.bx * BLOCK + ROAD) * s, y0 = ox + (b.by * BLOCK + ROAD) * s, sz = (BLOCK - ROAD) * s;
       g.fillStyle = b.kind === "park" ? "#1f5a3a" : "#1a1428";

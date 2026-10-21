@@ -1,5 +1,5 @@
 import { Car, type CarModel } from "./vehicles";
-import { BLOCK, ROAD, GRID, WORLD, HIGHWAYS, mulberry32, terrainH, type World } from "./world";
+import { BLOCK, ROAD, GRID, WORLD, HIGHWAYS, mulberry32, terrainH, isWater, type World } from "./world";
 import type { Game } from "./engine";
 import type { Civilian } from "./peds";
 import type { Marker } from "./missions";
@@ -57,6 +57,7 @@ export function buildShells(world: World): Shell[] {
       const a = r() * Math.PI * 2, d = 900 + r() * 3200;
       x = WORLD / 2 + Math.cos(a) * (WORLD / 2 + d); y = WORLD / 2 + Math.sin(a) * (WORLD / 2 + d);
     }
+    while (isWater(x, y)) x += 60; // the bay: move it to the shore (same order, so saved ids stay valid)
     if (world.isSolid(x, y, 12)) continue;
     out.push({ id: out.length, x, y, z: terrainH(x, y) });
   }

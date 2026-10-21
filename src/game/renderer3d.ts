@@ -6,8 +6,9 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_MAX, MAP_SIZE, EXT, HIGHWAYS, H_SCALE, terrainH, terrainGrad, cityDist, inCity, isHighway, mulberry32, type Building, type Ramp } from "./world";
-import type { Place } from "./places";
+import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_MAX, MAP_SIZE, EXT, HIGHWAYS, H_SCALE, WATER_Y, terrainH, terrainGrad, cityDist, inCity, isHighway, seaDist, mulberry32, type Building, type Ramp } from "./world";
+import { isCraft } from "./vehicles";
+import { JETTY, HELI_SPOT, type Place } from "./places";
 import { CrowdRenderer } from "./crowd3d";
 import { DISTRICTS, blockDistrict } from "./districts";
 import { WEAPONS, WEAPON_DEFS, type Weapon } from "./weapons";
@@ -144,6 +145,7 @@ const SPECS: Record<CarModel, CarSpec> = {
   bus: { L: 82, W: 28, y0: 4, noseY: 16, beltY: 17, deckY: 17, xCowl: 39, xRoofF: 37, xRoofR: -38, xDeck: -39.5, roofY: 34, r: 7, wx: 27, wxr: -25, wd: 5 },
   swat: { L: 54, W: 26, y0: 4.5, noseY: 12, beltY: 16, deckY: 16, xCowl: 25, xRoofF: 17, xRoofR: 15, xDeck: 15, roofY: 26, r: 7, wx: 17, wxr: -17, wd: 5 },
   armor: { L: 62, W: 29, y0: 6, noseY: 15, beltY: 19, deckY: 19, xCowl: 22, xRoofF: 16, xRoofR: -24, xDeck: -27, roofY: 25, r: 8, wx: 20, wxr: -20, wd: 6 },
+  boat: SEDAN, heli: SEDAN, // own geometry (boatGeo / heliGeo)
   bike: { L: 34, W: 8, y0: 6, noseY: 12, beltY: 14, deckY: 14, xCowl: 6, xRoofF: 2, xRoofR: -4, xDeck: -6, roofY: 18, r: 6, wx: 13, wxr: -13, wd: 3 },
 };
 
@@ -167,6 +169,34 @@ function bikeGeo(color: string): CarGeo {
   return res;
 }
 
+// speedboat: hull below the waterline, white deck, windshield, outboard motor
+function boatGeo(color: string): CarGeo {
+  const B: THREE.BufferGeometry[] = [], G: THREE.BufferGeometry[] = [], Lg: THREE.BufferGeometry[] = [];
+  const body = C(color), dark = body.clone().multiplyScalar(0.45);
+  B.push(prof([[-25, -3], [14, -3], [31, 6], [-26, 6]], 22, 2, body));
+  B.push(nb(42, 1, 19, -4, 6.4, 0, "#f4f4f6"), nb(44, 1.4, 22.4, -2, 2.5, 0, dark));
+  B.push(nb(8, 3, 16, -14, 8.3, 0, "#e9e4d8"), nb(6, 5, 8, -2, 9, 0, "#2a2d36"), nb(5, 9, 6, -27.5, 7, 0, "#22252b"), nb(2, 6, 2, -29, 1, 0, "#22252b"));
+  for (const sd of [-1, 1]) B.push(nb(30, 1.6, 1, -2, 8, sd * 10.6, "#c9ced8"));
+  G.push(prof([[3, 6.5], [9, 6.5], [5, 12.5], [1, 12.5]], 17, 0.5, "#0b121c"));
+  Lg.push(nb(1, 1.2, 1.2, 24, 7, 6, "#3dff8b", 2.4), nb(1, 1.2, 1.2, 24, 7, -6, "#ff1838", 2.4), nb(1.6, 1.6, 1.6, -22, 12, 0, "#fff4d6", 2.4));
+  const res: CarGeo = { body: mergeGeometries(B)!, glass: mergeGeometries(G)!, lights: mergeGeometries(Lg)!, wheels: [], roofY: 14 };
+  for (const g of [...B, ...G, ...Lg]) g.dispose();
+  return res;
+}
+// helicopter: fuselage, tail boom, skids, cockpit glass (the rotor is a separate mesh, see makeCar)
+function heliGeo(color: string): CarGeo {
+  const B: THREE.BufferGeometry[] = [], G: THREE.BufferGeometry[] = [], Lg: THREE.BufferGeometry[] = [];
+  const body = C(color), y = 14;
+  B.push(ni(withColor(new THREE.SphereGeometry(12, 14, 10).scale(1.6, 1, 1).translate(0, y, 0), body)), nb(30, 6, 6, -30, y + 2, 0, body), nb(2, 12, 2, -45, y + 8, 0, body), nb(8, 2, 10, -45, y + 2, 0, "#f4f6fa"));
+  for (const sd of [-1, 1]) B.push(nb(26, 1.6, 1.6, 0, 2, sd * 8, "#2a2d36"), nb(1.5, 6, 1.5, 6, 5, sd * 8, "#2a2d36"), nb(1.5, 6, 1.5, -6, 5, sd * 8, "#2a2d36"));
+  B.push(nb(3, 4, 3, 0, y + 12, 0, "#2a2d36"));
+  G.push(ni(withColor(new THREE.SphereGeometry(7, 10, 8).scale(1, 0.8, 1.1).translate(9, y + 2, 0), C("#0b121c"))));
+  Lg.push(nb(1.4, 1.4, 1.4, -46, y + 14, 0, "#ff1838", 2.6), nb(1.2, 1.2, 1.2, 0, y - 9, 0, "#fff4d6", 2.4));
+  const res: CarGeo = { body: mergeGeometries(B)!, glass: mergeGeometries(G)!, lights: mergeGeometries(Lg)!, wheels: [], roofY: y + 12 };
+  for (const g of [...B, ...G, ...Lg]) g.dispose();
+  return res;
+}
+
 interface CarWheel { x: number; z: number; r: number; wd: number; front: boolean; }
 interface CarGeo { body: THREE.BufferGeometry; glass: THREE.BufferGeometry; lights: THREE.BufferGeometry; wheels: CarWheel[]; roofY: number; }
 const carGeoCache = new Map<string, CarGeo>();
@@ -176,6 +206,8 @@ function getCarGeo(model: CarModel, color: string): CarGeo {
   const hit = carGeoCache.get(key);
   if (hit) return hit;
   if (model === "bike") { const g = bikeGeo(color); carGeoCache.set(key, g); return g; }
+  if (model === "boat") { const g = boatGeo(color); carGeoCache.set(key, g); return g; }
+  if (model === "heli") { const g = heliGeo(color); carGeoCache.set(key, g); return g; }
   const B: THREE.BufferGeometry[] = [], G: THREE.BufferGeometry[] = [], Lg: THREE.BufferGeometry[] = [];
   const s = SPECS[model] ?? SEDAN;
   const body = C(color), dark = body.clone().multiplyScalar(0.45);
@@ -296,7 +328,7 @@ function getCarGeo(model: CarModel, color: string): CarGeo {
 }
 
 interface CarObj {
-  group: THREE.Group; tilt: THREE.Group; body: THREE.Mesh; glass: THREE.Mesh; lights: THREE.Mesh; pool: THREE.Mesh; glow?: THREE.Mesh;
+  group: THREE.Group; tilt: THREE.Group; body: THREE.Mesh; glass: THREE.Mesh; lights: THREE.Mesh; pool: THREE.Mesh; glow?: THREE.Mesh; rotor?: THREE.Mesh;
   wheels: { pivot: THREE.Group; spin: THREE.Mesh; front: boolean; r: number }[];
   bar?: { reds: THREE.MeshBasicMaterial; blues: THREE.MeshBasicMaterial; white: THREE.MeshBasicMaterial };
   model: CarModel; color: string; wreck: boolean; pitch: number; roll: number; spinA: number; steerA: number;
@@ -509,6 +541,7 @@ export class Renderer3D {
   private flashMat!: THREE.MeshBasicMaterial; private lightMat!: THREE.MeshBasicMaterial;
   private poolGeo!: THREE.PlaneGeometry; private poolMat!: THREE.MeshBasicMaterial; private poolMatP!: THREE.MeshBasicMaterial;
   private shadowGeo!: THREE.PlaneGeometry; private shadowMat!: THREE.MeshBasicMaterial;
+  private rotorGeo!: THREE.BufferGeometry; private rotorMat!: THREE.MeshStandardMaterial;
   private glowGeo!: THREE.PlaneGeometry; private glowMat!: THREE.MeshBasicMaterial;
   private barSeg = new THREE.BoxGeometry(3.2, 2, 2.6);
   private decalGeo = new THREE.PlaneGeometry(20, 5.5);
@@ -643,7 +676,7 @@ export class Renderer3D {
     const asphalt = new THREE.Mesh(new THREE.PlaneGeometry(WORLD, WORLD).rotateX(-Math.PI / 2).translate(WORLD / 2, 0, WORLD / 2), new THREE.MeshStandardMaterial({ color: 0x46464b, map: noise, roughness: 0.55, metalness: 0.15, envMapIntensity: 0.6 }));
     asphalt.receiveShadow = true;
     this.scene.add(asphalt);
-    const water = new THREE.Mesh(new THREE.PlaneGeometry(60000, 60000).rotateX(-Math.PI / 2).translate(WORLD / 2, -5, WORLD / 2), new THREE.MeshStandardMaterial({ color: 0x1d5c78, roughness: 0.08, metalness: 0.6, envMapIntensity: 1.2 }));
+    const water = new THREE.Mesh(new THREE.PlaneGeometry(60000, 60000).rotateX(-Math.PI / 2).translate(WORLD / 2, WATER_Y, WORLD / 2), new THREE.MeshStandardMaterial({ color: 0x1d5c78, roughness: 0.08, metalness: 0.6, envMapIntensity: 1.2 }));
     this.scene.add(water);
 
     const M: THREE.BufferGeometry[] = [];
@@ -725,7 +758,8 @@ export class Renderer3D {
       const d = cityDist(x, z);
       const g = terrainGrad(x, z, 12);
       const slope = Math.hypot(g.x, g.y);
-      if (d > EXT - 330) tmp.copy(sand);
+      const sd = seaDist(x, z);
+      if (d > EXT - 330 || sd > -160) tmp.copy(sand).multiplyScalar(sd > 0 ? 0.7 : 1); // outer beach, bay shore and sea floor
       else {
         tmp.copy(grassLo).lerp(grassHi, clamp(h / 350, 0, 1));
         if (d < 260 && d > 0) tmp.copy(dirt).lerp(tmp, clamp((d - 120) / 140, 0, 1));
@@ -790,7 +824,7 @@ export class Renderer3D {
     while (placed < treeN && guard++ < treeN * 12) {
       const x = MAP_MIN + 400 + rr() * (MAP_SIZE - 800), z = MAP_MIN + 400 + rr() * (MAP_SIZE - 800);
       const d = cityDist(x, z);
-      if (d < 320 || d > EXT - 420) continue;
+      if (d < 320 || d > EXT - 420 || seaDist(x, z) > -260) continue;
       if (isHighway(x, z) || Math.min(...HIGHWAYS.map((i) => Math.abs(x - (i * BLOCK + ROAD / 2)))) < 110 || Math.min(...HIGHWAYS.map((i) => Math.abs(z - (i * BLOCK + ROAD / 2)))) < 110) continue;
       const h = terrainH(x, z);
       const g = terrainGrad(x, z, 10);
@@ -804,7 +838,7 @@ export class Renderer3D {
     while (placed < rockN && guard++ < rockN * 12) {
       const x = MAP_MIN + 400 + rr() * (MAP_SIZE - 800), z = MAP_MIN + 400 + rr() * (MAP_SIZE - 800);
       const d = cityDist(x, z);
-      if (d < 420 || d > EXT - 420 || isHighway(x, z)) continue;
+      if (d < 420 || d > EXT - 420 || isHighway(x, z) || seaDist(x, z) > -120) continue;
       const h = terrainH(x, z);
       const g = terrainGrad(x, z, 10);
       if (h < 120 && Math.hypot(g.x, g.y) < 0.2 && rr() < 0.7) continue;
@@ -984,10 +1018,37 @@ export class Renderer3D {
     for (const g of P) g.dispose();
   }
 
+  // places outside the blocks: sign on a post, plus a jetty into the bay or a helipad
+  private buildSpot(pl: Place, sign: THREE.Texture) {
+    const col = new THREE.Color(pl.color).multiplyScalar(1.6);
+    const gz = terrainH(pl.x, pl.y);
+    const P: THREE.BufferGeometry[] = [cyl(1.2, 1.2, 34, pl.x + 14, gz + 17, pl.y - 30, "#c9ced8", 8)];
+    if (pl.kind === "dock") {
+      // wooden jetty from the beach into the water, with posts
+      const x0 = JETTY.x1 + 10, x1 = JETTY.x0, len = x0 - x1;
+      P.push(box(len, 2, JETTY.hw * 2, (x0 + x1) / 2, 1.5, JETTY.y, "#8a6a4a"));
+      for (let x = x1 + 6; x < x0; x += 22) for (const dz of [-12, 12]) P.push(cyl(1.4, 1.4, 14, x, -4, JETTY.y + dz, "#5c4632", 6));
+    } else {
+      // helipad: round slab with a big H
+      const hx = HELI_SPOT.x, hy = HELI_SPOT.y, hz = terrainH(hx, hy);
+      P.push(cyl(64, 66, 4, hx, hz + 1, hy, "#3a3d45", 32), box(10, 1, 44, hx - 12, hz + 3.3, hy, "#ffd23f"), box(10, 1, 44, hx + 12, hz + 3.3, hy, "#ffd23f"), box(14, 1, 9, hx, hz + 3.3, hy, "#ffd23f"));
+    }
+    const m = new THREE.Mesh(mergeGeometries(P)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }));
+    m.receiveShadow = true;
+    this.scene.add(m);
+    for (const g of P) g.dispose();
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(56, 14), new THREE.MeshBasicMaterial({ map: sign, toneMapped: false, side: THREE.DoubleSide }));
+    panel.rotation.y = -Math.PI / 2;
+    panel.position.set(pl.x + 14, gz + 36, pl.y - 30);
+    this.scene.add(panel);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(9, 12, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8, depthWrite: false, toneMapped: false }));
+    ring.position.set(pl.x, gz + 0.5, pl.y); ring.renderOrder = 1;
+    this.scene.add(ring);
+  }
+
   // signs and entrance markers for hospital, police station, ...
   private buildPlaces(places: Place[]) {
     for (const pl of places) {
-      const b = pl.bld, H = b.height * H_SCALE + 14;
       const sign = canvasTex(512, 128, (g) => {
         g.fillStyle = "#f4f4f6"; g.fillRect(0, 0, 512, 128);
         g.fillStyle = pl.color; g.fillRect(0, 0, 128, 128);
@@ -998,6 +1059,9 @@ export class Renderer3D {
         do { g.font = `bold ${fs}px 'Bebas Neue', Impact, sans-serif`; fs -= 2; } while (fs > 20 && g.measureText(pl.name.toUpperCase()).width > 340);
         g.fillText(pl.name.toUpperCase(), 150, 68);
       });
+      const b = pl.bld;
+      if (!b) { this.buildSpot(pl, sign); continue; }
+      const H = b.height * H_SCALE + 14;
       const w = Math.min(b.h - 10, 84);
       const panel = new THREE.Mesh(new THREE.PlaneGeometry(w, w / 4), new THREE.MeshBasicMaterial({ map: sign, toneMapped: false }));
       panel.rotation.y = -Math.PI / 2;
@@ -1061,6 +1125,8 @@ export class Renderer3D {
     this.poolMat = new THREE.MeshBasicMaterial({ map: cone, transparent: true, opacity: 0.14, blending: THREE.AdditiveBlending, depthWrite: false });
     this.poolMatP = this.poolMat.clone(); this.poolMatP.opacity = 0.3;
     this.shadowGeo = new THREE.PlaneGeometry(66, 40).rotateX(-Math.PI / 2).translate(0, 0.35, 0);
+    this.rotorGeo = mergeGeometries([new THREE.BoxGeometry(80, 0.6, 3), new THREE.BoxGeometry(3, 0.6, 80)])!;
+    this.rotorMat = new THREE.MeshStandardMaterial({ color: 0x15161b });
     this.shadowMat = new THREE.MeshBasicMaterial({ map: radialTex("rgba(0,0,0,0.85)", "rgba(0,0,0,0)"), transparent: true, depthWrite: false });
     this.glowGeo = new THREE.PlaneGeometry(80, 52).rotateX(-Math.PI / 2).translate(0, 0.6, 0);
     this.glowMat = new THREE.MeshBasicMaterial({ map: radialTex("rgba(255,60,172,1)", "rgba(255,60,172,0)"), transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
@@ -1168,6 +1234,8 @@ export class Renderer3D {
     group.add(shadow, pool);
     const obj: CarObj = { group, tilt, body, glass, lights, pool, wheels, model: c.model, color: c.color, wreck: false, pitch: 0, roll: 0, spinA: 0, steerA: 0 };
     if (c.kind === "player") { obj.glow = new THREE.Mesh(this.glowGeo, this.glowMat); obj.glow.renderOrder = 2; group.add(obj.glow); }
+    if (c.model === "heli") { obj.rotor = new THREE.Mesh(this.rotorGeo, this.rotorMat); obj.rotor.position.y = 27; tilt.add(obj.rotor); shadow.visible = false; }
+    if (c.model === "boat") { shadow.visible = false; pool.visible = false; }
     if (c.model === "bike") shadow.scale.set(0.6, 1, 0.35);
     else if (c.model === "bus" || c.model === "truck") shadow.scale.set(1.5, 1, 1.15);
     if (c.model === "police" || c.model === "swat") {
@@ -1210,7 +1278,7 @@ export class Renderer3D {
       o.group.position.set(c.x, c.z, c.y);
       // terrain tilt
       let tp = 0, tr = 0;
-      if (!inCity(c.x, c.y)) {
+      if (!inCity(c.x, c.y) && !isCraft(c.model)) {
         const gr = terrainGrad(c.x, c.y, 10);
         const ca = Math.cos(c.a), sa = Math.sin(c.a);
         tp = Math.atan(gr.x * ca + gr.y * sa);
@@ -1220,13 +1288,21 @@ export class Renderer3D {
       const k = Math.min(1, dt * (c.air ? 3 : 12));
       o.pitch += (tp - o.pitch) * k; o.roll += (tr - o.roll) * k;
       o.group.rotation.set(o.roll, -c.a, o.pitch);
-      if (c.model === "bike") {
+      if (c.model === "heli") {
+        // nose down when flying forward, bank into turns, spinning rotor
+        o.tilt.rotation.z = clamp(-c.vF / 1400, -0.3, 0.2);
+        o.tilt.rotation.x = clamp(-c.av * 0.12, -0.3, 0.3);
+        if (o.rotor) o.rotor.rotation.y = c.rotor;
+      } else if (c.model === "boat") {
+        o.tilt.rotation.z = clamp(c.vF / 2600, -0.05, 0.16) + Math.sin(t * 2.1 + c.x * 0.01) * 0.02; // bow up when fast
+        o.tilt.rotation.x = clamp(-c.av * 0.06, -0.15, 0.15) + Math.sin(t * 1.7 + c.y * 0.01) * 0.02;
+      } else if (c.model === "bike") {
         // lean into the curve; the rider is only there when somebody rides it
         o.tilt.rotation.x = clamp(-c.av * Math.min(1, c.speed / 250) * 0.22, -0.55, 0.55);
         o.glass.visible = c === g.player ? !g.onFoot : c.kind !== "civ" || c.driver;
       } else o.tilt.rotation.x = clamp(-c.vR / 900, -0.09, 0.09);
-      o.tilt.rotation.z = c.dead ? 0 : c.throttle > 0 ? 0.025 * c.throttle : c.throttle < 0 && c.vF > 50 ? -0.04 : 0;
-      o.pool.visible = !c.air && !c.dead;
+      if (!isCraft(c.model)) o.tilt.rotation.z = c.dead ? 0 : c.throttle > 0 ? 0.025 * c.throttle : c.throttle < 0 && c.vF > 50 ? -0.04 : 0;
+      o.pool.visible = !c.air && !c.dead && c.model !== "boat";
       if (c.dead && !o.wreck) {
         o.wreck = true; o.body.material = this.wreckMat; o.glass.material = this.wreckMat; o.lights.visible = false; o.pool.visible = false;
         if (o.glow) o.glow.visible = false;

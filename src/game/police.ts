@@ -1,5 +1,5 @@
 import { Car } from "./vehicles";
-import { ROAD, GRID, inCity, terrainH } from "./world";
+import { ROAD, GRID, WATER_Y, inCity, isWater, terrainH } from "./world";
 import { steerTo, avoid, stuck } from "./traffic";
 import { SEEN_CLOSE, SEEN_DIST } from "./wanted";
 import { isPolice } from "./peds";
@@ -64,6 +64,7 @@ export class Police {
 
   spawnCop() {
     const g = this.g, fx = g.fx, fy = g.fy;
+    if (g.rules.city && isWater(fx, fy)) { this.spawnBoat(); return; }
     const outside = !inCity(fx, fy);
     for (let tries = 0; tries < 40; tries++) {
       let x: number, y: number;
@@ -71,7 +72,7 @@ export class Police {
         const a = Math.random() * TAU, d = rnd(850, 1250);
         x = fx + Math.cos(a) * d; y = fy + Math.sin(a) * d;
         if (inCity(x, y)) { const n = g.world.nearestNode(x, y); const np = g.world.nodePos(n.i, n.j); x = np.x; y = np.y; }
-        if (g.world.isSolid(x, y, 20)) continue;
+        if (g.world.isSolid(x, y, 20) || isWater(x, y)) continue;
       } else {
         const i = Math.floor(Math.random() * (GRID + 1)), j = Math.floor(Math.random() * (GRID + 1));
         const np = g.world.nodePos(i, j);
@@ -90,6 +91,21 @@ export class Police {
       c.shootT = rnd(SHELL_EVERY[0], SHELL_EVERY[1]);
       if (army && !this.armyCalled) { this.armyCalled = true; g.banner("MILITÄR", "Radpanzer rücken aus – versteck dich!", "#9fb35a", 2.4); }
       c.driver = g.rules.city; // open world: officers get out when you are on foot
+      g.cars.push(c);
+      return;
+    }
+  }
+
+  // you are on the water: a police boat comes after you
+  private spawnBoat() {
+    const g = this.g;
+    for (let tries = 0; tries < 40; tries++) {
+      const a = Math.random() * TAU, d = rnd(700, 1100);
+      const x = g.fx + Math.cos(a) * d, y = g.fy + Math.sin(a) * d;
+      if (!isWater(x, y) || !isWater(x + 60, y) || !isWater(x - 60, y)) continue;
+      const c = new Car("cop", "boat", "#1f3a6e");
+      c.x = x; c.y = y; c.z = WATER_Y; c.a = Math.atan2(g.fy - y, g.fx - x);
+      c.hp = c.maxHp = 120; c.mass = 1.2;
       g.cars.push(c);
       return;
     }

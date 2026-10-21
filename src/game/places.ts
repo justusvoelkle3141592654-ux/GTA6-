@@ -1,7 +1,7 @@
-import { BLOCK, ROAD, GRID, type Building, type World } from "./world";
+import { BLOCK, ROAD, GRID, WORLD, type Building, type World } from "./world";
 import type { EndReason } from "./engine";
 
-export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact";
+export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport";
 export type PlaceAccess = "foot" | "car" | "both" | "none";
 
 export interface PlaceDef {
@@ -10,7 +10,14 @@ export interface PlaceDef {
   near: [number, number]; // preferred block (bx, by); the closest free city block is used
   access: PlaceAccess;   // how it is entered
   robbable?: boolean;
+  at?: [number, number, number]; // fixed spot outside the city blocks (x, y, facing); vehicles wait next to it
 }
+// boat jetty on the beach (between the middle and the southern causeway) and helipad east of the harbour
+export const DOCK_SPOT = { x: -340, y: 3455, a: Math.PI };
+export const HELI_SPOT = { x: WORLD + 520, y: 1900, a: Math.PI };
+// the wooden jetty you can walk on (from the beach out to the boat)
+export const JETTY = { x0: DOCK_SPOT.x - 40, x1: -186, y: DOCK_SPOT.y - 26, hw: 15 };
+export const onJetty = (x: number, y: number) => x > JETTY.x0 && x < JETTY.x1 && Math.abs(y - JETTY.y) < JETTY.hw;
 
 export const PLACE_DEFS: PlaceDef[] = [
   { id: "hospital", kind: "hospital", name: "St. Aurelia Klinik", color: "#ff3b4e", icon: "+", near: [3, 7], access: "none" },
@@ -25,12 +32,15 @@ export const PLACE_DEFS: PlaceDef[] = [
   { id: "lou", kind: "contact", name: "Lous Werkstatt", color: "#ff5ad1", icon: "L", near: [3, 3], access: "foot" },
   { id: "marisol", kind: "contact", name: "Café Marisol", color: "#ff5ad1", icon: "M", near: [1, 7], access: "foot" },
   { id: "dock", kind: "contact", name: "Kai 9", color: "#ff5ad1", icon: "D", near: [9, 8], access: "foot" },
+  // vehicles: a speedboat at the jetty, a helicopter on the pad (always there again when you come back)
+  { id: "jetty", kind: "dock", name: "Bootssteg", color: "#2bb3ff", icon: "B", near: [0, 6], access: "none", at: [-196, 3455, Math.PI] },
+  { id: "helipad", kind: "heliport", name: "Heliport", color: "#ffd23f", icon: "F", near: [10, 3], access: "none", at: [WORLD + 440, 1900, Math.PI] },
 ];
 
 export interface Place extends PlaceDef {
   x: number; y: number; a: number; // entrance on the sidewalk, direction facing the street
   cx: number; cy: number;          // spot for cars (on the street in front of it)
-  bld: Building;
+  bld: Building | null;            // null: a fixed spot outside the blocks (jetty, helipad)
 }
 
 export const PLACE_RADIUS = { foot: 22, car: 46 };
@@ -49,6 +59,7 @@ export function buildPlaces(world: World): Place[] {
   const out: Place[] = [];
   const ok = (bx: number) => { const w = westFacing(bx); return (b: Building) => w(b) && !world.ramps.some((r) => r.bld === b); };
   for (const def of PLACE_DEFS) {
+    if (def.at) { const [x, y, a] = def.at; out.push({ ...def, x, y, a, cx: x, cy: y, bld: null }); continue; }
     let best = -1, bd = Infinity;
     for (let i = 0; i < world.blocks.length; i++) {
       const b = world.blocks[i];
