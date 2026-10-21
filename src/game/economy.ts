@@ -23,6 +23,7 @@ export const OUTFITS: Outfit[] = [
 export const ARMOR_PRICE = 500;       // full vest
 export const REPAIR_PER_HP = 4;       // workshop: price per missing car hit point
 export const PAINT_PRICE = 200;
+export const TYRE_PRICE = 150;       // new tyres after a spike strip
 export const ROB_REWARD: [number, number] = [250, 700];
 export const ROB_COOLDOWN = 180;      // seconds until a shop can be robbed again
 export const ROB_HEAT = 60;           // heat added by a robbery (2 stars)

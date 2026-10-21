@@ -5,7 +5,9 @@ import { DISTRICTS, blockDistrict } from "./districts";
 export type CivState = "walk" | "wait" | "flee" | "cower" | "down" | "attack" | "idle";
 export type AlarmKind = "shot" | "blast";
 // civ: passer-by; cop/swat: police on foot; gang: gang member; fare: taxi customer; target: mission target
-export type PedRole = "civ" | "cop" | "swat" | "gang" | "fare" | "target";
+export type PedRole = "civ" | "cop" | "swat" | "army" | "gang" | "fare" | "target";
+// police on foot (army: soldiers at the top wanted level)
+export const isPolice = (r: PedRole) => r === "cop" || r === "swat" || r === "army";
 // who fired a shot: the player, the police or a gang (gangs and police fight each other)
 export type Team = "player" | "cop" | FactionId;
 
@@ -44,9 +46,10 @@ export interface PedHost {
 }
 
 // uniforms and gang colours
-export const ROLE_LOOK: Record<"cop" | "swat" | FactionId, { shirt: string; pants: string; hp: number }> = {
+export const ROLE_LOOK: Record<"cop" | "swat" | "army" | FactionId, { shirt: string; pants: string; hp: number }> = {
   cop: { shirt: "#1f3a6e", pants: "#16213a", hp: 80 },
   swat: { shirt: "#1b1d22", pants: "#22252b", hp: 160 },
+  army: { shirt: "#4b5320", pants: "#3b3f2a", hp: 200 },
   halcones: { shirt: "#c0392b", pants: "#2b2f3a", hp: 70 },
   kings: { shirt: "#7d3c98", pants: "#1c1c22", hp: 70 },
 };
@@ -54,7 +57,7 @@ export const ROLE_LOOK: Record<"cop" | "swat" | FactionId, { shirt: string; pant
 export const MAX_PEDS = 32;
 export const PED_LIMIT = { high: 24, low: 12 };
 const HOSTILE_EXTRA = 8;                 // armed peds may exceed the normal limit by this much
-const ATTACK_RANGE = 230, ATTACK_KEEP = 120, ENEMY_DMG = { cop: 7, swat: 10, gang: 6 };
+const ATTACK_RANGE = 230, ATTACK_KEEP = 120, ENEMY_DMG = { cop: 7, swat: 10, army: 12, gang: 6 };
 const INSET = 12;                        // sidewalk path: distance from the block edge (buildings start at 18)
 const SPAWN_MIN = 300, SPAWN_MAX = 950, DESPAWN = 1150;
 const WALK_V: [number, number] = [26, 36], FLEE_V: [number, number] = [120, 150];
@@ -138,11 +141,11 @@ export class PedSystem {
     this.init(c, x, y);
     c.role = role; c.faction = faction;
     c.bx = clamp(Math.floor((x - ROAD / 2) / BLOCK), 0, GRID - 1); c.by = clamp(Math.floor((y - ROAD / 2) / BLOCK), 0, GRID - 1);
-    const look = role === "cop" || role === "swat" ? ROLE_LOOK[role] : faction ? ROLE_LOOK[faction] : null;
+    const look = role === "cop" || role === "swat" || role === "army" ? ROLE_LOOK[role] : faction ? ROLE_LOOK[faction] : null;
     if (look) { c.shirt = look.shirt; c.pants = look.pants; c.hp = c.maxHp = look.hp; }
-    if (role === "swat") c.scale = 1.08;
-    c.armed = role === "cop" || role === "swat" || role === "gang";
-    c.state = role === "cop" || role === "swat" ? "attack" : role === "gang" ? "idle" : "walk";
+    if (role === "swat" || role === "army") c.scale = 1.08;
+    c.armed = isPolice(role) || role === "gang";
+    c.state = isPolice(role) ? "attack" : role === "gang" ? "idle" : "walk";
     if (role === "fare" || role === "target") { c.state = "idle"; c.hp = c.maxHp = 40; }
     c.shootT = rnd(0.8, 1.6);
     return c;
@@ -231,7 +234,7 @@ export class PedSystem {
   }
 
   private scare(c: Civilian, x: number, y: number) {
-    if (c.state === "down" || c.state === "attack" || c.role === "cop" || c.role === "swat" || c.tag === "fare") return;
+    if (c.state === "down" || c.state === "attack" || isPolice(c.role) || c.tag === "fare") return;
     if (c.role === "gang") { c.state = "attack"; c.t = 0; return; } // gangs fight back
     c.threatX = x; c.threatY = y;
     const wasFleeing = c.state === "flee";
@@ -338,7 +341,7 @@ export class PedSystem {
   // police on foot standing close to (x, y) (arrests)
   copsNear(x: number, y: number, r: number) {
     let n = 0;
-    for (const c of this.list) if (c.active && c.state === "attack" && (c.role === "cop" || c.role === "swat") && Math.hypot(c.x - x, c.y - y) < r) n++;
+    for (const c of this.list) if (c.active && c.state === "attack" && isPolice(c.role) && Math.hypot(c.x - x, c.y - y) < r) n++;
     return n;
   }
 
@@ -356,7 +359,7 @@ export class PedSystem {
   static hostile(team: Team, c: Civilian): boolean {
     if (team === "player") return false;
     if (team === "cop") return c.role === "gang";
-    return c.role === "cop" || c.role === "swat";
+    return isPolice(c.role);
   }
   static teamOf(c: Civilian): Team { return c.role === "gang" && c.faction ? c.faction : "cop"; }
 
@@ -364,7 +367,7 @@ export class PedSystem {
   private findOpponent(c: Civilian): number {
     let best = -1, bd = FIGHT_RANGE;
     for (const o of this.list) {
-      if (!o.active || o.state === "down" || (o.role !== "cop" && o.role !== "swat")) continue;
+      if (!o.active || o.state === "down" || !isPolice(o.role)) continue;
       const d = Math.hypot(o.x - c.x, o.y - c.y);
       if (d < bd && this.world.lineClear(c.x, c.y, o.x, o.y, 40)) { bd = d; best = o.id; }
     }
@@ -385,7 +388,7 @@ export class PedSystem {
       const far = c.tag ? Infinity : c.armed ? DESPAWN + 400 : DESPAWN; // mission peds stay
       if ((c.state === "down" && c.t > DOWN_TIME && !c.tag) || (dist > far && c.state !== "down")) { c.active = false; continue; }
       if (c.state === "down") { this.fall(c, dt); continue; }
-      const cop = c.role === "cop" || c.role === "swat";
+      const cop = isPolice(c.role);
       if (cop && c.state === "attack" && h.stars === 0 && c.target < 0) { c.state = "walk"; c.speed = rnd(WALK_V[0], WALK_V[1]); this.targetSidewalk(c); }
       else if (cop && c.state !== "attack" && h.stars > 0 && dist < 500) { c.state = "attack"; c.t = 0; }
       if (c.role === "gang" && c.state === "idle" && c.faction && h.gangHostile(c.faction) && dist < 320) { c.state = "attack"; c.t = 0; }
@@ -427,12 +430,12 @@ export class PedSystem {
 
   // police and gang members: close in on the player and shoot when they have a clear line
   private attack(c: Civilian, dt: number, h: PedHost, dPlayer: number) {
-    const cop = c.role === "cop" || c.role === "swat";
+    const cop = isPolice(c.role);
     const foe = c.target >= 0 ? this.list[c.target] : null;
     const fx = foe ? foe.x : h.fx, fy = foe ? foe.y : h.fy, fz = foe ? foe.z : h.fz;
     const dx = fx - c.x, dy = fy - c.y, d = foe ? Math.max(1, Math.hypot(dx, dy)) : dPlayer;
     c.a = Math.atan2(dy, dx);
-    const speed = c.role === "swat" ? 125 : cop ? 135 : 115;
+    const speed = c.role === "swat" || c.role === "army" ? 125 : cop ? 135 : 115;
     const arrest = cop && !foe && h.stars <= 1; // 1 star: they want to cuff you, not shoot
     if (d > (arrest ? 18 : ATTACK_KEEP)) {
       const nx = c.x + (dx / d) * speed * dt, ny = c.y + (dy / d) * speed * dt;
@@ -444,9 +447,9 @@ export class PedSystem {
     if (!c.armed || arrest || d > ATTACK_RANGE) return;
     c.shootT -= dt;
     if (c.shootT > 0) return;
-    c.shootT = c.role === "swat" ? rnd(0.35, 0.7) : rnd(0.7, 1.4);
+    c.shootT = c.role === "swat" || c.role === "army" ? rnd(0.35, 0.7) : rnd(0.7, 1.4);
     if (!this.world.lineClear(c.x, c.y, fx, fy, 30)) return;
-    const dmg = c.role === "swat" ? ENEMY_DMG.swat : cop ? ENEMY_DMG.cop : ENEMY_DMG.gang;
+    const dmg = c.role === "swat" ? ENEMY_DMG.swat : c.role === "army" ? ENEMY_DMG.army : cop ? ENEMY_DMG.cop : ENEMY_DMG.gang;
     const za = Math.atan2(fz + 12 - (c.z + 15), d);
     h.enemyShot(c.x + Math.cos(c.a) * 8, c.y + Math.sin(c.a) * 8, c.z + 15 + Math.sin(za) * 8, c.a + rnd(-0.1, 0.1), dmg, PedSystem.teamOf(c), c.id);
   }

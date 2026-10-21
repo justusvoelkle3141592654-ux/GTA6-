@@ -24,7 +24,7 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onTog
           <div key={hud.mult} className={"popin rounded-md px-2 py-0.5 font-display text-xl tracking-wider sm:text-2xl " + (hud.mult > 1 ? "bg-pink-500 text-white shadow-[0_0_14px_rgba(255,60,172,0.9)]" : "bg-white/10 text-white/60")}>x{hud.mult}</div>
           <div className="h-1.5 w-20 overflow-hidden rounded-full bg-white/10 sm:w-28"><div className="h-full bg-gradient-to-r from-pink-500 to-yellow-300" style={{ width: `${hud.combo01 * 100}%` }} /></div>
         </div>}
-        {rules.cops && <div className={"mt-2" + (hud.searching ? " animate-pulse" : "")}><Stars n={hud.stars} size={isTouch ? "text-xl" : "text-3xl"} /></div>}
+        {rules.cops && <div className={"mt-2" + (hud.searching ? " animate-pulse" : "")}><Stars n={hud.stars} max={rules.maxStars} size={isTouch ? "text-xl" : "text-3xl"} /></div>}
         <div className="mt-2 w-36 space-y-1.5 sm:w-52">
           {rules.damage && <Bar label="DU" value={hud.health01} from={hud.health01 < 0.3 ? "#ff1a3a" : "#3dff8b"} to={hud.health01 < 0.3 ? "#ff6b3d" : "#9dffc8"} />}
           {rules.damage && hud.armor01 > 0 && <Bar label="WESTE" value={hud.armor01} from="#5aa0ff" to="#b5d6ff" />}

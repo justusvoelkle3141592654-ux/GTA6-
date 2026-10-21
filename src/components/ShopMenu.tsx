@@ -91,7 +91,7 @@ export default function ShopMenu({ game, place, onClose }: { game: Game; place: 
           </>}
 
           {place.kind === "workshop" && (!view.car ? <div className="text-white/60">Fahr mit einem Auto in den Ring vor der Werkstatt.</div> : <>
-            <Row><div><b>{view.car.name}</b> <span className="text-white/50">Zustand {Math.round((view.car.hp / view.car.maxHp) * 100)} %</span></div><Buy label="Reparieren" price={view.car.repair} onClick={() => act({ t: "repair" })} disabled={view.car.repair <= 0 || view.cash < view.car.repair} /></Row>
+            <Row><div><b>{view.car.name}</b> <span className="text-white/50">Zustand {Math.round((view.car.hp / view.car.maxHp) * 100)} %</span>{view.car.flat && <span className="ml-2 text-orange-300">Reifen platt</span>}</div><Buy label="Reparieren" price={view.car.repair} onClick={() => act({ t: "repair" })} disabled={view.car.repair <= 0 || view.cash < view.car.repair} /></Row>
             <div className="rounded-xl border border-white/10 bg-white/5 p-3">
               <div className="mb-2 flex justify-between"><b>Lackieren</b><span className="text-white/50">${PAINT_PRICE} · löscht die Fahndung, wenn dich keiner sieht</span></div>
               <div className="grid grid-cols-6 gap-2">

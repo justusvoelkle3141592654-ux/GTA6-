@@ -3,7 +3,7 @@ import { Car, MODEL_NAME, MODEL_STATS } from "./vehicles";
 import { WEAPON_DEFS } from "./weapons";
 import { terrainH } from "./world";
 import { GARAGE_SLOTS, MAX_TUNE, PAINTS, TUNE_DEFS, tuneHp } from "./garage";
-import { AMMO_FOR_SALE, ARMOR_PRICE, FOOD, GUNS_FOR_SALE, OUTFITS, PAINT_PRICE, REPAIR_PER_HP, ROB_COOLDOWN, ROB_HEAT, ROB_REWARD, type ShopAction } from "./economy";
+import { AMMO_FOR_SALE, ARMOR_PRICE, FOOD, GUNS_FOR_SALE, OUTFITS, PAINT_PRICE, REPAIR_PER_HP, ROB_COOLDOWN, ROB_HEAT, ROB_REWARD, TYRE_PRICE, type ShopAction } from "./economy";
 import { MAX_ARMOR, newPed, type Game, type ShopView } from "./engine";
 
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
@@ -24,7 +24,7 @@ export class Shops {
     return {
       cash: g.cash, hp: pd.hp, maxHp: pd.maxHp, armor: pd.armor, outfit: g.outfit, stars: g.wanted.stars,
       weapons: GUNS_FOR_SALE.map((w) => ({ w, owned: g.inv.has(w), total: g.inv.total(w), canAmmo: AMMO_FOR_SALE.includes(w) })),
-      car: inCar ? { name: MODEL_NAME[p.model], hp: p.hp, maxHp: p.maxHp, color: p.color, tune: { ...p.tune }, repair: Math.ceil(Math.max(0, p.maxHp - p.hp) * REPAIR_PER_HP) } : null,
+      car: inCar ? { name: MODEL_NAME[p.model], hp: p.hp, maxHp: p.maxHp, color: p.color, tune: { ...p.tune }, repair: Math.ceil(Math.max(0, p.maxHp - p.hp) * REPAIR_PER_HP) + (p.flat ? TYRE_PRICE : 0), flat: p.flat } : null,
       garage: g.garage.map((c) => ({ name: MODEL_NAME[c.model], color: c.color, tune: { ...c.tune }, value: Math.round(MODEL_STATS[c.model].price * 0.6) })),
       slots: GARAGE_SLOTS,
       bank: g.bank,
@@ -87,10 +87,10 @@ export class Shops {
       }
       case "repair": {
         if (!pl || g.onFoot) return "";
-        const cost = Math.ceil(Math.max(0, p.maxHp - p.hp) * REPAIR_PER_HP);
+        const cost = Math.ceil(Math.max(0, p.maxHp - p.hp) * REPAIR_PER_HP) + (p.flat ? TYRE_PRICE : 0);
         if (cost <= 0) return "Der Wagen ist in Ordnung";
         if (!this.pay(cost)) return broke;
-        p.hp = p.maxHp;
+        p.hp = p.maxHp; p.flat = false;
         return "Repariert";
       }
       case "paint": {

@@ -1,11 +1,11 @@
 // vehicle data and the shared car entity
 import { noTune, type Tune } from "./garage";
 
-export type CarModel = "sport" | "super" | "muscle" | "suv" | "sedan" | "van" | "police" | "taxi" | "bike" | "truck" | "bus" | "swat";
-export const CAR_MODELS: CarModel[] = ["sport", "super", "muscle", "suv", "sedan", "van", "police", "taxi", "bike", "truck", "bus", "swat"];
+export type CarModel = "sport" | "super" | "muscle" | "suv" | "sedan" | "van" | "police" | "taxi" | "bike" | "truck" | "bus" | "swat" | "armor";
+export const CAR_MODELS: CarModel[] = ["sport", "super", "muscle", "suv", "sedan", "van", "police", "taxi", "bike", "truck", "bus", "swat", "armor"];
 export const MODEL_NAME: Record<CarModel, string> = {
   sport: "Corsaro", super: "Zephyra", muscle: "Torvan", suv: "Granit", sedan: "Limousine", van: "Lieferwagen", police: "Streifenwagen",
-  taxi: "Taxi", bike: "Motorrad", truck: "Lastwagen", bus: "Stadtbus", swat: "SEK-Transporter",
+  taxi: "Taxi", bike: "Motorrad", truck: "Lastwagen", bus: "Stadtbus", swat: "SEK-Transporter", armor: "Radpanzer",
 };
 
 export interface CarDef { id: string; name: string; model: CarModel; color: string; maxV: number; acc: number; grip: number; hp: number; mass: number; desc: string; }
@@ -33,6 +33,7 @@ export const MODEL_STATS: Record<CarModel, ModelStats> = {
   truck: { maxV: 360, acc: 320, grip: 13, hp: 240, mass: 3, price: 1800 },
   bus: { maxV: 340, acc: 290, grip: 13, hp: 260, mass: 3.2, price: 1500 },
   swat: { maxV: 520, acc: 600, grip: 12, hp: 220, mass: 2.2, price: 3500 },
+  armor: { maxV: 440, acc: 430, grip: 13, hp: 600, mass: 4, price: 9000 },
 };
 
 export type CarKind = "player" | "cop" | "civ";
@@ -55,6 +56,7 @@ export class Car {
   tag = "";       // mission marker ("target", "deliver", ...)
   flee = false;   // drives away from the player (mission targets)
   hunt = false;   // gang car chasing the player (drives faster)
+  flat = false;   // tyres burst by a spike strip (slow and slippery until repaired)
   dead = false; deadT = 0; wrecked = false; wreckT = 0; parked = false;
   throttle = 0; steer = 0; handbrake = false; nitro = false;
   wpI = 0; wpJ = 0; prevI = -1; prevJ = -1; hasWp = false;

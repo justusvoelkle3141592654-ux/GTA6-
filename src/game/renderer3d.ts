@@ -143,6 +143,7 @@ const SPECS: Record<CarModel, CarSpec> = {
   truck: { L: 66, W: 27, y0: 5, noseY: 18, beltY: 22, deckY: 20, xCowl: 27, xRoofF: 23, xRoofR: 13, xDeck: 12, roofY: 33, r: 7.5, wx: 22, wxr: -21, wd: 5 },
   bus: { L: 82, W: 28, y0: 4, noseY: 16, beltY: 17, deckY: 17, xCowl: 39, xRoofF: 37, xRoofR: -38, xDeck: -39.5, roofY: 34, r: 7, wx: 27, wxr: -25, wd: 5 },
   swat: { L: 54, W: 26, y0: 4.5, noseY: 12, beltY: 16, deckY: 16, xCowl: 25, xRoofF: 17, xRoofR: 15, xDeck: 15, roofY: 26, r: 7, wx: 17, wxr: -17, wd: 5 },
+  armor: { L: 62, W: 29, y0: 6, noseY: 15, beltY: 19, deckY: 19, xCowl: 22, xRoofF: 16, xRoofR: -24, xDeck: -27, roofY: 25, r: 8, wx: 20, wxr: -20, wd: 6 },
   bike: { L: 34, W: 8, y0: 6, noseY: 12, beltY: 14, deckY: 14, xCowl: 6, xRoofF: 2, xRoofR: -4, xDeck: -6, roofY: 18, r: 6, wx: 13, wxr: -13, wd: 3 },
 };
 
@@ -267,6 +268,15 @@ function getCarGeo(model: CarModel, color: string): CarGeo {
       B.push(nb(10, 3, s.W - 6, -10, s.roofY + 1.5, 0, "#c9ccd2"));
       Lg.push(nb(0.6, 3, 14, hl + 0.3, s.roofY - 3, 0, "#ffc21a", 2));
       break;
+    case "armor": {
+      // armoured car: slab sides, turret with a long barrel, spare wheel, vision slits instead of windows
+      B.push(rbox(54, 14, s.W, -2, s.y0 + 9, 0, body, 2.4), rbox(48, 3, s.W + 2, -2, s.y0 + 3, 0, dark, 1));
+      B.push(rbox(18, 8, 17, -4, s.roofY + 4.5, 0, body, 2), cylY(5, 2, -4, s.roofY + 9.5, 0, "#3a3f2a", 12));
+      B.push(cylX(1.5, 26, 16, s.roofY + 5, 0, "#2a2d22", 8), cylX(2.2, 4, 28, s.roofY + 5, 0, "#2a2d22", 8));
+      B.push(cylX(6, 3, -hl - 1.5, 16, 0, "#141414", 16));
+      for (const sd of [-1, 1]) B.push(nb(10, 1.6, 0.5, 10, s.beltY + 2, sd * (hw + 0.2), "#0b0d08"), nb(26, 1.2, 0.6, -6, s.beltY - 4, sd * (hw + 0.3), dark));
+      break;
+    }
     case "swat": {
       const navy = "#141820";
       B.push(rbox(43, 21, s.W, -5.5, s.y0 + 10.5, 0, body, 1.4), nb(s.L - 2, 2.5, s.W + 0.4, 0, 10, 0, navy));
@@ -534,7 +544,7 @@ export class Renderer3D {
     pmrem.dispose();
     this.scene.fog = new THREE.Fog(0xcdbca4, 450, 3600);
     this.scene.background = new THREE.Color(0xb7cbe6);
-    this.buildLights(); this.buildSky(); this.buildGround(); this.buildTerrain(); this.buildCity(); this.buildRamps(); this.buildLamps(); this.buildShared(); this.buildPlaces(places); this.buildMarkers(); this.buildHeli();
+    this.buildLights(); this.buildSky(); this.buildGround(); this.buildTerrain(); this.buildCity(); this.buildRamps(); this.buildLamps(); this.buildShared(); this.buildPlaces(places); this.buildMarkers(); this.buildHeli(); this.buildSpikes();
     this.setQuality(quality);
   }
 
@@ -1470,6 +1480,26 @@ export class Renderer3D {
       this.jumpMesh.instanceMatrix.needsUpdate = true;
     }
   }
+  // spike strips of the police (a few pooled meshes, strip along x; rotated for strips along y)
+  private spikeMeshes: THREE.Mesh[] = [];
+  private buildSpikes() {
+    const P: THREE.BufferGeometry[] = [nb(120, 1.2, 10, 0, 0.6, 0, "#2b2d33")];
+    for (let i = 0; i < 20; i++) P.push(ni(withColor(new THREE.ConeGeometry(1.4, 4, 4).translate(-57 + i * 6, 3, i % 2 ? 2.5 : -2.5), C("#c9ced8"))));
+    const geo = mergeGeometries(P)!;
+    for (const p of P) p.dispose();
+    for (let i = 0; i < 4; i++) { const m = new THREE.Mesh(geo, this.bodyMat); m.visible = false; this.scene.add(m); this.spikeMeshes.push(m); }
+  }
+  private syncSpikes(g: Game) {
+    const list = g.police.spikes;
+    for (let i = 0; i < this.spikeMeshes.length; i++) {
+      const m = this.spikeMeshes[i], s = list[i];
+      m.visible = !!s && g.state !== "menu";
+      if (!s) continue;
+      m.position.set(s.x, terrainH(s.x, s.y), s.y);
+      m.rotation.y = s.alongX ? 0 : Math.PI / 2;
+    }
+  }
+
   // police helicopter with spotlight cone on the ground
   private heliG: THREE.Group | null = null; private heliRotor: THREE.Mesh | null = null; private heliSpot: THREE.Mesh | null = null;
   private buildHeli() {
@@ -1602,6 +1632,7 @@ export class Renderer3D {
     this.syncArrow(g);
     this.syncMarkers(g);
     this.syncHeli(g);
+    this.syncSpikes(g);
     this.ped.update(g, dt);
     this.crowd.update(g.peds.list, g.state !== "menu");
     this.updateCamera(g, dt);

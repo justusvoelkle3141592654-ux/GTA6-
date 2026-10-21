@@ -26,10 +26,11 @@ export function Btn({ children, onClick, primary, disabled }: { children: ReactN
   );
 }
 
-export function Stars({ n, size = "text-2xl" }: { n: number; size?: string }) {
+const STAR_SLOTS = [0, 1, 2, 3, 4, 5];
+export function Stars({ n, size = "text-2xl", max = 5 }: { n: number; size?: string; max?: number }) {
   return (
     <div className={`flex gap-0.5 ${size} leading-none`}>
-      {[0, 1, 2, 3, 4].map((i) => <span key={i} className={i < n ? "text-yellow-300" : "text-white/15"} style={i < n ? { textShadow: "0 0 10px rgba(255,210,63,0.9)" } : undefined}>★</span>)}
+      {STAR_SLOTS.slice(0, max).map((i) => <span key={i} className={i < n ? "text-yellow-300" : "text-white/15"} style={i < n ? { textShadow: "0 0 10px rgba(255,210,63,0.9)" } : undefined}>★</span>)}
     </div>
   );
 }

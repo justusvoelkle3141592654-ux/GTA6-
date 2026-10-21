@@ -11,8 +11,8 @@ export const CRIMES: Record<Crime, number> = {
 };
 
 const CHASE_STAR_HEAT = 90;                     // chase: one more star per 90 heat
-export const STAR_HEAT = [0, 5, 60, 140, 240, 380]; // decaying modes: heat needed for 0..5 stars
-export const LOSE_TIME = [0, 7, 10, 13, 16, 20];    // seconds out of sight to escape, per star level
+export const STAR_HEAT = [0, 5, 60, 140, 240, 380, 600]; // decaying modes: heat needed for 0..6 stars (6: military)
+export const LOSE_TIME = [0, 7, 10, 13, 16, 20, 26];     // seconds out of sight to escape, per star level
 export const SEARCH_AFTER = 1.5;                    // stars start blinking after this long out of sight
 export const SEEN_DIST = 650, SEEN_CLOSE = 220;     // a cop sees you within SEEN_DIST with line of sight, always within SEEN_CLOSE
 
@@ -47,8 +47,8 @@ export class Wanted {
     let target: number;
     if (this.rules.starsDecay) {
       target = 0;
-      for (let i = 1; i < STAR_HEAT.length; i++) if (this.heat >= STAR_HEAT[i]) target = i;
-    } else target = Math.min(5, this.rules.minStars + Math.floor(this.heat / CHASE_STAR_HEAT));
+      for (let i = 1; i < STAR_HEAT.length && i <= this.rules.maxStars; i++) if (this.heat >= STAR_HEAT[i]) target = i;
+    } else target = Math.min(this.rules.maxStars, this.rules.minStars + Math.floor(this.heat / CHASE_STAR_HEAT));
     if (target > this.stars) {
       this.stars = target; this.maxStars = Math.max(this.maxStars, target); this.lostT = 0;
       return "up";

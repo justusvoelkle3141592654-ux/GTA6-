@@ -2,15 +2,20 @@ import { Car } from "./vehicles";
 import { ROAD, GRID, inCity, terrainH } from "./world";
 import { steerTo, avoid, stuck } from "./traffic";
 import { SEEN_CLOSE, SEEN_DIST } from "./wanted";
+import { isPolice } from "./peds";
 import { sfx } from "./audio";
 import type { Game } from "./engine";
 
 // police beyond the patrol cars: sight / last known position, cops on foot, roadblocks, helicopter, SWAT
-export const HELI_STARS = 4, ROADBLOCK_STARS = 3, SWAT_STARS = 5;
+export const HELI_STARS = 4, ROADBLOCK_STARS = 3, SWAT_STARS = 5, ARMY_STARS = 6, SPIKE_STARS = 4;
+const SHELL_EVERY: [number, number] = [3.2, 4.5], SHELL_RANGE = 750; // armoured car: time between shots, range
+const PIT_RANGE = 150;            // a cop this close to a fast player aims for the rear corner (spin him out)
+const SPIKE_LIFE = 60, SPIKE_W = 120, SPIKE_D = 12;
 const HELI_HP = 260, HELI_ALT = 190, HELI_SPEED = 300, HELI_SPOT = 260;
 const ROADBLOCK_EVERY = 22;
 const SEARCH_R = (stars: number) => 260 + stars * 120;
 
+export interface Spike { x: number; y: number; alongX: boolean; t: number; } // strip across the road, alongX: strip runs along x
 export interface Heli { x: number; y: number; z: number; a: number; vx: number; vy: number; hp: number; dead: boolean; vz: number; shootT: number; rotor: number; }
 
 const TAU = Math.PI * 2;
@@ -18,15 +23,17 @@ const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 
 export class Police {
   heli: Heli | null = null;
+  spikes: Spike[] = [];
   lastX = 0; lastY = 0;        // where the police saw you last
   seen = false;                // somebody sees you right now
   private searchX = 0; private searchY = 0; private searchT = 0;
   private roadblockT = ROADBLOCK_EVERY;
+  private armyCalled = false;
   private rotorT = 0;
 
   constructor(private g: Game) {}
 
-  reset() { this.heli = null; this.seen = false; this.roadblockT = ROADBLOCK_EVERY; }
+  reset() { this.heli = null; this.seen = false; this.roadblockT = ROADBLOCK_EVERY; this.spikes.length = 0; }
   get searchRadius() { return SEARCH_R(this.g.wanted.stars); }
 
   // a cop car / cop on foot / the helicopter can see (x, y)
@@ -38,7 +45,7 @@ export class Police {
       if (d < SEEN_CLOSE || (loud && d < 600) || (d < SEEN_DIST && g.world.lineClear(c.x, c.y, x, y, 50))) return true;
     }
     for (const p of g.peds.list) {
-      if (!p.active || p.state === "down" || (p.role !== "cop" && p.role !== "swat")) continue;
+      if (!p.active || p.state === "down" || !isPolice(p.role)) continue;
       const d = Math.hypot(p.x - x, p.y - y);
       if (d < 120 || (d < 420 && g.world.lineClear(p.x, p.y, x, y, 40))) return true;
     }
@@ -72,13 +79,16 @@ export class Police {
       }
       const d = Math.hypot(x - fx, y - fy);
       if (d < 800 || d > 1350) continue;
-      // SWAT vans at the top wanted level (open world)
-      const swat = g.rules.city && g.wanted.stars >= SWAT_STARS && Math.random() < 0.6;
-      const c = new Car("cop", swat ? "swat" : "police", swat ? "#1b1d22" : "#f4f6fa");
+      // SWAT vans at 5 stars, armoured cars of the military at 6 (open world)
+      const army = g.rules.city && g.wanted.stars >= ARMY_STARS && Math.random() < 0.45;
+      const swat = !army && g.rules.city && g.wanted.stars >= SWAT_STARS && Math.random() < 0.6;
+      const c = new Car("cop", army ? "armor" : swat ? "swat" : "police", army ? "#4b5320" : swat ? "#1b1d22" : "#f4f6fa");
       c.x = x; c.y = y; c.z = terrainH(x, y);
       c.a = Math.atan2(fy - y, fx - x);
-      c.hp = c.maxHp = swat ? 220 : g.config.difficulty === "easy" ? 70 : 100;
-      c.mass = swat ? 2 : 1.25;
+      c.hp = c.maxHp = army ? 600 : swat ? 220 : g.config.difficulty === "easy" ? 70 : 100;
+      c.mass = army ? 4 : swat ? 2 : 1.25;
+      c.shootT = rnd(SHELL_EVERY[0], SHELL_EVERY[1]);
+      if (army && !this.armyCalled) { this.armyCalled = true; g.banner("MILITÄR", "Radpanzer rücken aus – versteck dich!", "#9fb35a", 2.4); }
       c.driver = g.rules.city; // open world: officers get out when you are on foot
       g.cars.push(c);
       return;
@@ -103,6 +113,9 @@ export class Police {
     const elevated = c.z > terrainH(c.x, c.y) + 15;
     const roofRamp = !g.onFoot && g.player.z > 25 && this.seen ? w.rampToRoofAt(fx, fy) : null;
     const direct = elevated || !inCity(c.x, c.y) || !inCity(fx, fy) || (d < 650 && w.lineClear(c.x, c.y, fx, fy));
+    if (c.model === "armor") this.turret(c, d, dt);
+    // half of the cars try to cut you off: they head for the crossing in front of you
+    const intercept = c.siren > 5 && this.seen && !g.onFoot && g.player.speed > 150;
     if (roofRamp && !elevated) {
       const rs = w.rampStart(roofRamp);
       tx = rs.x; ty = rs.y;
@@ -110,11 +123,17 @@ export class Police {
     } else if (direct) {
       const lead = Math.min(g.diff.lead, d / 700);
       tx = fx + fvx * lead; ty = fy + fvy * lead;
+      // close behind a fast car: aim for its rear corner (PIT manoeuvre)
+      const p = g.player;
+      if (!g.onFoot && d < PIT_RANGE && p.speed > 150 && this.seen) {
+        const ca = Math.cos(p.a), sa = Math.sin(p.a), side = c.siren % 2 < 1 ? 1 : -1;
+        tx = p.x - ca * 16 - sa * 14 * side + p.vx * 0.12; ty = p.y - sa * 16 + ca * 14 * side + p.vy * 0.12;
+      }
       c.hasWp = false;
     } else {
       if (!c.hasWp || Math.hypot(c.x - w.nodePos(c.wpI, c.wpJ).x, c.y - w.nodePos(c.wpI, c.wpJ).y) < 70) {
         const cur = c.hasWp ? { i: c.wpI, j: c.wpJ } : w.nearestNode(c.x, c.y);
-        const pn = w.nearestNode(fx, fy);
+        const pn = intercept ? w.nearestNode(fx + fvx * 1.4, fy + fvy * 1.4) : w.nearestNode(fx, fy);
         const di = pn.i - cur.i, dj = pn.j - cur.j;
         let ni = cur.i, nj = cur.j;
         if (di === 0 && dj === 0) { /* direct */ }
@@ -134,6 +153,7 @@ export class Police {
     c.throttle = Math.abs(diff) > 1.4 ? 0.45 : 1;
     c.handbrake = Math.abs(diff) > 1.1 && Math.abs(c.vF) > 260;
     if (g.onFoot && d < 320 && c.vF > 240) c.throttle = -0.3;
+    if (g.onFoot && this.seen && d < 160 && c.driver) { c.throttle = c.vF > 40 ? -1 : 0; c.handbrake = false; } // stop next to you, then get out
     if (!this.seen && g.rules.starsDecay) c.throttle *= 0.7; // searching: slower
     avoid(c, w);
     stuck(c, dt);
@@ -145,12 +165,24 @@ export class Police {
     this.searchT = rnd(4, 8);
   }
 
+  // armoured car: fires a shell at you every few seconds when it can see you
+  private turret(c: Car, d: number, dt: number) {
+    const g = this.g;
+    if (d > SHELL_RANGE || !this.seen || !g.world.lineClear(c.x, c.y, g.fx, g.fy, 40)) return;
+    c.shootT -= dt;
+    if (c.shootT > 0) return;
+    c.shootT = rnd(SHELL_EVERY[0], SHELL_EVERY[1]);
+    const lead = d / 700;
+    const a = Math.atan2(g.fy + g.fvy * lead * 0.5 - c.y, g.fx + g.fvx * lead * 0.5 - c.x) + rnd(-0.05, 0.05);
+    g.enemyShell(c.x + Math.cos(a) * 34, c.y + Math.sin(a) * 34, c.z + 26, a);
+  }
+
   // the car stops and one or two officers get out
   private dismount(c: Car) {
     const g = this.g;
     c.driver = false; c.parked = true; c.handbrake = true;
-    const role = c.model === "swat" ? "swat" : "cop";
-    const n = c.model === "swat" ? 3 : 1 + (g.wanted.stars >= 2 ? 1 : 0);
+    const role = c.model === "swat" ? "swat" : c.model === "armor" ? "army" : "cop";
+    const n = c.model === "swat" || c.model === "armor" ? 3 : 1 + (g.wanted.stars >= 2 ? 1 : 0);
     const ca = Math.cos(c.a), sa = Math.sin(c.a);
     for (let i = 0; i < n; i++) {
       const side = i % 2 ? 1 : -1;
@@ -167,7 +199,9 @@ export class Police {
     this.seen = w.stars > 0 && this.copSees(g.fx, g.fy);
     if (this.seen) { this.lastX = g.fx; this.lastY = g.fy; }
     if (!g.rules.city) return;
+    if (w.stars < ARMY_STARS) this.armyCalled = false;
     this.updateHeli(dt);
+    this.updateSpikes(dt);
     // roadblocks ahead of you while you drive fast
     if (w.stars >= ROADBLOCK_STARS && !g.onFoot && inCity(g.fx, g.fy)) {
       this.roadblockT -= dt;
@@ -176,7 +210,7 @@ export class Police {
   }
 
   // two cars across the road two crossings ahead, officers behind them
-  private roadblock() {
+  roadblock() {
     const g = this.g, p = g.player, wd = g.world;
     const dirx = Math.abs(p.vx) > Math.abs(p.vy) ? Math.sign(p.vx) : 0, diry = dirx ? 0 : Math.sign(p.vy);
     const n = wd.nearestNode(p.x, p.y);
@@ -194,7 +228,25 @@ export class Police {
       g.cars.push(c);
     }
     for (const off of [-20, 20]) g.peds.spawnRole("cop", bx - dirx * 40 + (diry ? off : 0), by - diry * 40 + (dirx ? off : 0));
-    g.hintMsg("Straßensperre voraus!");
+    // from 4 stars: a spike strip across the whole road in front of the cars
+    if (g.wanted.stars >= SPIKE_STARS) {
+      this.spikes.push({ x: bx - dirx * 70, y: by - diry * 70, alongX: diry !== 0, t: 0 });
+      if (this.spikes.length > 4) this.spikes.shift();
+      g.hintMsg("Straßensperre mit Nagelband voraus!");
+    } else g.hintMsg("Straßensperre voraus!");
+  }
+
+  // spike strips: the player's tyres burst when driving over one
+  private updateSpikes(dt: number) {
+    const g = this.g, p = g.player;
+    for (let i = this.spikes.length - 1; i >= 0; i--) {
+      const s = this.spikes[i];
+      s.t += dt;
+      if (s.t > SPIKE_LIFE) { this.spikes.splice(i, 1); continue; }
+      if (g.onFoot || p.flat || p.air) continue;
+      const hw = (s.alongX ? SPIKE_W : SPIKE_D) / 2 + 10, hh = (s.alongX ? SPIKE_D : SPIKE_W) / 2 + 10;
+      if (Math.abs(p.x - s.x) < hw && Math.abs(p.y - s.y) < hh) g.burstTyres();
+    }
   }
 
   private updateHeli(dt: number) {

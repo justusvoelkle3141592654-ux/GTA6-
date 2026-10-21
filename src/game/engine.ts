@@ -4,7 +4,7 @@ import { Renderer3D } from "./renderer3d";
 import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, CRIMES, type Crime } from "./wanted";
 import { buildPlaces, respawnCost, RESPAWN_RULES, type Place } from "./places";
-import { PedSystem, PED_LIMIT, type Civilian, type Team } from "./peds";
+import { PedSystem, PED_LIMIT, isPolice, type Civilian, type Team } from "./peds";
 import { Car, CARS, MODEL_STATS, type CarDef, type FactionId } from "./vehicles";
 import { Inventory, WEAPONS, type Weapon } from "./weapons";
 import { AUTOSAVE_EVERY, SAVE_VERSION, emptyProgress, emptyStats, writeSave, type Progress, type SaveData, type SaveResult, type SaveStats } from "./save";
@@ -36,7 +36,7 @@ export interface DialogLine { speaker: string; text: string; color: string; }
 export interface ShopView {
   cash: number; hp: number; maxHp: number; armor: number; outfit: number; stars: number;
   weapons: { w: Weapon; owned: boolean; total: number; canAmmo: boolean }[];
-  car: { name: string; hp: number; maxHp: number; color: string; tune: Record<TunePart, number>; repair: number } | null;
+  car: { name: string; hp: number; maxHp: number; color: string; tune: Record<TunePart, number>; repair: number; flat: boolean } | null;
   garage: { name: string; color: string; tune: Record<TunePart, number>; value: number }[];
   slots: number;
   bank: number;     // money on the account (safehouse), not lost on death or arrest
@@ -55,9 +55,9 @@ export interface GameConfig { mode: Mode; difficulty: Difficulty; car: string; c
 
 interface DiffDef { dmg: number; cops: number[]; copV: number; copVStar: number; heat: number; bust: number; regen: number; firstCop: number; spawnGap: number; lead: number; }
 const DIFFS: Record<Difficulty, DiffDef> = {
-  easy: { dmg: 0.28, cops: [0, 1, 2, 2, 3, 4], copV: 330, copVStar: 16, heat: 1.3, bust: 0.22, regen: 4, firstCop: 8, spawnGap: 3.5, lead: 0.2 },
-  normal: { dmg: 0.6, cops: [0, 1, 2, 3, 5, 6], copV: 390, copVStar: 24, heat: 2.3, bust: 0.75, regen: 1.5, firstCop: 4, spawnGap: 2, lead: 0.4 },
-  hard: { dmg: 1, cops: [0, 2, 3, 5, 7, 9], copV: 440, copVStar: 30, heat: 3.2, bust: 1, regen: 0, firstCop: 2.5, spawnGap: 1.4, lead: 0.55 },
+  easy: { dmg: 0.28, cops: [0, 1, 2, 2, 3, 4, 5], copV: 330, copVStar: 16, heat: 1.3, bust: 0.22, regen: 4, firstCop: 8, spawnGap: 3.5, lead: 0.2 },
+  normal: { dmg: 0.6, cops: [0, 1, 2, 3, 5, 6, 7], copV: 390, copVStar: 24, heat: 2.3, bust: 0.75, regen: 1.5, firstCop: 4, spawnGap: 2, lead: 0.4 },
+  hard: { dmg: 1, cops: [0, 2, 3, 5, 7, 9, 10], copV: 440, copVStar: 30, heat: 3.2, bust: 1, regen: 0, firstCop: 2.5, spawnGap: 1.4, lead: 0.55 },
 };
 
 export interface HudData {
@@ -473,7 +473,8 @@ export class Game {
     return v;
   }
 
-  private explode(x: number, y: number, big = 1, power = 1) {
+  // byPlayer: the player caused it (crime, knocked-down people count against you)
+  private explode(x: number, y: number, big = 1, power = 1, byPlayer = true) {
     const z = terrainH(x, y);
     sfx.explosion();
     this.shake(0.5 * big);
@@ -486,7 +487,7 @@ export class Game {
     this.emit(x, y, z + 1, 0, 0, 0, 0.45, 20, 520, "#ffc88c", 4, 0);
     const R = 160 * Math.sqrt(big);
     const knocked = this.peds.blast(x, y, R);
-    if (knocked && this.state === "playing" && !this.ending) { this.crime("pedHit", knocked); this.stats.pedsHit += knocked; }
+    if (knocked && byPlayer && this.state === "playing" && !this.ending) { this.crime("pedHit", knocked); this.stats.pedsHit += knocked; }
     this.peds.alarm(x, y, 900, "blast");
     for (const c of this.cars) {
       const d = Math.hypot(c.x - x, c.y - y);
@@ -495,14 +496,14 @@ export class Game {
         c.vx += ((c.x - x) / d) * 380 * f; c.vy += ((c.y - y) / d) * 380 * f; c.av += rnd(-6, 6) * f;
         if (!c.air && f > 0.3) { c.air = true; c.vz = Math.max(c.vz, 120 * f * power); }
         if (c.kind === "player") this.damagePlayerCar(7 * f * big);
-        else if (!c.dead) this.damageCar(c, 50 * f * power);
+        else if (!c.dead) this.damageCar(c, 50 * f * power, false, byPlayer);
       }
     }
     if (this.onFoot) {
       const d = Math.hypot(this.ped.x - x, this.ped.y - y);
       if (d < R) { const f = 1 - d / R; this.damagePed(45 * f * big); this.ped.vx += ((this.ped.x - x) / Math.max(d, 1)) * 300 * f; this.ped.vy += ((this.ped.y - y) / Math.max(d, 1)) * 300 * f; }
     }
-    this.crime("explosion", power);
+    if (byPlayer) this.crime("explosion", power);
   }
 
   private damagePlayerCar(amt: number) {
@@ -537,7 +538,7 @@ export class Game {
     if (pd.hp <= 0) { pd.hp = 0; pd.dead = true; this.endRun("dead"); }
   }
 
-  private damageCar(c: Car, amt: number, byWeapon = false) {
+  private damageCar(c: Car, amt: number, byWeapon = false, byPlayer = true) {
     if (c.dead) return;
     if (c.kind === "player") { this.damagePlayerCar(amt); return; }
     c.hp -= amt;
@@ -547,15 +548,15 @@ export class Game {
       c.dead = true; c.wrecked = true;
       this.detachBombs(c);
       if (c.kind === "cop") {
-        this.explode(c.x, c.y, 1);
-        if (this.state === "playing" && !this.ending) {
+        this.explode(c.x, c.y, 1, 1, byPlayer);
+        if (byPlayer && this.state === "playing" && !this.ending) {
           this.takedowns++;
           this.addScore(750, c.x, c.y - 20, byWeapon ? "ABGESCHOSSEN" : "TAKEDOWN", "#ff3cac", 30);
           this.addCombo();
           this.crime("copTakedown");
           this.banner(byWeapon ? "COP ABGESCHOSSEN" : "COP TAKEDOWN", `x${this.mult} COMBO`, "#ff3cac", 1.3);
         }
-      } else this.explode(c.x, c.y, 0.7);
+      } else this.explode(c.x, c.y, 0.7, 1, byPlayer);
     }
   }
 
@@ -595,6 +596,24 @@ export class Game {
     this.flashes.push({ x: x + Math.cos(a) * 6, y: y + Math.sin(a) * 6, z, life: 0.05, max: 0.05, size: 70 });
     if (Math.hypot(x - this.fx, y - this.fy) < 900) sfx.shot();
     if (this.rules.city) this.peds.alarm(x, y, 300, "shot");
+  }
+
+  // armoured car: a slow shell that explodes on impact
+  enemyShell(x: number, y: number, z: number, a: number) {
+    const sp = 640;
+    this.addProj("rocket", "enemy", "cop", -1, 0, x, y, z, Math.cos(a) * sp, Math.sin(a) * sp, 0, a, 1.6);
+    this.flashes.push({ x, y, z, life: 0.15, max: 0.15, size: 260 });
+    sfx.rocket(); this.shake(0.12);
+  }
+
+  // spike strip: tyres flat until the workshop fixes them
+  burstTyres() {
+    const p = this.player;
+    if (p.flat) return;
+    p.flat = true;
+    sfx.crash(0.6); this.shake(0.25);
+    this.sparks(p.x, p.y, p.z + 4, 14, 0, 0, 0.8);
+    this.banner("REIFEN PLATT", "Nagelband! Die Werkstatt (T) flickt sie", "#ff9f43", 2);
   }
 
   // projectiles come from a pool as well; removed ones go back to it
@@ -641,7 +660,7 @@ export class Game {
     if (reason === "dead") this.stats.deaths++; else this.stats.arrests++;
     this.missions.fail(reason === "dead" ? "Du wurdest erledigt" : "Du wurdest verhaftet");
     this.police.reset(); this.pendingHeat = 0; this.pendingT = 0;
-    for (const c of this.peds.list) if (c.active && (c.role === "cop" || c.role === "swat")) c.active = false;
+    for (const c of this.peds.list) if (c.active && isPolice(c.role)) c.active = false;
     this.jobs.stop(reason === "dead" ? "Erledigt" : "Verhaftet");
     this.jobs.race = null; this.objective = ""; this.objTimer = -1;
     const place = this.places.find((pl) => pl.kind === rule.place);
@@ -771,7 +790,7 @@ export class Game {
   private onPedDown(c: Civilian) {
     this.stats.pedsHit++;
     this.peds.alarm(c.x, c.y, 400, "blast");
-    this.crime(c.role === "cop" || c.role === "swat" ? "copTakedown" : "pedShot");
+    this.crime(isPolice(c.role) ? "copTakedown" : "pedShot");
     if (c.faction) this.gangs.angered(c.faction); // hurting a gang member makes the whole gang angry for a while
     this.onPedKnocked?.(c);
   }
@@ -820,6 +839,13 @@ export class Game {
         if (q.z < gz + 2) { q.z = gz + 2; if (q.vz < 0) q.vz = -q.vz * 0.35; q.vx *= 0.6; q.vy *= 0.6; }
         if (this.world.isSolid(q.x, q.y, 2) && q.z < this.world.roofAt(q.x, q.y)) { q.x = q.px; q.y = q.py; q.vx *= -0.4; q.vy *= -0.4; }
         if (q.life <= 0) { this.explode(q.x, q.y, 1.15, 3); this.dropProj(i); }
+        continue;
+      }
+      // shells of the armoured car: explode at the first thing they touch
+      if (q.from === "enemy" && q.kind === "rocket") {
+        let boom = q.life <= 0 || this.world.isSolid(q.x, q.y, 2) || q.z < gh + 2 || Math.hypot(q.x - this.fx, q.y - this.fy) < (this.onFoot ? 14 : 28);
+        if (!boom) for (const c of this.cars) if (c.kind !== "cop" && !c.dead && Math.hypot(c.x - q.x, c.y - q.y) < 26) { boom = true; break; }
+        if (boom) { this.explode(q.x, q.y, 1.2, 3, false); this.dropProj(i); }
         continue;
       }
       // enemy bullets hit the player (on foot or in the car) and pedestrians of the other side (police vs gangs)
@@ -1276,9 +1302,11 @@ export class Game {
         else if (playing) {
           const st = p.model === def.model ? def : MODEL_STATS[p.model];
           const t = p.tune, top = st.maxV * tuneSpeed(t), grip = st.grip * tuneGrip(t);
-          const maxV = p.nitro ? top + 280 : top;
+          const maxV = (p.nitro ? top + 280 : top) * (p.flat ? 0.6 : 1);
           const acc = (p.nitro ? st.acc + 500 : st.acc) * tuneAcc(t);
-          this.drive(c, dt, acc, grass ? maxV * 0.8 : maxV, grass ? grip * 0.5 : grip, 1.7);
+          const g2 = (grass ? grip * 0.5 : grip) * (p.flat ? 0.45 : 1);
+          this.drive(c, dt, acc, grass ? maxV * 0.8 : maxV, g2, 1.7);
+          if (p.flat && p.speed > 120 && Math.random() < 0.3) this.sparks(p.x - Math.cos(p.a) * 14, p.y - Math.sin(p.a) * 14, p.z + 2, 1, -p.vx, -p.vy, 0.4);
         } else this.drive(c, dt, 300, c.cruise + 20, 12, 3);
       } else if (c.dead || (c.kind === "civ" && c.wrecked && !c.parked)) this.wreckPhysics(c, dt);
       else if (c.kind === "cop") {
@@ -1663,7 +1691,13 @@ export class Game {
       if (!playing) return;
       if (other.kind === "cop") {
         this.damageCar(other, impact * 0.15 + (p.nitro ? 22 : 0));
-        if (impact > 80 && p.hitFlash <= 0) this.damagePlayerCar(impact * 0.025 + 2);
+        if (impact > 80 && p.hitFlash <= 0) this.damagePlayerCar(impact * (other.model === "armor" ? 0.06 : 0.025) + 2);
+        // hit at the rear corner while driving fast: the car spins out (PIT manoeuvre)
+        if (!this.onFoot && p.speed > 140) {
+          const ca = Math.cos(p.a), sa = Math.sin(p.a), ox = other.x - p.x, oy = other.y - p.y;
+          const lx = ox * ca + oy * sa, ly = -ox * sa + oy * ca;
+          if (lx < -6 && Math.abs(ly) > 6) p.av += -Math.sign(ly) * Math.min(3.5, impact * 0.014);
+        }
         this.crime("copRam");
       } else if (other.kind === "civ") {
         const wasWrecked = other.wrecked;
