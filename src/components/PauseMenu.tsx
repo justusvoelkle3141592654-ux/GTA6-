@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { CameraMode, Game, GameConfig, HudData } from "../game/engine";
 import type { SaveResult } from "../game/save";
 import { MISSIONS } from "../game/missions";
+import { HIDE_ROUNDS } from "../game/hide";
 import { JOB_DEFS, JOB_KINDS, RACES } from "../game/jobs";
 import { ACTIONS, ACTION_LABEL, keyLabel, type Action } from "../game/input";
 import { CHANNELS } from "../game/audio";
@@ -61,7 +62,7 @@ export default function PauseMenu({ game, tab, setTab, hud, config, isTouch, mut
 function Progress({ game }: { game: Game }) {
   const pr = game.progress, st = game.stats, done = new Set(pr.missions);
   const rep = (v: number) => (v <= -30 ? "feindlich" : v >= 30 ? "freundlich" : "neutral");
-  const pct = Math.round(((pr.missions.length / MISSIONS.length) * 0.5 + (pr.shells.length / Math.max(1, game.jobs.shells.length)) * 0.2 + (pr.jumps.length / Math.max(1, game.jobs.jumps.length)) * 0.15 + (Object.keys(pr.records).length / RACES.length) * 0.15) * 100);
+  const pct = Math.round(((pr.missions.length / MISSIONS.length) * 0.5 + (pr.shells.length / Math.max(1, game.jobs.shells.length)) * 0.2 + (pr.jumps.length / Math.max(1, game.jobs.jumps.length)) * 0.15 + (RACES.filter((r) => pr.records[r.id]).length / RACES.length) * 0.15) * 100);
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <div className="rounded-2xl border border-white/10 bg-black/50 p-4 sm:col-span-2">
@@ -85,6 +86,8 @@ function Progress({ game }: { game: Game }) {
           <div>🛹 Stuntsprünge: <b>{pr.jumps.length}/{game.jobs.jumps.length}</b></div>
           {JOB_KINDS.map((k) => <div key={k}>💼 {JOB_DEFS[k].name}: <b>{pr.jobs[k] ?? 0}</b> erledigt <span className="text-xs text-white/45">({JOB_DEFS[k].models.join("/")})</span></div>)}
           {RACES.map((r) => <div key={r.id}>🏁 {r.name}: <b>{pr.records[r.id] ? `${pr.records[r.id].toFixed(1)} s` : "–"}</b> <span className="text-xs text-white/45">(Ziel {r.par} s)</span></div>)}
+          <div>🙈 Versteckspiel: <b>{pr.records.hide ?? 0}/{HIDE_ROUNDS.length}</b> Runden</div>
+          <div>🏦 Bankkonto: <b>${fmt(game.bank)}</b></div>
         </div>
         <div className="rounded-2xl border border-white/10 bg-black/50 p-4 text-sm">
           <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Statistik</h3>

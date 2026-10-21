@@ -1327,7 +1327,7 @@ export class Game {
     for (const c of this.cars) {
       if (c === p) continue;
       if (c.dead || c.parked || (c.kind === "civ" && c.wrecked)) { c.throttle = 0; c.steer = 0; c.handbrake = true; continue; }
-      if (c.model === "boat" || c.model === "heli") { if (c.kind === "cop") { c.calm = this.wanted.stars === 0; if (c.calm) { c.throttle = 0; c.steer = 0; } else this.craft.boatAI(c); } else { c.throttle = 0; c.steer = 0; } }
+      if (c.model === "boat" || c.model === "heli") { if (c.kind === "cop") { c.calm = this.wanted.stars === 0; if (c.calm) { c.throttle = 0; c.steer = 0; } else this.craft.boatAI(c); } else if (c.model === "boat" && c.flee && c.driver) this.craft.fleeBoat(c); else { c.throttle = 0; c.steer = 0; } }
       else if (c.kind === "cop") {
         c.calm = this.wanted.stars === 0;
         if (c.calm) this.traffic.patrol(this, c, dt); else this.police.copAI(c, dt);
@@ -1340,7 +1340,7 @@ export class Game {
       if (c.model === "heli" && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.fly(c, dt, mine ? this.lift : -1, mine); this.collideWorld(c); continue; }
       if (c.model === "boat" && !c.dead) {
         const st = MODEL_STATS.boat, mine = c === p && playing;
-        this.craft.boat(c, dt, st.acc + (mine && p.nitro ? 400 : 0), c.kind === "cop" ? st.maxV * 0.9 : st.maxV + (mine && p.nitro ? 200 : 0) + (mine ? st.maxV * (tuneSpeed(p.tune) - 1) : 0));
+        this.craft.boat(c, dt, st.acc + (mine && p.nitro ? 400 : 0), !mine ? st.maxV * (c.kind === "cop" ? 0.9 : 0.8) : st.maxV + (mine && p.nitro ? 200 : 0) + (mine ? st.maxV * (tuneSpeed(p.tune) - 1) : 0));
         this.collideWorld(c);
         continue;
       }

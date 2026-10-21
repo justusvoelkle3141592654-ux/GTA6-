@@ -39,6 +39,13 @@ export class Wanted {
 
   clear() { this.heat = 0; this.stars = this.rules.minStars; this.lostT = 0; }
 
+  // raise the stars to what the heat says right away (missions that start a chase)
+  syncStars() {
+    if (!this.rules.cops || !this.rules.starsDecay) return;
+    for (let i = 1; i < STAR_HEAT.length && i <= this.rules.maxStars; i++) if (this.heat >= STAR_HEAT[i] && i > this.stars) this.stars = i;
+    this.maxStars = Math.max(this.maxStars, this.stars);
+  }
+
   // heatRate: heat per second (only used when the mode has timeHeat), seen: a cop currently sees the player,
   // far: the player is outside the search area (escape goes twice as fast)
   update(dt: number, heatRate: number, seen: boolean, far = false): WantedEvent {

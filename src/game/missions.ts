@@ -1,5 +1,5 @@
 import { Car, type CarModel, type FactionId } from "./vehicles";
-import { BLOCK, ROAD, terrainH } from "./world";
+import { BLOCK, ROAD, GRID, WATER_Y, terrainH, roofOf } from "./world";
 import type { DialogLine, Game } from "./engine";
 import type { Civilian } from "./peds";
 import { STAR_HEAT } from "./wanted";
@@ -8,10 +8,13 @@ import { sfx } from "./audio";
 // ---------------------------------------------------------------- data
 // a location: a place (by id), a road crossing (grid node) or world coordinates
 // { last: true }: where the previous target ended up (e.g. the wreck of a destroyed van)
-export type Loc = { place: string; car?: boolean } | { node: [number, number] } | { xy: [number, number] } | { last: true };
+// { roof: [bx, by] }: on top of the tallest building of that block (helicopter landings)
+export type Loc = { place: string; car?: boolean } | { node: [number, number] } | { xy: [number, number] } | { last: true } | { roof: [number, number] };
 
 export type Step =
-  | { kind: "goto"; text: string; at: Loc; radius?: number; inCar?: boolean; time?: number }
+  | { kind: "goto"; text: string; at: Loc; radius?: number; inCar?: boolean; vehicle?: CarModel; landed?: boolean; time?: number }
+  | { kind: "catch"; text: string; at: Loc; time?: number }            // a suspect runs away: catch him on foot
+  | { kind: "hide"; text: string; stars: number; time: number }        // stay out of the police's sight this long
   | { kind: "steal"; text: string; model: CarModel; color: string; at: Loc; time?: number }
   | { kind: "deliver"; text: string; at: Loc; model?: CarModel; time?: number }
   | { kind: "destroy"; text: string; model: CarModel; color: string; at: Loc; hp: number; flee: boolean; time?: number }
@@ -27,12 +30,14 @@ export interface MissionDef {
   intro: DialogLine[]; outro: DialogLine[]; steps: Step[];
 }
 
-const KAI = "#ffd23f", LOU = "#2bf0ff", MARISOL = "#ff5ad1", DOCK = "#ff9f43", VALE = "#ff4d4d";
+const KAI = "#ffd23f", LOU = "#2bf0ff", MARISOL = "#ff5ad1", DOCK = "#ff9f43", VALE = "#ff4d4d", INES = "#2bb3ff", RUIZ = "#3d8bff";
 const kai = (text: string): DialogLine => ({ speaker: "Kai", text, color: KAI });
 const lou = (text: string): DialogLine => ({ speaker: "Lou", text, color: LOU });
 const mar = (text: string): DialogLine => ({ speaker: "Marisol", text, color: MARISOL });
 const dock = (text: string): DialogLine => ({ speaker: "Teo (Kai 9)", text, color: DOCK });
 const vale = (text: string): DialogLine => ({ speaker: "Dorian Vale", text, color: VALE });
+const ines = (text: string): DialogLine => ({ speaker: "Ines (Hafenamt)", text, color: INES });
+const ruiz = (text: string): DialogLine => ({ speaker: "Kommissarin Ruiz", text, color: RUIZ });
 
 // story: Kai Romero comes back to Solara Bay; the developer Dorian Vale buys up the bay with gang money
 export const MISSIONS: MissionDef[] = [
@@ -131,6 +136,110 @@ export const MISSIONS: MissionDef[] = [
     ],
     outro: [dock("Vale hat die Stadt verlassen. Die Baupläne liegen bei der Zeitung."), mar("Der Strand bleibt, wie er ist. Danke, Kai."), lou("Und jetzt? Die Stadt gehört dir. Fahr vorsichtig – oder auch nicht."), kai("Solara Bay. Endlich wieder zu Hause.")],
   },
+  // ---------------- chapter 2: Vale's money leaves the city over the water; the police wants him too
+  {
+    id: "m11", title: "Spuren im Wasser", giver: "ines", requires: ["m3"], reward: 900,
+    intro: [ines("Du bist der, der Marisol die Baupläne gebracht hat? Ich bin Ines vom Hafenamt."), ines("Nachts fahren Schnellboote ohne Licht durch die Bucht. Vales Geld, da bin ich sicher."), ines("Am Bootssteg liegt ein Speedboot. Versenk den Schmuggler.")],
+    steps: [
+      { kind: "goto", text: "Steig am Bootssteg ins Speedboot", at: { place: "jetty" }, radius: 9999, vehicle: "boat" },
+      { kind: "destroy", text: "Versenk das Schmugglerboot", model: "boat", color: "#2b2f3a", at: { xy: [-1500, 3200] }, hp: 140, flee: true, time: 150 },
+      { kind: "pickup", text: "Fisch die Kiste aus dem Wasser", at: { last: true } },
+      { kind: "goto", text: "Zurück zum Bootssteg", at: { place: "jetty" }, radius: 120 },
+    ],
+    outro: [ines("Falschgeld und Frachtpapiere mit Vales Firmenstempel."), ines("Damit kann ich arbeiten. Lass das Boot einfach am Steg.")],
+  },
+  {
+    id: "m12", title: "Landung auf dem Turm", giver: "ines", requires: ["m11"], reward: 1400,
+    intro: [ines("Vales Leute holen die Ware vom Dach eines Hochhauses im Zentrum ab – per Hubschrauber."), ines("Am Heliport östlich vom Hafen steht einer. Flieg hin, lande auf dem Dach und schnapp dir die Tasche vor ihnen.")],
+    steps: [
+      { kind: "goto", text: "Steig am Heliport in den Hubschrauber", at: { place: "helipad" }, radius: 9999, vehicle: "heli" },
+      { kind: "goto", text: "Lande auf dem markierten Dach", at: { roof: [5, 4] }, radius: 70, vehicle: "heli", landed: true, time: 120 },
+      { kind: "talk", lines: [kai("Die Tasche ist hier. Und unten fahren schon ihre Autos vor."), ines("Dann nichts wie weg. Flieg zurück zum Heliport.")] },
+      { kind: "goto", text: "Flieg zurück zum Heliport und lande", at: { place: "helipad" }, radius: 110, vehicle: "heli", landed: true },
+    ],
+    outro: [ines("Bankdaten. Vale hat Konten bei Banken, die es gar nicht gibt."), ines("Kommissarin Ruiz will dich treffen. Keine Sorge – sie ist eine von den Guten.")],
+  },
+  {
+    id: "m13", title: "Kein Name, keine Fragen", giver: "ruiz", requires: ["m12"], reward: 1200,
+    intro: [ruiz("Romero. Ich weiß, was du getan hast – und dass es Vale schadet. Deshalb sitzt du nicht in einer Zelle."), ruiz("Einer von Vales Boten verkauft am Markt Informationen. Fang ihn – zu Fuß, ohne Schießerei.")],
+    steps: [
+      { kind: "goto", text: "Fahr zum Markt", at: { node: [4, 6] }, radius: 120 },
+      { kind: "catch", text: "Fang den Boten (berühren oder niederschlagen)", at: { node: [4, 6] }, time: 90 },
+      { kind: "talk", lines: [kai("Der Bote redet. Vale trifft sich morgen mit den Neon Kings."), ruiz("Gute Arbeit. Ich melde mich.")] },
+    ],
+    outro: [ruiz("Offiziell kennen wir uns nicht. Inoffiziell: Danke.")],
+  },
+  {
+    id: "m14", title: "Funkstille", giver: "ruiz", requires: ["m13"], reward: 1800, rep: { kings: -30 },
+    intro: [ruiz("Die Neon Kings haben einen Wagen mit Vales Funkgeräten. Ohne die sind sie blind."), ruiz("Stopp den Wagen und die Leute, die ihn bewachen. Meine Kollegen schauen in der Zeit woanders hin – nicht lange.")],
+    steps: [
+      { kind: "destroy", text: "Zerstör den Funkwagen der Neon Kings", model: "van", color: "#7d3c98", at: { node: [8, 2] }, hp: 260, flee: true, time: 150 },
+      { kind: "kill", text: "Schalte die Wachen aus", at: { last: true }, n: 3, faction: "kings" },
+      { kind: "escape", text: "Werd die Polizei los", stars: 2 },
+    ],
+    outro: [ruiz("Funkstille im Eisenwerk. Perfekt."), ruiz("Aber jetzt sucht Vale dich persönlich. Pass auf.")],
+  },
+  {
+    id: "m15", title: "Versteckspiel", giver: "marisol", requires: ["m10"], reward: 1500,
+    intro: [mar("Kai! Vales Anwalt hat dich angezeigt. Die halbe Polizei sucht dich."), mar("Du kannst nicht ewig fahren. Versteck dich – unter Bäumen, hinter Häusern, in einem geparkten Auto – bis sich die Lage beruhigt.")],
+    steps: [
+      { kind: "hide", text: "Bleib vor der Polizei versteckt", stars: 3, time: 40 },
+      { kind: "goto", text: "Komm ins Café Marisol", at: { place: "marisol" }, radius: 30 },
+    ],
+    outro: [mar("Ruiz hat die Anzeige verschwinden lassen. Du hast mächtige Freunde, Kai.")],
+  },
+  {
+    id: "m16", title: "Hafenrundfahrt", giver: "ines", requires: ["m12"], reward: 1600,
+    intro: [ines("Vales Schmuggler prahlen, niemand fährt die Bucht schneller als sie."), ines("Beweis das Gegenteil: einmal um die Bojen und zurück, im Speedboot.")],
+    steps: [
+      { kind: "goto", text: "Steig am Bootssteg ins Speedboot", at: { place: "jetty" }, radius: 9999, vehicle: "boat" },
+      { kind: "race", text: "Bootsrennen: alle Bojen!", time: 75, points: [{ xy: [-900, 3300] }, { xy: [-1900, 3500] }, { xy: [-2600, 3100] }, { xy: [-2500, 2000] }, { xy: [-1500, 1900] }, { xy: [-700, 2200] }, { xy: [-400, 3300] }] },
+    ],
+    outro: [ines("Die Schmuggler haben's gesehen. Die prahlen nicht mehr.")],
+  },
+  {
+    id: "m17", title: "Die letzte Lieferung", giver: "dock", requires: ["m10"], reward: 2500,
+    intro: [dock("Vale ist weg, aber sein Geld nicht. Ein Transporter bringt heute alles zum Flughafen."), dock("Wenn wir den kriegen, kommt er nie wieder auf die Beine. Das gibt Ärger – richtig Ärger.")],
+    steps: [
+      { kind: "destroy", text: "Zerstör den Geldtransporter", model: "swat", color: "#3a3d45", at: { node: [6, 1] }, hp: 520, flee: true, time: 180 },
+      { kind: "pickup", text: "Schnapp dir die Geldkoffer", at: { last: true } },
+      { kind: "escape", text: "Entkomme der Polizei", stars: 4 },
+      { kind: "deliver", text: "Bring das Geld zu Kai 9", at: { place: "dock", car: true } },
+    ],
+    outro: [dock("Das reicht für neue Dächer im ganzen Hafenviertel."), dock("Aber Vale hat Freunde beim Militär. Hast du die Panzerwagen am Rand der Stadt gesehen?")],
+  },
+  {
+    id: "m18", title: "Doppelspiel", giver: "ruiz", requires: ["m14", "m15"], reward: 2000,
+    intro: [ruiz("Vales Anwalt Brenner will heute die Stadt verlassen – mit allen Akten."), ruiz("Er läuft vom Café zum Bahnhof. Hol ihn dir, bevor er abtaucht.")],
+    steps: [
+      { kind: "goto", text: "Fahr zum Treffpunkt", at: { node: [2, 7] }, radius: 120 },
+      { kind: "catch", text: "Fang Brenner zu Fuß", at: { node: [2, 7] }, time: 80 },
+      { kind: "talk", lines: [vale("(am Telefon) Brenner? Brenner!"), kai("Brenner redet jetzt mit der Polizei, Vale. Wo bist du?"), vale("Da, wo du mich nie findest.")] },
+      { kind: "escape", text: "Werd die Polizei los", stars: 2 },
+    ],
+    outro: [ruiz("Brenner hat ausgepackt. Vale versteckt sich auf seiner Jacht in der Bucht."), ruiz("Ines weiß mehr.")],
+  },
+  {
+    id: "m19", title: "Sperrgebiet", giver: "dock", requires: ["m17"], reward: 3000,
+    intro: [dock("Vale hat sich einen Radpanzer beschafft, um ihn im Hafen zu verstecken."), dock("Der steht im Industriegebiet. Klau ihn, bevor er verschifft wird – und überleb die Antwort.")],
+    steps: [
+      { kind: "steal", text: "Klau den Radpanzer", model: "armor", color: "#4b5320", at: { node: [10, 1] } },
+      { kind: "escape", text: "Schüttel Polizei und Militär ab", stars: 5 },
+      { kind: "deliver", text: "Bring den Radpanzer zu Kai 9", at: { place: "dock", car: true }, model: "armor" },
+    ],
+    outro: [dock("Den kriegt Vale nicht zurück. Jetzt bleibt ihm nur noch das Wasser.")],
+  },
+  {
+    id: "m20", title: "Vales Flucht", giver: "ines", requires: ["m16", "m18", "m19"], reward: 8000, rep: { halcones: 20, kings: 20 },
+    intro: [ines("Vales Jacht hat Anker gelichtet. Er will über die offene Bucht raus."), ines("Nimm das Speedboot. Ruiz' Leute warten auf der anderen Seite – du musst ihn nur stoppen."), kai("Diesmal entkommt er nicht.")],
+    steps: [
+      { kind: "goto", text: "Steig am Bootssteg ins Speedboot", at: { place: "jetty" }, radius: 9999, vehicle: "boat" },
+      { kind: "destroy", text: "Stopp Vales Jacht", model: "boat", color: "#f4f4f6", at: { xy: [-2200, 2300] }, hp: 320, flee: true, time: 200 },
+      { kind: "talk", lines: [vale("Hör auf! Ich ... ich ergebe mich."), ruiz("(über Funk) Wir haben ihn, Romero. Diesmal endgültig."), kai("Dann ist die Bucht frei.")] },
+      { kind: "goto", text: "Zurück zum Safehouse", at: { place: "safehouse" }, radius: 30 },
+    ],
+    outro: [ines("Der Hafen gehört wieder den Leuten, die hier arbeiten."), ruiz("Vale sitzt. Und du, Romero ... bleib sauber. Zumindest ein bisschen."), mar("Komm vorbei, der Kaffee geht aufs Haus. Für immer."), kai("Solara Bay. Jetzt wirklich zu Hause.")],
+  },
 ];
 
 // ---------------------------------------------------------------- runner
@@ -166,9 +275,17 @@ export class Missions {
     }
     if ("node" in l) return { x: l.node[0] * BLOCK + ROAD / 2, y: l.node[1] * BLOCK + ROAD / 2 };
     if ("last" in l) return this.lastPos;
+    if ("roof" in l) {
+      const b = this.g.world.blocks[l.roof[1] * GRID + l.roof[0]];
+      let best = b?.buildings[0];
+      for (const bd of b?.buildings ?? []) if (best && roofOf(bd) > roofOf(best)) best = bd;
+      return best ? { x: best.x + best.w / 2, y: best.y + best.h / 2 } : { x: 0, y: 0 };
+    }
     return { x: l.xy[0], y: l.xy[1] };
   }
   private lastPos = { x: 0, y: 0 };
+  private suspect: Civilian | null = null; // catch steps
+  private hiddenT = 0;                     // hide steps: seconds out of sight
   private spawned = false; // targets of the current step exist (they appear when you get close)
 
   // a contact was visited (E); returns true if something happened
@@ -212,7 +329,8 @@ export class Missions {
     g.banner("MISSION ERFÜLLT", `${m.title} · +$${m.reward.toLocaleString("de-DE")}`, "#3dff8b", 3);
     const pl = g.places.find((p) => p.id === m.giver);
     g.saveSoon();
-    if (m.id === "m10") g.banner("SOLARA BAY", "Story abgeschlossen – die Stadt gehört dir", "#ff3cac", 4);
+    if (m.id === "m10") g.banner("SOLARA BAY", "Kapitel 1 abgeschlossen – neue Aufträge bei Ines und Kommissarin Ruiz", "#ff3cac", 4);
+    if (m.id === "m20") g.banner("SOLARA BAY", "Story abgeschlossen – die Stadt gehört dir", "#ff3cac", 4);
     window.setTimeout(() => { if (g.state === "playing") g.say(m.outro, pl ? { x: pl.x, y: pl.y, a: pl.a } : null); }, 600);
   }
 
@@ -221,13 +339,15 @@ export class Missions {
     this.target = null;
     for (const e of this.enemies) e.tag = "";
     this.enemies = [];
+    if (this.suspect && this.suspect.active) this.suspect.tag = "";
+    this.suspect = null; this.hiddenT = 0;
     this.timer = -1; this.raceI = 0; this.stepStarted = false;
     this.g.objective = ""; this.g.objTimer = -1;
   }
 
   private next() {
     this.stepI++; this.stepStarted = false; this.timer = -1;
-    this.target = null; this.enemies = []; this.raceI = 0;
+    this.target = null; this.enemies = []; this.raceI = 0; this.suspect = null; this.hiddenT = 0;
     sfx.checkpoint();
     if (this.active && this.stepI >= this.active.steps.length) this.complete();
   }
@@ -237,8 +357,9 @@ export class Missions {
     const g = this.g;
     this.stepStarted = true; this.spawned = false;
     this.timer = "time" in s && s.time ? s.time : -1;
-    if (s.kind === "escape") {
+    if (s.kind === "escape" || s.kind === "hide") {
       g.wanted.heat = Math.max(g.wanted.heat, STAR_HEAT[s.stars]); g.wanted.lostT = 0;
+      g.wanted.syncStars(); // otherwise the step would count as escaped before the stars show up
     } else if (s.kind === "talk") {
       g.say(s.lines, { x: g.fx, y: g.fy }, () => this.next());
     }
@@ -247,10 +368,16 @@ export class Missions {
   // cars and enemies appear once the player is close (far away they would be cleaned up again)
   private spawnTargets(s: Step) {
     const g = this.g;
-    if (s.kind !== "steal" && s.kind !== "destroy" && s.kind !== "kill") return;
+    if (s.kind !== "steal" && s.kind !== "destroy" && s.kind !== "kill" && s.kind !== "catch") return;
     const p = this.pos(s.at);
     if (Math.hypot(g.fx - p.x, g.fy - p.y) > 750) return;
     this.spawned = true;
+    if (s.kind === "catch") {
+      const c = g.peds.spawnRole("target", p.x + 75 + 12, p.y + 75 + 12);
+      if (c) { c.tag = "suspect"; c.shirt = "#e8e8ec"; c.pants = "#2b2f3a"; c.hp = c.maxHp = 40; g.peds.panic(c, g.fx, g.fy, 30); }
+      this.suspect = c;
+      return;
+    }
     if (s.kind === "kill") {
       for (let i = 0; i < s.n; i++) {
         const a = (i / s.n) * Math.PI * 2;
@@ -260,8 +387,9 @@ export class Missions {
       return;
     }
     const c = new Car("civ", s.model, s.color);
-    c.x = p.x + 10; c.y = p.y + 34; c.a = 0; c.z = terrainH(c.x, c.y);
-    c.hp = c.maxHp = s.kind === "destroy" ? s.hp : 120; c.mass = s.model === "swat" ? 2 : 1.2;
+    const boat = s.model === "boat";
+    c.x = boat ? p.x : p.x + 10; c.y = boat ? p.y : p.y + 34; c.a = 0; c.z = boat ? WATER_Y : terrainH(c.x, c.y);
+    c.hp = c.maxHp = s.kind === "destroy" ? s.hp : s.model === "armor" ? 600 : 120; c.mass = s.model === "swat" ? 2 : s.model === "armor" ? 4 : 1.2;
     c.tag = s.kind === "steal" ? "steal" : "target"; c.keep = true;
     if (s.kind === "destroy") { c.flee = s.flee; c.driver = true; c.cruise = 250; c.route = false; }
     else { c.parked = true; c.handbrake = true; }
@@ -292,8 +420,31 @@ export class Missions {
     switch (s.kind) {
       case "goto": {
         const p = this.pos(s.at), r = s.radius ?? 40;
-        if (r < 9000) this.markers.push({ x: p.x, y: p.y, color: GOAL, kind: "goal", label: "" });
-        if ((!s.inCar || inCar) && Math.hypot(fx - p.x, fy - p.y) < r) this.next();
+        if (r < 9000 || s.vehicle) this.markers.push({ x: p.x, y: p.y, color: GOAL, kind: "goal", label: "" });
+        const rightVehicle = !s.vehicle || (inCar && g.player.model === s.vehicle);
+        const down = !s.landed || (inCar && g.player.z <= g.groundAt(g.player.x, g.player.y) + 2 && g.player.speed < 60);
+        if (s.landed && rightVehicle && !down && Math.hypot(fx - p.x, fy - p.y) < r) g.objective = `${s.text} (Shift / RUNTER zum Landen)`;
+        if ((!s.inCar || inCar) && rightVehicle && down && Math.hypot(fx - p.x, fy - p.y) < r) this.next();
+        break;
+      }
+      case "catch": {
+        if (!this.spawned) this.spawnTargets(s);
+        const c = this.suspect;
+        if (!c) { const p = this.pos(s.at); this.markers.push({ x: p.x, y: p.y, color: "#ffd23f", kind: "enemy", label: "" }); break; }
+        if (!c.active) { this.fail("Er ist entkommen"); return; }
+        this.markers.push({ x: c.x, y: c.y, color: "#ffd23f", kind: "enemy", label: "" });
+        const d = Math.hypot(c.x - fx, c.y - fy);
+        if (c.state !== "down" && c.state !== "flee") g.peds.panic(c, fx, fy, 30); // keeps running
+        if (!g.onFoot) g.objective = `${s.text} – steig aus!`;
+        if (c.state === "down" || (g.onFoot && d < 20)) { c.active = false; c.tag = ""; this.suspect = null; g.banner("GESCHNAPPT", "", "#3d8bff", 1.2); this.next(); break; }
+        if (d > 1400) { this.fail("Er ist entkommen"); return; }
+        break;
+      }
+      case "hide": {
+        // the police looks for you: every second out of their sight counts
+        if (!g.police.seen) this.hiddenT += dt;
+        g.objective = `${s.text}: ${Math.floor(this.hiddenT)}/${s.time} s`;
+        if (this.hiddenT >= s.time || g.wanted.stars === 0) { g.wanted.clear(); this.next(); }
         break;
       }
       case "steal": {

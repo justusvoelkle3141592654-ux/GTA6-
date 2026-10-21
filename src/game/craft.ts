@@ -11,6 +11,7 @@ const SPOT_FREE = 300;                    // ... and none of its kind is closer 
 export const HELI_CEIL = 900;             // highest flying altitude
 const HELI_CLIMB = 230, HELI_TURN = 1.9, HELI_LAND_HIT = 260;
 const SINK_TIME = 1.1;                    // seconds until a car in the water is lost
+const FLEE_TRY = [0, 0.5, -0.5, 1, -1, 1.6, -1.6, 2.3, -2.3, 3.1];
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
@@ -50,14 +51,14 @@ export class Craft {
     const wet = isWater(c.x, c.y);
     const ca = Math.cos(c.a), sa = Math.sin(c.a);
     let vF = c.vx * ca + c.vy * sa, vR = -c.vx * sa + c.vy * ca;
-    const t = wet ? c.throttle : c.throttle * 0.15; // beached: you can only wiggle back into the water
+    const t = wet ? c.throttle : c.throttle * 0.35; // beached: you can only wiggle back into the water
     if (t > 0 && vF < maxV) vF += acc * t * dt;
     else if (t < 0) vF += (vF > 0 ? -700 : -acc * 0.45) * -t * dt;
     vF -= vF * (wet ? 0.35 : 4) * dt;
     if (vF < -maxV * 0.35) vF = -maxV * 0.35;
     vR *= Math.exp(-(c.handbrake ? 0.7 : wet ? 2.4 : 6) * dt);
     const sp = Math.abs(vF), dir = vF >= -5 ? 1 : -1;
-    c.av += (c.steer * 2.1 * Math.min(1, sp / 140) * dir * (c.handbrake ? 1.4 : 1) - c.av) * Math.min(1, dt * 6);
+    c.av += (c.steer * 2.1 * Math.max(0.35, Math.min(1, sp / 140)) * dir * (c.handbrake ? 1.4 : 1) - c.av) * Math.min(1, dt * 6); // turns slowly even when almost standing
     c.a += c.av * dt;
     c.vx = ca * vF - sa * vR; c.vy = sa * vF + ca * vR;
     c.x += c.vx * dt; c.y += c.vy * dt;
@@ -76,6 +77,28 @@ export class Craft {
     steerTo(c, g.fx + g.fvx * lead, g.fy + g.fvy * lead);
     const d = Math.hypot(g.fx - c.x, g.fy - c.y);
     c.throttle = d > 90 ? 1 : 0.2;
+    c.handbrake = false;
+  }
+
+  // mission boat on the run: away from you, but it keeps to the water
+  fleeBoat(c: Car) {
+    const g = this.g;
+    const away = Math.atan2(c.y - g.fy, c.x - g.fx);
+    let best = c.a;
+    for (const off of FLEE_TRY) {
+      const a = away + off;
+      if (isWater(c.x + Math.cos(a) * 260, c.y + Math.sin(a) * 260) && isWater(c.x + Math.cos(a) * 130, c.y + Math.sin(a) * 130)) { best = a; break; }
+    }
+    if (!isWater(c.x, c.y)) {
+      // ran aground: the crew pushes it back into the water
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2;
+        if (isWater(c.x + Math.cos(a) * 70, c.y + Math.sin(a) * 70)) { c.vx = Math.cos(a) * 90; c.vy = Math.sin(a) * 90; c.a = a; break; }
+      }
+      c.throttle = 0; return;
+    }
+    const diff = steerTo(c, c.x + Math.cos(best) * 100, c.y + Math.sin(best) * 100);
+    c.throttle = Math.abs(diff) > 1.4 ? 0.3 : 1; // a sharp turn: slow down so it can come round
     c.handbrake = false;
   }
 

@@ -401,7 +401,7 @@ export class PedSystem {
       if (c.role === "gang" && c.state === "idle" && c.faction && h.gangHostile(c.faction) && dist < 320) { c.state = "attack"; c.t = 0; }
       if (c.target >= 0) { const o = this.list[c.target]; if (!o.active || o.state === "down") c.target = -1; }
       // a gang member that is not angry at you (any more) calms down
-      if (c.role === "gang" && c.state === "attack" && c.target < 0 && c.faction && !h.gangHostile(c.faction) && c.t > 4) { c.state = "idle"; c.t = 0; }
+      if (c.role === "gang" && !c.tag && c.state === "attack" && c.target < 0 && c.faction && !h.gangHostile(c.faction) && c.t > 4) { c.state = "idle"; c.t = 0; }
       // gangs shoot at police in their turf (checked about once a second)
       if (c.role === "gang" && c.target < 0 && (c.state === "idle" || c.state === "attack") && Math.random() < dt) {
         const o = this.findOpponent(c);

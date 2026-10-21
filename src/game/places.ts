@@ -33,6 +33,8 @@ export const PLACE_DEFS: PlaceDef[] = [
   { id: "lou", kind: "contact", name: "Lous Werkstatt", color: "#ff5ad1", icon: "L", near: [3, 3], access: "foot" },
   { id: "marisol", kind: "contact", name: "Café Marisol", color: "#ff5ad1", icon: "M", near: [1, 7], access: "foot" },
   { id: "dock", kind: "contact", name: "Kai 9", color: "#ff5ad1", icon: "D", near: [9, 8], access: "foot" },
+  { id: "ines", kind: "contact", name: "Hafenamt", color: "#ff5ad1", icon: "A", near: [0, 5], access: "foot" },
+  { id: "ruiz", kind: "contact", name: "Kommissarin Ruiz", color: "#ff5ad1", icon: "R", near: [8, 4], access: "foot" },
   // vehicles: a speedboat at the jetty, a helicopter on the pad (always there again when you come back)
   // hide and seek in the park
   { id: "hide", kind: "park", name: "Versteckspiel im Park", color: "#3dff8b", icon: "V", near: [6, 7], access: "foot", inPark: true },
