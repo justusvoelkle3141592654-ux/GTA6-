@@ -15,6 +15,7 @@ import WeaponWheel from "./components/WeaponWheel";
 import StartScreen from "./components/StartScreen";
 import GameOver, { DIFF_LABEL } from "./components/GameOver";
 import PauseMenu, { type PauseTab } from "./components/PauseMenu";
+import Phone, { IncomingCall } from "./components/Phone";
 import { Overlay, ammoText } from "./components/ui";
 import { loadSettings, applySettings } from "./game/settings";
 
@@ -102,6 +103,7 @@ export default function App() {
       }, cfgRef.current);
     } catch (e) { console.error(e); setGlError(true); return null; }
     gameRef.current = game;
+    game.openJobs = () => { game.pause(); setPauseTab("jobs"); };
     if (import.meta.env.DEV) (window as unknown as { game?: Game }).game = game; // debugging / automated tests
     setTouchInput(game.touch);
     return game;
@@ -134,7 +136,7 @@ export default function App() {
   const toggleMute = () => { const m = !muted; setMuted(m); sfx.setMuted(m); };
   const cycleCam = () => gameRef.current?.cycleCamera();
 
-  useEffect(() => { if (state !== "paused") setPauseTab("menu"); }, [state]);
+  useEffect(() => { if (state !== "paused" && state !== "playing") setPauseTab("menu"); }, [state]);
 
   const g = gameRef.current;
   const playing = state === "playing";
@@ -159,7 +161,7 @@ export default function App() {
 
       {(playing || state === "paused") && g && (
         <Hud hud={hud} isTouch={isTouch} rules={rules} camera={config.camera} onPause={() => g.pause()} onCam={cycleCam} onToggleCar={() => g.toggleCar()}
-          onInteract={() => g.interact()} onRadio={() => g.cycleRadio()} onJob={() => g.toggleJob()} onDetonate={() => g.detonate()} onWeapon={(w) => g.setWeapon(w)} onWheel={() => g.openModal({ kind: "wheel" })} />
+          onInteract={() => g.interact()} onRadio={() => g.cycleRadio()} onJob={() => g.toggleJob()} onPhone={() => g.openModal({ kind: "phone" })} onDetonate={() => g.detonate()} onWeapon={(w) => g.setWeapon(w)} onWheel={() => g.openModal({ kind: "wheel" })} />
       )}
       {playing && isTouch && touchInput && g && (
         <TouchControls input={touchInput} nitro01={hud.nitro01} flying={hud.alt >= 0} relative={config.camera !== "top"} onFoot={hud.onFoot} weapon={hud.weapon} ammo={hud.reloading ? "…" : ammoText(hud.ammo, hud.reserve)} bombsPlaced={hud.bombsPlaced}
@@ -168,6 +170,8 @@ export default function App() {
 
       {state === "modal" && g && modal?.kind === "shop" && <ShopMenu key={modal.place.id} game={g} place={modal.place} onClose={() => g.closeModal()} />}
       {state === "modal" && g && modal?.kind === "dialog" && <DialogBox d={modal} isTouch={isTouch} onNext={() => g.dialogNext()} />}
+      {state === "modal" && g && modal?.kind === "phone" && <Phone game={g} onClose={() => g.closeModal()} />}
+      {state === "modal" && g && modal?.kind === "call" && <IncomingCall game={g} from={modal.from} text={modal.text} job={modal.job} onClose={() => { /* closed by the game */ }} />}
       {state === "modal" && g && modal?.kind === "wheel" && <WeaponWheel owned={g.inv.owned} current={g.inv.current} onPick={(w) => { g.setWeapon(w); g.closeModal(); }} onClose={() => g.closeModal()} />}
 
       {state === "menu" && !glError && (

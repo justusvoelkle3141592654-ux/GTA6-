@@ -2,7 +2,7 @@ import { sfx } from "./audio";
 import { Car, MODEL_NAME, MODEL_STATS, isCraft } from "./vehicles";
 import { WEAPON_DEFS } from "./weapons";
 import { terrainH } from "./world";
-import { GARAGE_SLOTS, MAX_TUNE, PAINTS, TUNE_DEFS, tuneHp } from "./garage";
+import { MAX_TUNE, PAINTS, TUNE_DEFS, tuneHp } from "./garage";
 import { AMMO_FOR_SALE, ARMOR_PRICE, FOOD, GUNS_FOR_SALE, OUTFITS, PAINT_PRICE, REPAIR_PER_HP, ROB_COOLDOWN, ROB_HEAT, ROB_REWARD, TYRE_PRICE, type ShopAction } from "./economy";
 import { MAX_ARMOR, newPed, type Game, type ShopView } from "./engine";
 
@@ -26,7 +26,7 @@ export class Shops {
       weapons: GUNS_FOR_SALE.map((w) => ({ w, owned: g.inv.has(w), total: g.inv.total(w), canAmmo: AMMO_FOR_SALE.includes(w) })),
       car: inCar ? { name: MODEL_NAME[p.model], hp: p.hp, maxHp: p.maxHp, color: p.color, tune: { ...p.tune }, repair: Math.ceil(Math.max(0, p.maxHp - p.hp) * REPAIR_PER_HP) + (p.flat ? TYRE_PRICE : 0), flat: p.flat } : null,
       garage: g.garage.map((c) => ({ name: MODEL_NAME[c.model], color: c.color, tune: { ...c.tune }, value: Math.round(MODEL_STATS[c.model].price * 0.6) })),
-      slots: GARAGE_SLOTS,
+      slots: g.garageSlots,
       bank: g.bank,
       robWait: pl ? Math.max(0, Math.ceil(ROB_COOLDOWN - (g.time - (this.robbedAt.get(pl.id) ?? -1e9)))) : 0,
     };
@@ -117,7 +117,7 @@ export class Shops {
       }
       case "store": {
         if (g.onFoot || g.playerCarStored || !pl) return "Fahr mit dem Auto in die Garage";
-        if (g.garage.length >= GARAGE_SLOTS) return "Garage ist voll";
+        if (g.garage.length >= g.garageSlots) return "Garage ist voll";
         if (p.tag) return "Den Wagen brauchst du noch für den Auftrag";
         if (isCraft(p.model)) return "Das passt nicht in die Garage";
         g.garage.push({ model: p.model, color: p.color, hp: p.hp, maxHp: p.maxHp, mass: p.mass, tune: { ...p.tune } });

@@ -5,7 +5,7 @@ import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, CRIMES, type Crime } from "./wanted";
 import { buildPlaces, onJetty, respawnCost, RESPAWN_RULES, type Place } from "./places";
 import { PedSystem, PED_LIMIT, isPolice, type Civilian, type Team } from "./peds";
-import { Car, CARS, MODEL_STATS, isCraft, type CarDef, type FactionId } from "./vehicles";
+import { Car, CARS, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, type CarDef, type FactionId } from "./vehicles";
 import { Inventory, WEAPONS, type Weapon } from "./weapons";
 import { AUTOSAVE_EVERY, SAVE_VERSION, emptyProgress, emptyStats, writeSave, type Progress, type SaveData, type SaveResult, type SaveStats } from "./save";
 import { Traffic, PARKED_LIMIT } from "./traffic";
@@ -16,7 +16,7 @@ import type { ShopAction } from "./economy";
 import { PLACE_RADIUS } from "./places";
 import { Bindings } from "./input";
 import { Missions } from "./missions";
-import { Jobs } from "./jobs";
+import { Jobs, JOB_DEFS, JOB_KINDS, type JobKind } from "./jobs";
 import { currentSettings } from "./settings";
 import { findRoute, MAX_ROUTE } from "./route";
 import { Tips } from "./tips";
@@ -24,7 +24,7 @@ import { Police } from "./police";
 import { Shops } from "./shops";
 import { Gangs } from "./gangs";
 import { Craft } from "./craft";
-import { HideSeek, HIDE_RADIUS } from "./hide";
+import { HideSeek, SPOT_NAME } from "./hide";
 import { Spawner } from "./spawner";
 
 export type GameState = "menu" | "playing" | "paused" | "over" | "modal";
@@ -32,7 +32,9 @@ export type GameState = "menu" | "playing" | "paused" | "over" | "modal";
 export type ModalInfo =
   | { kind: "shop"; place: Place }
   | { kind: "dialog"; speaker: string; text: string; color: string; index: number; count: number }
-  | { kind: "wheel" };
+  | { kind: "wheel" }
+  | { kind: "phone" }
+  | { kind: "call"; from: string; text: string; job: string };
 export interface DialogLine { speaker: string; text: string; color: string; }
 
 // what the shop overlay shows
@@ -162,6 +164,34 @@ export class Game {
   slowT = 0; // slow motion after detonating bombs (game seconds)
 
   // open world
+  clock = 9;                    // time of day in hours (0..24)
+  get isNight() { return this.clock < 6 || this.clock >= 20; }
+  messages: { from: string; text: string; time: number }[] = []; // the phone's messages
+  addMessage(from: string, text: string) { this.messages.unshift({ from, text, time: this.clock }); if (this.messages.length > 30) this.messages.pop(); }
+  openJobs: (() => void) | null = null; // the UI opens the job menu
+  get garageSlots() { return GARAGE_SLOTS + this.progress.unlocks.filter((u) => u.startsWith("slot:")).length; }
+  // job calls: now and then a client calls with a special offer (not during missions, at most every 5 minutes)
+  private callT = 240; private callOffer: { job: JobKind } | null = null;
+  private updateCalls(dt: number) {
+    if (this.missions.active || this.hide.active || this.jobs.active || this.wanted.stars > 0 || this.state !== "playing") return;
+    this.callT -= dt;
+    if (this.callT > 0) return;
+    this.callT = 300 + Math.random() * 240;
+    const kinds = JOB_KINDS.filter((k) => !this.jobs.blocked(k));
+    if (!kinds.length) return;
+    const job = kinds[Math.floor(Math.random() * kinds.length)];
+    const from = ["Marta (Taxizentrale)", "Herr Ödemir", "Spedition Küstenblick", "Kommissariat Mitte", "Leitstelle", "Hotel Solara"][Math.floor(Math.random() * 6)];
+    this.callOffer = { job };
+    sfx.phone();
+    this.openModal({ kind: "call", from, text: `Kannst du einspringen? Ich brauche jemanden für ${JOB_DEFS[job].name}. Ich leg 50 % drauf.`, job });
+  }
+  acceptCall() {
+    const o = this.callOffer;
+    this.callOffer = null;
+    this.closeModal();
+    if (o) { const m = this.jobs.accept(o.job); this.jobs.bonus = 1.5; this.addMessage("Auftrag", `${JOB_DEFS[o.job].name} mit Bonus: ${m}`); }
+  }
+  declineCall() { this.callOffer = null; this.closeModal(); }
   outfit = 0;
   garage: OwnedCar[] = [];
   district: DistrictId = "downtown"; districtT = 0; // name is shown big for a moment after entering
@@ -274,6 +304,7 @@ export class Game {
     if (b.is("radio", k)) this.cycleRadio();
     if (b.is("detonate", k)) this.detonate();
     if (b.is("job", k)) this.toggleJob();
+    if (b.is("phone", k) && this.rules.city) this.openModal({ kind: "phone" });
   };
   private onKeyUp = (e: KeyboardEvent) => {
     this.keys.delete(e.code);
@@ -681,7 +712,7 @@ export class Game {
     this.hide.stop(reason === "dead" ? "Erledigt" : "Verhaftet");
     this.police.reset(); this.pendingHeat = 0; this.pendingT = 0;
     for (const c of this.peds.list) if (c.active && isPolice(c.role)) c.active = false;
-    this.jobs.stop(reason === "dead" ? "Erledigt" : "Verhaftet");
+    this.jobs.stop(reason === "dead" ? "Erledigt" : "Verhaftet"); this.jobs.cancelDelivery();
     this.jobs.race = null; this.objective = ""; this.objTimer = -1;
     const place = this.places.find((pl) => pl.kind === rule.place);
     const cost = respawnCost(rule, this.cash);
@@ -712,7 +743,7 @@ export class Game {
     const p = this.player;
     if (this.playerCarStored) return;
     if (!p.dead) {
-      if (p.keep && this.garage.length < GARAGE_SLOTS) this.garage.push({ model: p.model, color: p.color, hp: p.hp, maxHp: p.maxHp, mass: p.mass, tune: { ...p.tune } });
+      if (p.keep && this.garage.length < this.garageSlots) this.garage.push({ model: p.model, color: p.color, hp: p.hp, maxHp: p.maxHp, mass: p.mass, tune: { ...p.tune } });
       else if (!isCraft(p.model)) {
         const old = new Car("civ", p.model, p.color);
         old.x = p.x; old.y = p.y; old.z = p.z; old.a = p.a;
@@ -767,11 +798,12 @@ export class Game {
 
   private fire() {
     if (this.fireCd > 0 || this.ending || this.state !== "playing") return;
+    if (this.jobs.waterCannon) { this.jobs.spray(0.05); this.fireCd = 0.05; return; } // fire truck: water instead of bullets
     const onFoot = this.onFoot;
     const p = this.player;
     const d = this.inv.def, w = d.id;
     if (onFoot && this.ped.swim) { this.fireCd = 0.5; this.setHint("Beim Schwimmen kannst du nicht kämpfen", 1.2); return; }
-    if (!onFoot && p.model === "heli" && d.kind !== "gun") { this.fireCd = 0.5; this.setHint("Aus dem Hubschrauber nur mit Schusswaffen", 1.2); return; }
+    if (!onFoot && isHeli(p.model) && d.kind !== "gun") { this.fireCd = 0.5; this.setHint("Aus dem Hubschrauber nur mit Schusswaffen", 1.2); return; }
     if (d.kind === "melee") {
       if (!onFoot) { this.fireCd = 0.5; this.setHint("Nahkampf geht nur zu Fuß – wähl eine Schusswaffe (Q)", 1.4); return; }
       this.melee();
@@ -804,6 +836,7 @@ export class Game {
     if (d.noise > 0) this.peds.alarm(ox, oy, d.noise, "shot");
     if (d.crime) this.crime(d.crime);
     if (d.kind === "gun") {
+      this.jobs.onShot();
       for (let i = 0; i < d.pellets; i++) {
         const aa = a + rnd(-d.spread, d.spread);
         this.addProj("bullet", "player", "player", -1, d.dmg, ox, oy, oz, Math.cos(aa) * speed * rnd(0.92, 1) + bvx * 0.3, Math.sin(aa) * speed * rnd(0.92, 1) + bvy * 0.3, 0, aa, d.range);
@@ -1002,6 +1035,7 @@ export class Game {
   }
   closeModal() {
     if (this.state !== "modal") return;
+    if (this.modal?.kind === "call") this.callOffer = null;
     this.modal = null;
     this.r3d.cinematic = null;
     this.setState("playing");
@@ -1053,6 +1087,8 @@ export class Game {
 
   // E on foot: enter the shop / talk to the contact in front of you
   interact(): boolean {
+    if (this.hide.interact()) return true;
+    if (this.jobs.interact()) return true;
     const pl = this.nearPlace;
     if (!pl || !this.onFoot) return false;
     if (pl.kind === "contact") return this.onContact?.(pl) ?? false;
@@ -1082,7 +1118,7 @@ export class Game {
     if (this.state !== "playing" || this.ending) return;
     if (!this.onFoot) {
       const p = this.player;
-      if (p.model === "heli" && p.z > this.groundAt(p.x, p.y) + 6) { this.setHint("Erst landen – dann aussteigen", 1.4); return; }
+      if (isHeli(p.model) && p.z > this.groundAt(p.x, p.y) + 6) { this.setHint("Erst landen – dann aussteigen", 1.4); return; }
       if (p.speed > 220) { this.setHint("Zu schnell zum Aussteigen – erst bremsen!", 1.2); return; }
       this.exitCar();
     } else {
@@ -1108,16 +1144,25 @@ export class Game {
     let x = p.x + sa * 30, y = p.y - ca * 30;
     if (this.world.isSolid(x, y, 8)) { x = p.x - sa * 30; y = p.y + ca * 30; }
     const pd = this.ped;
-    pd.x = x; pd.y = y; pd.z = Math.max(terrainH(x, y), p.model === "heli" ? p.z : -Infinity); pd.a = p.a; pd.vx = p.vx * 0.3; pd.vy = p.vy * 0.3; pd.dead = false;
+    pd.x = x; pd.y = y; pd.z = Math.max(terrainH(x, y), isHeli(p.model) ? p.z : -Infinity); pd.a = p.a; pd.vx = p.vx * 0.3; pd.vy = p.vy * 0.3; pd.dead = false;
     this.onFoot = true;
     p.throttle = 0; p.steer = 0; p.handbrake = true; p.nitro = false;
     sfx.door();
     this.setHint("E / 🚗 zum Einsteigen", 2);
   }
 
+  // hide and seek "bring me there": fade, the player stands there on foot (a car stays where it was)
+  teleportOnFoot(x: number, y: number) {
+    if (!this.onFoot) { const p = this.player; p.vx = 0; p.vy = 0; this.exitCar(); }
+    const pd = this.ped;
+    pd.x = x; pd.y = y; pd.z = this.groundH(x, y, 0); pd.vx = 0; pd.vy = 0; pd.air = false;
+    this.fade = 1; // fades in again (updateFall)
+    this.r3d.resetCamera(this.r3d.camYaw);
+  }
+
   // sandbox menu: get into a vehicle that was just put next to you (from the car you sit in, or on foot)
   takeVehicle(c: Car) {
-    if (!this.onFoot) { const p = this.player; p.vx = 0; p.vy = 0; if (p.model !== "heli" || p.z <= this.groundAt(p.x, p.y) + 6) this.exitCar(); else return; }
+    if (!this.onFoot) { const p = this.player; p.vx = 0; p.vy = 0; if (!isHeli(p.model) || p.z <= this.groundAt(p.x, p.y) + 6) this.exitCar(); else return; }
     this.ped.x = c.x; this.ped.y = c.y;
     this.enterCar(c);
   }
@@ -1164,8 +1209,8 @@ export class Game {
     p.handbrake = false; p.parked = false;
     sfx.door();
     const b = this.bind;
-    if (p.model === "heli") this.setHint(this.mobile ? "Hubschrauber: HOCH steigen · RUNTER sinken" : `Hubschrauber: ${b.label("handbrake")} steigen · ${b.label("nitro")} sinken · ${b.label("up")}/${b.label("down")} vor/zurück · ${b.label("left")}/${b.label("right")} drehen`, 5);
-    else if (p.model === "boat") this.setHint("Speedboot: fährt nur auf dem Wasser – Nitro geht auch hier", 3);
+    if (isHeli(p.model)) this.setHint(this.mobile ? "Hubschrauber: HOCH steigen · RUNTER sinken" : `Hubschrauber: ${b.label("handbrake")} steigen · ${b.label("nitro")} sinken · ${b.label("up")}/${b.label("down")} vor/zurück · ${b.label("left")}/${b.label("right")} drehen`, 5);
+    else if (isBoat(p.model)) this.setHint(`${MODEL_NAME[p.model]}: fährt nur auf dem Wasser – Nitro geht auch hier`, 3);
   }
 
   // ---------- loop ----------
@@ -1217,13 +1262,23 @@ export class Game {
       canEnter: this.onFoot && !!this.nearestEnterable(), hint: this.hintT > 0 ? this.hint : "", air: !this.onFoot && p.air && p.airT > 0.25 && !isCraft(p.model),
       armor01: this.ped.armor / MAX_ARMOR,
       district: this.rules.city ? dist.name : "", districtColor: this.districtT > 0 ? dist.color : "",
-      place: this.nearPlace && this.nearPlace.kind !== "contact" ? this.nearPlace.name : this.nearPlace ? this.contactLabel(this.nearPlace) : "",
+      place: this.actionLabel(),
       radio: !this.onFoot && st ? st.name : "",
       objective: this.objective, objTimer: this.objTimer,
-      job: this.jobs.active ? "beenden" : "",
-      alt: !this.onFoot && p.model === "heli" && !p.dead ? Math.max(0, Math.round((p.z - this.groundAt(p.x, p.y)) * 0.1)) : -1,
+      job: this.jobs.active ? "beenden" : "jobs",
+      alt: !this.onFoot && isHeli(p.model) && !p.dead ? Math.max(0, Math.round((p.z - this.groundAt(p.x, p.y)) * 0.1)) : -1,
       swim: this.onFoot && this.ped.swim,
     };
+  }
+  // what E does right now (shown as a button)
+  private actionLabel(): string {
+    if (this.hide.hiddenIn) return "Versteck verlassen";
+    const sp = this.hide.nearSpot();
+    if (sp) return `Verstecken: ${SPOT_NAME[sp.kind]}`;
+    const a = this.jobs.active;
+    if (a?.kind === "trash" && this.onFoot && !a.carrying && a.bins.some((b) => !b.done && Math.hypot(b.x - this.fx, b.y - this.fy) < 26)) return "Mülltonne nehmen";
+    const pl = this.nearPlace;
+    return pl && pl.kind !== "contact" ? pl.name : pl ? this.contactLabel(pl) : "";
   }
   // mission system sets these
   objective = ""; objTimer = -1;
@@ -1275,7 +1330,7 @@ export class Game {
       else if (this.config.camera !== "top") { p.steer = clamp(jx * 1.5, -1, 1); p.throttle = jy < -0.25 ? 1 : jy > 0.55 ? -1 : 0.85; }
       else { const diff = wrap(Math.atan2(jy, jx) - p.a); p.steer = clamp(diff * 2.6, -1, 1); p.throttle = m * (Math.abs(diff) > 1.9 ? 0.55 : 1); }
     } else { p.throttle = 0; p.steer = 0; }
-    if (p.model === "heli") {
+    if (isHeli(p.model)) {
       // helicopter: Space / DRIFT climbs, Shift / NITRO descends (no nitro, no handbrake)
       this.lift = (p.handbrake ? 1 : 0) - (wantNitro ? 1 : 0);
       p.handbrake = false; p.nitro = false; this.nitroWasOn = false;
@@ -1371,7 +1426,7 @@ export class Game {
       const wnx = nxl * ca - nyl * sa, wny = nxl * sa + nyl * ca;
       const push = 9 - d;
       // a stranded boat close to the water can be pushed back in
-      if (c.model === "boat" && !isWater(c.x, c.y) && (isWater(c.x - wnx * 60, c.y - wny * 60) || isWater(c.x - wnx * 30, c.y - wny * 30))) {
+      if (isBoat(c.model) && !isWater(c.x, c.y) && (isWater(c.x - wnx * 60, c.y - wny * 60) || isWater(c.x - wnx * 30, c.y - wny * 30))) {
         c.x -= wnx * push * 0.7; c.y -= wny * push * 0.7; pd.x += wnx * push * 0.3; pd.y += wny * push * 0.3;
         continue;
       }
@@ -1400,7 +1455,7 @@ export class Game {
     if (this.fall || this.ending) return;
     const fx = this.fx, fy = this.fy, e = edgeDist(fx, fy);
     const p = this.player;
-    const craft = !this.onFoot && (p.model === "boat" || p.model === "heli");
+    const craft = !this.onFoot && (isBoat(p.model) || isHeli(p.model));
     if (!craft && e < EDGE_LAND + 600 && terrainH(fx, fy) < WATER_Y - 30 && this.fz > WATER_Y + 4 && (this.onFoot ? this.ped.air : p.air)) { this.startFall(true); return; }
     if (!craft && isEdgeSea(fx, fy) && this.fz <= WATER_Y + 2) { this.startFall(false); return; }
     // soft border: current on the water, head wind in the air
@@ -1412,9 +1467,9 @@ export class Game {
       if (this.onFoot) { this.ped.vx += nx * k; this.ped.vy += ny * k; }
       else {
         p.vx += nx * k; p.vy += ny * k;
-        if (p.model === "heli") p.av += wrap(Math.atan2(ny, nx) - p.a) * dt * 0.8; // the wind turns it back
+        if (isHeli(p.model)) p.av += wrap(Math.atan2(ny, nx) - p.a) * dt * 0.8; // the wind turns it back
       }
-      if (this.hintT <= 0) this.setHint(p.model === "heli" && !this.onFoot ? "Starker Gegenwind – hier ist die Welt zu Ende" : "Hier ist die Bucht zu Ende – die Strömung treibt dich zurück", 2);
+      if (this.hintT <= 0) this.setHint(isHeli(p.model) && !this.onFoot ? "Starker Gegenwind – hier ist die Welt zu Ende" : "Hier ist die Bucht zu Ende – die Strömung treibt dich zurück", 2);
     }
   }
   // per frame (real time): slow motion, fade, then back on a safe street
@@ -1461,6 +1516,7 @@ export class Game {
 
     if (playing && !this.ending) {
       this.time += dt;
+      this.clock = (this.clock + (dt * 24) / (Math.max(1, currentSettings.dayMinutes) * 60)) % 24;
       if (this.onFoot) { this.readPedInput(dt); p.throttle = 0; p.steer = 0; p.handbrake = true; p.nitro = false; }
       else this.readCarInput();
       if ((this.fireHeld || this.touch.fire || this.bind.held("fire", this.keys)) && this.fireCd <= 0) this.fire();
@@ -1470,25 +1526,26 @@ export class Game {
     } else { this.traffic.civAI(this, p, dt); p.nitro = false; }
 
     // nitro burns while boosting and refills slowly (pickups refill faster)
-    if (p.nitro && !this.onFoot && p.model !== "heli") { this.nitro = Math.max(0, this.nitro - dt * NITRO_DRAIN); if (this.nitro <= 0) p.nitro = false; }
+    if (p.nitro && !this.onFoot && !isHeli(p.model)) { this.nitro = Math.max(0, this.nitro - dt * NITRO_DRAIN); if (this.nitro <= 0) p.nitro = false; }
     else this.nitro = Math.min(1, this.nitro + dt * NITRO_REGEN);
 
     for (const c of this.cars) {
       if (c === p) continue;
       if (c.dead || c.parked || (c.kind === "civ" && c.wrecked)) { c.throttle = 0; c.steer = 0; c.handbrake = true; continue; }
-      if (c.model === "boat" || c.model === "heli") { if (c.kind === "cop") { c.calm = this.wanted.stars === 0; if (c.calm) { c.throttle = 0; c.steer = 0; } else this.craft.boatAI(c); } else if (c.model === "boat" && c.flee && c.driver) this.craft.fleeBoat(c); else { c.throttle = 0; c.steer = 0; } }
+      if (isBoat(c.model) || isHeli(c.model)) { if (c.kind === "cop") { c.calm = this.wanted.stars === 0; if (c.calm) { c.throttle = 0; c.steer = 0; } else this.craft.boatAI(c); } else if (isBoat(c.model) && c.flee && c.driver) this.craft.fleeBoat(c); else { c.throttle = 0; c.steer = 0; } }
       else if (c.kind === "cop") {
         c.calm = this.wanted.stars === 0;
         if (c.calm) this.traffic.patrol(this, c, dt); else this.police.copAI(c, dt);
-      } else if (!this.gangs.carAI(c, dt)) this.traffic.patrol(this, c, dt); // sets up a route first if the car has none
+      } else if (this.jobs.racerAI(c)) { /* street race opponents */ }
+      else if (!this.gangs.carAI(c, dt)) this.traffic.patrol(this, c, dt); // sets up a route first if the car has none
     }
 
     const def = this.carDef;
     for (const c of this.cars) {
       const grass = this.onGrass(c.x, c.y);
-      if (c.model === "heli" && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.fly(c, dt, mine ? this.lift : -1, mine); this.collideWorld(c); continue; }
-      if (c.model === "boat" && !c.dead) {
-        const st = MODEL_STATS.boat, mine = c === p && playing;
+      if (isHeli(c.model) && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.fly(c, dt, mine ? this.lift : -1, mine); this.collideWorld(c); continue; }
+      if (isBoat(c.model) && !c.dead) {
+        const st = MODEL_STATS[c.model], mine = c === p && playing;
         this.craft.boat(c, dt, st.acc + (mine && p.nitro ? 400 : 0), !mine ? st.maxV * (c.kind === "cop" ? 0.9 : 0.8) : st.maxV + (mine && p.nitro ? 200 : 0) + (mine ? st.maxV * (tuneSpeed(p.tune) - 1) : 0));
         this.collideWorld(c);
         continue;
@@ -1515,6 +1572,7 @@ export class Game {
       if (this.rules.city && !(c === p && this.fall) && this.craft.sink(c, dt)) this.onSunk(c);
     }
     this.collideCars();
+    this.jobs.afterPhysics();
     if (this.onFoot && playing) this.updatePed(dt);
     if (playing && this.rules.city) this.checkBorder(dt);
     this.traffic.lights.update(dt);
@@ -1522,7 +1580,7 @@ export class Game {
     if (playing) this.updateProjs(dt);
     if (playing && !this.ending) {
       this.updatePlaces();
-      if (this.rules.city) { this.missions.update(dt); this.jobs.update(dt); this.hide.update(dt); this.updateNav(dt); this.tips.update(dt); }
+      if (this.rules.city) { this.missions.update(dt); this.jobs.update(dt); this.hide.update(dt); this.updateNav(dt); this.tips.update(dt); this.updateCalls(dt); }
       const dId = districtAt(this.fx, this.fy);
       if (dId !== this.district) { this.district = dId; this.districtT = 2.5; }
     }
@@ -1617,7 +1675,7 @@ export class Game {
       if (rules.cops && this.wanted.stars > 0) {
         let close = this.onFoot ? this.peds.copsNear(fx, fy, 30) : 0; // police on foot grabs you
         for (const c of this.cars) if (c.kind === "cop" && !c.calm && !c.dead && Math.hypot(c.x - fx, c.y - fy) < 85) close++;
-        const reachable = this.onFoot || !(this.player.model === "heli" && this.player.air); // nobody cuffs you in the air
+        const reachable = this.onFoot || !(isHeli(this.player.model) && this.player.air); // nobody cuffs you in the air
         if (close > 0 && this.fspeed < 60 && reachable) this.bust += dt * (0.3 + close * 0.1) * D.bust * (this.onFoot ? 1.6 : 1);
         else this.bust = Math.max(0, this.bust - dt * 0.8);
         if (this.bust >= 1) { this.bust = 1; this.endRun("arrested"); }
@@ -1640,6 +1698,7 @@ export class Game {
     const pts = this.driftPts;
     this.driftPts = 0;
     if (pts < 60) return;
+    this.jobs.onDrift(pts);
     const p = this.player;
     this.bestDrift = Math.max(this.bestDrift, pts);
     this.addScore(pts, p.x, p.y - 34, "DRIFT", "#ffd23f", pts > 600 ? 30 : 22);
@@ -1902,6 +1961,15 @@ export class Game {
   // water spray / wake (boats, sinking cars)
   spray(x: number, y: number, z: number, vx: number, vy: number) { this.emit(x, y, z, vx + rnd(-25, 25), vy + rnd(-25, 25), rnd(30, 90), rnd(0.4, 0.8), rnd(4, 8), 18, "#e8f6ff", 0, 2.5); }
 
+  // fire of a job (burning car or bin): flames and smoke
+  flame(x: number, y: number, size: number, dt: number) {
+    const z = terrainH(x, y);
+    if (P60(0.9 * size, dt)) this.emit(x + rnd(-8, 8) * size, y + rnd(-8, 8) * size, z + 6, rnd(-10, 10), rnd(-10, 10), rnd(40, 90), rnd(0.35, 0.6), rnd(8, 14) * size, -6, Math.random() < 0.5 ? "#ff8a1a" : "#ffcf4a", 2, 1.5);
+    if (P60(0.35 * size, dt)) this.emit(x, y, z + 20 * size, rnd(-15, 15), rnd(-15, 15), rnd(30, 60), rnd(1.2, 2.2), rnd(10, 16) * size, 30, "#2a2430", 0, 0.8);
+  }
+  // water drop of the fire truck's cannon
+  water(x: number, y: number, z: number, vx: number, vy: number) { this.emit(x, y, z, vx, vy, rnd(60, 140), rnd(0.5, 0.8), rnd(3, 5), 6, "#bfe6ff", 5, 0.4); }
+
   // the helicopter hit the ground too hard
   heliCrash(dmg: number) { sfx.crash(0.8); this.shake(0.4); this.damagePlayerCar(dmg); }
 
@@ -1932,6 +2000,7 @@ export class Game {
         const rec = this.progress.records;
         if (m > (rec.jumpDist ?? 0)) { rec.jumpDist = Math.round(m * 10) / 10; if (m > 15) this.setHint(`Neuer Rekord: weitester Sprung ${m.toFixed(1).replace(".", ",")} m`, 2.5); }
         if (c.airT > (rec.airTime ?? 0)) rec.airTime = Math.round(c.airT * 100) / 100;
+        this.jobs.onJump(m);
       }
       this.jobs.landed(c.airT, js ? js.ramp : -1); // stunt jumps
     }
@@ -1958,7 +2027,7 @@ export class Game {
     this.sparks(x, y, c.z + 8, Math.min(18, Math.floor(impact / 30)), nx, ny);
     for (let i = 0; i < 3; i++) this.emit(x, y, c.z + 8, nx * 40 + rnd(-30, 30), ny * 40 + rnd(-30, 30), rnd(15, 35), rnd(0.5, 1), rnd(6, 12), 20, "#6b6478", 0, 2);
     if (c.kind === "player") {
-      if (!this.onFoot) { sfx.crash(impact / 500); this.shake(Math.min(0.6, impact / 900)); }
+      if (!this.onFoot) { sfx.crash(impact / 500); this.shake(Math.min(0.6, impact / 900)); this.jobs.onCrash(impact); }
       if (impact > 160) {
         this.damagePlayerCar((impact - 160) * 0.045);
         if (this.driftPts > 100) { this.driftPts = 0; this.text(c.x, c.y - 30, "DRIFT VERLOREN", "#ff4d6d", 20); }
@@ -2021,7 +2090,7 @@ export class Game {
     const other = p === a ? b : a;
     this.sparks(x, y, a.z + 8, Math.min(16, Math.floor(impact / 35)), nx, ny);
     if (p) {
-      if (!this.onFoot) { sfx.crash(impact / 500); this.shake(Math.min(0.55, impact / 800)); }
+      if (!this.onFoot) { sfx.crash(impact / 500); this.shake(Math.min(0.55, impact / 800)); this.jobs.onCrash(impact); }
       if (!playing) return;
       if (other.kind === "cop") {
         this.damageCar(other, impact * 0.15 + (p.nitro ? 22 : 0));
@@ -2131,7 +2200,23 @@ export class Game {
     this.drawTexts(ctx);
     if (this.player.nitro && this.state === "playing" && !this.onFoot) this.drawSpeedLines(ctx);
     if (this.state === "playing" && !this.ending && this.config.camera !== "top") this.drawCrosshair(ctx);
-    if (this.state !== "menu") { this.drawMinimap(ctx); this.drawBanners(ctx); }
+    if (this.state !== "menu") { this.drawSeekers(ctx); this.drawMinimap(ctx); this.drawBanners(ctx); }
+    if (this.fade > 0) { ctx.fillStyle = `rgba(0,0,0,${this.fade})`; ctx.fillRect(0, 0, cw, ch); }
+  }
+
+  // hide and seek: "?" over searching seekers, "!" when they saw you; "es" in tag
+  private drawSeekers(ctx: CanvasRenderingContext2D) {
+    const hs = this.hide.active;
+    if (!hs) return;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = "bold 22px 'Bebas Neue', Impact, sans-serif";
+    hs.seekers.forEach((sk, i) => {
+      const s = this.r3d.project(sk.c.x, sk.c.y, sk.c.z + 34);
+      if (!s.ok || Math.hypot(sk.c.x - this.fx, sk.c.y - this.fy) > 700) return;
+      const t = hs.mode === "tag" ? (i === hs.it ? "ES" : "") : sk.saw ? "!" : "?";
+      if (!t) return;
+      ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.strokeText(t, s.x, s.y);
+      ctx.fillStyle = t === "?" ? "#ffd23f" : "#ff4d4d"; ctx.fillText(t, s.x, s.y);
+    });
   }
 
   private drawCrosshair(ctx: CanvasRenderingContext2D) {
@@ -2240,7 +2325,17 @@ export class Game {
       // mission / job markers stay on the edge when far away
       // hide and seek: playing field
       const hs = this.hide.active;
-      if (hs) { ctx.strokeStyle = "rgba(61,255,139,0.8)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cxm + (hs.x - fx) * m, cym + (hs.y - fy) * m, HIDE_RADIUS * m, 0, TAU); ctx.stroke(); }
+      if (hs) {
+        ctx.strokeStyle = "rgba(61,255,139,0.8)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cxm + (hs.x - fx) * m, cym + (hs.y - fy) * m, hs.field.r * m, 0, TAU); ctx.stroke();
+        // view cones of the seekers
+        if (currentSettings.seekerCones && hs.mode === "hide") for (const sk of hs.seekers) {
+          const sx = cxm + (sk.c.x - fx) * m, sy = cym + (sk.c.y - fy) * m;
+          ctx.fillStyle = sk.chase ? "rgba(255,77,77,0.35)" : "rgba(255,255,255,0.18)";
+          ctx.beginPath(); ctx.moveTo(sx, sy); ctx.arc(sx, sy, 270 * m, sk.c.a - 0.95, sk.c.a + 0.95); ctx.closePath(); ctx.fill();
+        }
+      }
+      const sa = this.jobs.searchArea;
+      if (sa) { ctx.strokeStyle = "rgba(157,77,255,0.85)"; ctx.lineWidth = 2; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.arc(cxm + (sa.x - fx) * m, cym + (sa.y - fy) * m, sa.r * m, 0, TAU); ctx.stroke(); ctx.setLineDash([]); }
       for (const list of [this.missions.markers, this.jobs.markers, this.hide.markers]) for (const mk of list) {
         let dx = (mk.x - fx) * m, dy = (mk.y - fy) * m;
         const d = Math.hypot(dx, dy);

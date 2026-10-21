@@ -34,7 +34,7 @@ export interface Building {
   low?: boolean;          // fences, rails, containers: cars stop, but it is no building to enter
 }
 export interface Tree { x: number; y: number; r: number; rot: number; kind?: number; }
-export type BlockKind = "city" | "park" | "plaza" | "site" | "lot" | "garage" | "skate";
+export type BlockKind = "city" | "park" | "plaza" | "site" | "lot" | "garage" | "skate" | "townhall" | "stadium";
 export interface Block { bx: number; by: number; kind: BlockKind; district: DistrictId; buildings: Building[]; trees: Tree[]; }
 
 export function isHighway(x: number, y: number) {
@@ -55,9 +55,12 @@ const NEONS = ["#ff3cac", "#2bf0ff", "#ffd23f", "#9d4dff", "#3dff8b", "#ff6b3d"]
 const SPECIAL: Record<string, BlockKind> = {
   "7,2": "garage", "12,8": "garage", "3,12": "garage", "9,13": "garage", "14,4": "garage",
   "6,14": "site", "11,11": "site", "2,14": "site", "13,2": "site", "4,1": "site", "10,3": "site",
-  "10,15": "lot", "5,12": "lot", "12,13": "lot", "15,3": "lot", "8,15": "skate",
+  "10,15": "lot", "5,12": "lot", "12,13": "lot", "15,3": "lot", "8,15": "skate", "7,7": "townhall", "12,14": "stadium",
 };
 const M = 18; // inset of buildings from the block edge
+
+// the ferris wheel on the beach promenade (drawn in worldmesh, solid base here)
+export const FERRIS = { x: -130, y: 3.4 * BLOCK, r: 70 };
 
 export class World {
   blocks: Block[] = [];
@@ -269,8 +272,10 @@ export class World {
       if (isWater(x, y) || Math.abs(x - lineC(8)) < 100 || this.isSolid(x, y, 20)) continue;
       this.extraTrees.push({ x, y, r: 14 + r() * 8, rot: r() * 6, kind: 1 });
     }
+    // ferris wheel base on the promenade
+    this.extra(FERRIS.x - 30, FERRIS.y - 12, 60, 24, 6, "#c9ced8", { type: 28, low: true });
     // palms along the beach promenade
-    for (let y = 60; y < WORLD; y += 140) if (HIGHWAYS.every((i) => Math.abs(y - lineC(i)) > 110)) this.extraTrees.push({ x: -16, y, r: 14, rot: r() * 6, kind: 1 });
+    for (let y = 60; y < WORLD; y += 140) if (HIGHWAYS.every((i) => Math.abs(y - lineC(i)) > 110) && Math.abs(y - FERRIS.y) > 100) this.extraTrees.push({ x: -16, y, r: 14, rot: r() * 6, kind: 1 });
     // stunt park fence (gap on the west side, towards the highway) and a few containers to jump over
     const sp = STUNT_PARK, gapY = (sp.y0 + sp.y1) / 2;
     const fence = { low: true, type: 23 };
@@ -374,6 +379,14 @@ export class World {
           const n = kind === "park" ? 7 + Math.floor(r() * 6) : 3;
           for (let i = 0; i < n; i++) block.trees.push({ x: x0 + 40 + r() * (size - 80), y: y0 + 40 + r() * (size - 80), r: 16 + r() * 10, rot: r() * Math.PI * 2, kind: r() < 0.4 ? 1 : 0 });
           if (kind === "skate") block.trees = block.trees.filter((t) => Math.hypot(t.x - (x0 + size / 2), t.y - (y0 + size / 2)) > 150);
+        } else if (kind === "townhall") {
+          // town hall with the clock tower on a square with a fountain
+          const p = pal();
+          block.buildings.push({ x: x0 + 95, y: y0 + 40, w: 180, h: 110, height: 34, wall: "#e8dcc4", wallDark: p[1], roof: "#7a5a4a", neon: null, detail: 0, seed: r(), type: 25 });
+          block.buildings.push({ x: x0 + 165, y: y0 + 60, w: 40, h: 40, height: 95, wall: "#e8dcc4", wallDark: p[1], roof: "#3a5a4a", neon: null, detail: 0, seed: r(), type: 26 });
+          for (const [tx, ty] of [[60, 230], [310, 230], [60, 330], [310, 330]]) block.trees.push({ x: x0 + tx, y: y0 + ty, r: 16, rot: r() * 6, kind: 0 });
+        } else if (kind === "stadium") {
+          block.buildings.push({ x: x0 + 30, y: y0 + 30, w: size - 60, h: size - 60, height: 28, wall: "#d9d6cf", wallDark: "#9a968e", roof: "#3c8a4a", neon: null, detail: 0, seed: r(), type: 27 });
         } else if (kind === "plaza") {
           const s = size * 0.36, p = pal();
           block.buildings.push({ x: x0 + size / 2 - s / 2, y: y0 + size / 2 - s / 2, w: s, h: s, height: 60 + r() * 60, wall: p[0], wallDark: p[1], roof: p[2], neon: NEONS[Math.floor(r() * NEONS.length)], detail: 3, seed: r(), type: dist === "downtown" ? 5 : 9 });
@@ -482,16 +495,55 @@ export class World {
 
   // valid points on the sidewalks next to the streets (taxi customers, suspects, drop-offs): never in a wall,
   // never on or right in front of a ramp, never in the water; computed once
-  private curbs: { x: number; y: number }[] | null = null;
+  // bus stops with shelters (every few blocks), docks for the water taxi, landmarks for the sightseeing flights
+  private stops: { x: number; y: number; nx: number; ny: number }[] | null = null;
+  busStops() {
+    if (this.stops) return this.stops;
+    const out: { x: number; y: number; nx: number; ny: number }[] = [];
+    for (const c of this.curbPoints()) {
+      if ((c.bx * 7 + c.by * 3) % 4 !== 0 || out.some((o) => Math.hypot(o.x - c.x, o.y - c.y) < 600)) continue;
+      out.push({ x: c.x, y: c.y, nx: c.nx, ny: c.ny });
+    }
+    this.stops = out;
+    return out;
+  }
+  docks(): { name: string; x: number; y: number; lx: number; ly: number }[] {
+    const out = [{ name: "Bootssteg Strand", x: -340, y: 3455, lx: -150, ly: 3430 }];
+    // island: walk out from the middle until the water
+    for (const [name, ang] of [["Insel Nordsteg", -2.2], ["Insel Südsteg", 1.2]] as [string, number][]) {
+      let d = 100;
+      while (d < 1500 && !isWater(ISLAND.x + Math.cos(ang) * d, ISLAND.y + Math.sin(ang) * d)) d += 20;
+      out.push({ name, x: ISLAND.x + Math.cos(ang) * (d + 70), y: ISLAND.y + Math.sin(ang) * (d + 70), lx: ISLAND.x + Math.cos(ang) * (d - 40), ly: ISLAND.y + Math.sin(ang) * (d - 40) });
+    }
+    out.push({ name: "Hafenkai", x: COAST.east + 70, y: 11.5 * BLOCK, lx: COAST.east - 40, ly: 11.5 * BLOCK });
+    out.push({ name: "Promenade Süd", x: 2600, y: COAST.south + 70, lx: 2600, ly: COAST.south - 30 });
+    return out;
+  }
+  landmarks(): { name: string; x: number; y: number; h: number }[] {
+    const th = this.blocks.find((b) => b.kind === "townhall")!, st = this.blocks.find((b) => b.kind === "stadium")!;
+    const c = (b: Block) => ({ x: b.bx * BLOCK + ROAD + (BLOCK - ROAD) / 2, y: b.by * BLOCK + ROAD + (BLOCK - ROAD) / 2 });
+    let tower = this.blocks[0].buildings[0];
+    for (const b of this.blocks) if (b.district === "downtown") for (const bd of b.buildings) if (!tower || bd.height > tower.height) tower = bd;
+    const lh = this.extras.find((e) => e.type === 24)!;
+    return [
+      { name: "Rathaus mit Uhrturm", ...c(th), h: 170 },
+      { name: "Vale Tower", x: tower.x + tower.w / 2, y: tower.y + tower.h / 2, h: roofOf(tower) },
+      { name: "Riesenrad an der Promenade", x: FERRIS.x, y: FERRIS.y, h: 150 },
+      { name: "Leuchtturm Isla Faro", x: lh.x + lh.w / 2, y: lh.y + lh.h / 2, h: roofOf(lh) },
+      { name: "Stadion Palmenhain", ...c(st), h: 60 },
+    ];
+  }
+
+  private curbs: { x: number; y: number; nx: number; ny: number; bx: number; by: number }[] | null = null;
   curbPoints() {
     if (this.curbs) return this.curbs;
-    const out: { x: number; y: number }[] = [];
+    const out: { x: number; y: number; nx: number; ny: number; bx: number; by: number }[] = [];
     const IN = 9;
     for (const b of this.blocks) {
       const x0 = b.bx * BLOCK + ROAD + IN, y0 = b.by * BLOCK + ROAD + IN, s = BLOCK - ROAD - IN * 2;
-      for (let t = 30; t < s - 30; t += 40) for (const [x, y] of [[x0 + t, y0], [x0 + t, y0 + s], [x0, y0 + t], [x0 + s, y0 + t]]) {
+      for (let t = 30; t < s - 30; t += 40) for (const [x, y, nx, ny] of [[x0 + t, y0, 0, -1], [x0 + t, y0 + s, 0, 1], [x0, y0 + t, -1, 0], [x0 + s, y0 + t, 1, 0]]) {
         if (this.isSolid(x, y, 7) || this.treeHit(x, y, 6) || this.nearRamp(x, y, 30) || isWater(x, y)) continue;
-        out.push({ x, y });
+        out.push({ x, y, nx, ny, bx: b.bx, by: b.by }); // nx, ny: towards the street
       }
     }
     this.curbs = out;

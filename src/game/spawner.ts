@@ -1,4 +1,4 @@
-import { Car, MODEL_NAME, MODEL_STATS, type CarModel } from "./vehicles";
+import { Car, CAR_MODELS, MODEL_NAME, MODEL_STATS, isBoat, isHeli, type CarModel } from "./vehicles";
 import { WATER_Y, isWater, terrainH } from "./world";
 import { WEAPONS, WEAPON_DEFS } from "./weapons";
 import { STAR_HEAT } from "./wanted";
@@ -7,9 +7,11 @@ import type { FactionId } from "./vehicles";
 
 // sandbox menu (pause menu, open world): vehicles, weapons, money, people and the wanted level on demand
 export type SpawnPeople = "civ" | "cop" | FactionId;
-export const SPAWN_MODELS: CarModel[] = ["sport", "super", "muscle", "suv", "sedan", "van", "taxi", "bike", "truck", "bus", "police", "swat", "armor", "boat", "heli"];
+export const SPAWN_MODELS: CarModel[] = CAR_MODELS;
 const COLOR: Partial<Record<CarModel, string>> = {
   police: "#f4f6fa", swat: "#1b1d22", armor: "#4b5320", taxi: "#ffc21a", bus: "#2bb3ff", boat: "#f4f6fa", heli: "#ff3cac",
+  ambulance: "#f4f4f6", fire: "#c0392b", garbage: "#3c6e47", tow: "#e1b12c", icecream: "#f2c7d8", policebike: "#f4f6fa", unmarked: "#2b2f3a",
+  policeboat: "#1f3a6e", policeheli: "#1f3a6e", fishboat: "#2e6da4", jetski: "#ffd23f",
 };
 const PAINT = ["#ff2d95", "#2bf0ff", "#ffd23f", "#ff8a1f", "#3dff8b", "#9d4dff", "#f4f4f6", "#15161b"];
 const CASH_MAX = 1e8;
@@ -28,7 +30,7 @@ export class Spawner {
     if (g.missions.active || g.hide.active) return "Nicht während einer Mission oder des Versteckspiels";
     const fx = g.fx, fy = g.fy;
     let x = fx, y = fy;
-    if (model === "boat") {
+    if (isBoat(model)) {
       // a boat needs water close by
       let found = false;
       for (let r = 40; r <= 320 && !found; r += 40) for (let k = 0; k < 12; k++) {
@@ -46,7 +48,7 @@ export class Spawner {
     }
     const c = new Car("civ", model, COLOR[model] ?? PAINT[Math.floor(Math.random() * PAINT.length)]);
     const st = MODEL_STATS[model];
-    c.x = x; c.y = y; c.a = g.fa; c.z = model === "boat" ? WATER_Y : model === "heli" ? g.groundAt(x, y) : terrainH(x, y);
+    c.x = x; c.y = y; c.a = g.fa; c.z = isBoat(model) ? WATER_Y : isHeli(model) ? g.groundAt(x, y) : terrainH(x, y);
     c.hp = c.maxHp = st.hp; c.mass = st.mass;
     c.parked = true; c.handbrake = true; c.owned = true;
     g.cars.push(c);

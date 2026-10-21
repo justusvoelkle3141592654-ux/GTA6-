@@ -10,8 +10,9 @@ import { wrapA, clamp, canvasTex, radialTex, withColor, C, box, flat, cyl, sph }
 import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_SIZE, H_SCALE, WATER_Y, EDGE_LAND, STUNT_PARK, terrainH, terrainGrad, cityDist, inCity, coast, edgeDist, mulberry32, type Building, tunnelAt, TUNNEL } from "./world";
 import { terrainMesh, backdropMesh, roadsMesh, rampsMesh, coastMesh, extrasMesh, LightsMesh } from "./worldmesh";
 import { TrafficLights } from "./traffic";
+import { buildHideFields } from "./hide";
 const inStuntPark = (x: number, y: number) => x > STUNT_PARK.x0 - 60 && x < STUNT_PARK.x1 + 60 && y > STUNT_PARK.y0 - 60 && y < STUNT_PARK.y1 + 60;
-import { isCraft } from "./vehicles";
+import { isCraft, isBoat, isHeli, isTwoWheel } from "./vehicles";
 import { JETTY, HELI_SPOT, type Place } from "./places";
 import { CrowdRenderer } from "./crowd3d";
 import { DISTRICTS, blockDistrict } from "./districts";
@@ -106,49 +107,95 @@ const SPECS: Record<CarModel, CarSpec> = {
   armor: { L: 62, W: 29, y0: 6, noseY: 15, beltY: 19, deckY: 19, xCowl: 22, xRoofF: 16, xRoofR: -24, xDeck: -27, roofY: 25, r: 8, wx: 20, wxr: -20, wd: 6 },
   boat: SEDAN, heli: SEDAN, // own geometry (boatGeo / heliGeo)
   bike: { L: 34, W: 8, y0: 6, noseY: 12, beltY: 14, deckY: 14, xCowl: 6, xRoofF: 2, xRoofR: -4, xDeck: -6, roofY: 18, r: 6, wx: 13, wxr: -13, wd: 3 },
+  roadster: { L: 46, W: 23, y0: 3, noseY: 7, beltY: 11, deckY: 11.5, xCowl: 6, xRoofF: 1, xRoofR: -9, xDeck: -12, roofY: 15, r: 6, wx: 14.5, wxr: -14.5, wd: 4 },
+  pickup: { L: 54, W: 26, y0: 5, noseY: 13, beltY: 17, deckY: 17, xCowl: 13, xRoofF: 8, xRoofR: -4, xDeck: -6, roofY: 27, r: 7.5, wx: 17, wxr: -17, wd: 5 },
+  compact: { L: 40, W: 22, y0: 3.5, noseY: 9, beltY: 12.5, deckY: 13, xCowl: 7, xRoofF: 1, xRoofR: -12, xDeck: -15, roofY: 20, r: 5.5, wx: 12.5, wxr: -12.5, wd: 4 },
+  wagon: { L: 50, W: 24, y0: 3.5, noseY: 8.5, beltY: 12.5, deckY: 13, xCowl: 8, xRoofF: 1, xRoofR: -19, xDeck: -23, roofY: 20, r: 6, wx: 15.5, wxr: -15.5, wd: 4 },
+  offroad: { L: 50, W: 27, y0: 6, noseY: 14, beltY: 18, deckY: 18.5, xCowl: 12, xRoofF: 8, xRoofR: -19, xDeck: -22, roofY: 28, r: 8, wx: 16, wxr: -16, wd: 6 },
+  tow: { L: 66, W: 27, y0: 5, noseY: 18, beltY: 22, deckY: 12, xCowl: 27, xRoofF: 23, xRoofR: 13, xDeck: 12, roofY: 33, r: 7.5, wx: 22, wxr: -21, wd: 5 },
+  garbage: { L: 72, W: 28, y0: 5, noseY: 18, beltY: 22, deckY: 20, xCowl: 30, xRoofF: 26, xRoofR: 16, xDeck: 15, roofY: 33, r: 7.5, wx: 25, wxr: -22, wd: 5 },
+  ambulance: { L: 56, W: 26, y0: 4.5, noseY: 12, beltY: 15, deckY: 15, xCowl: 26, xRoofF: 18, xRoofR: 16, xDeck: 16, roofY: 25, r: 6.5, wx: 18, wxr: -17, wd: 4.5 },
+  fire: { L: 80, W: 28, y0: 5, noseY: 18, beltY: 22, deckY: 20, xCowl: 36, xRoofF: 32, xRoofR: 22, xDeck: 21, roofY: 34, r: 7.5, wx: 28, wxr: -25, wd: 5 },
+  icecream: { L: 54, W: 26, y0: 4.5, noseY: 12, beltY: 15, deckY: 15, xCowl: 25, xRoofF: 17, xRoofR: 15, xDeck: 15, roofY: 25, r: 6.5, wx: 17, wxr: -17, wd: 4.5 },
+  unmarked: { L: 48, W: 24, y0: 3.5, noseY: 9, beltY: 12.5, deckY: 13, xCowl: 8, xRoofF: 1, xRoofR: -9, xDeck: -14, roofY: 20, r: 6, wx: 15, wxr: -15, wd: 4.5 },
+  policebike: SEDAN, scooter: SEDAN, bicycle: SEDAN, jetski: SEDAN, fishboat: SEDAN, policeboat: SEDAN, policeheli: SEDAN, // own geometry
 };
 
-// motorbike: frame, tank, seat, handlebar; the rider goes into the "glass" mesh so it can be hidden
-function bikeGeo(color: string): CarGeo {
+// two wheelers: frame, tank, seat, handlebar; the rider goes into the "glass" mesh so it can be hidden
+function bikeGeo(color: string, model: CarModel): CarGeo {
   const B: THREE.BufferGeometry[] = [], G: THREE.BufferGeometry[] = [], Lg: THREE.BufferGeometry[] = [];
   const body = C(color), trim = "#15161b", chrome = "#c9ced8";
-  B.push(bar(-13, 6, 2, 11, 1.6, 1.6, 0, trim), bar(2, 11, 12, 6, 1.6, 1.6, 0, trim), bar(-4, 7, 9, 14, 1.4, 1.4, 0, trim));
-  B.push(rbox(11, 5, 7, 2, 14.5, 0, body, 1.8), rbox(10, 2.2, 6, -6, 15.5, 0, "#1d1d22", 0.8), rbox(7, 4, 7.5, -12, 11.5, 0, body, 1.4));
-  B.push(bar(9, 14, 12.5, 6, 1, 1, 2.2, chrome), bar(9, 14, 12.5, 6, 1, 1, -2.2, chrome), nb(1, 1, 13, 9.5, 19, 0, trim), nb(1, 6, 1, 9, 16.5, 0, trim));
-  B.push(cylX(1.3, 12, -9, 7, 3.2, chrome, 8), nb(8, 4, 4, 0, 8, 0, "#3a3d45"));
-  Lg.push(nb(1, 2.4, 3, 13.4, 15, 0, "#fff4d6", 3.2), nb(0.8, 1.4, 3, -15.6, 12, 0, "#ff1838", 2.6));
-  // rider: legs, torso, helmet
-  const jacket = "#23252c", helmet = "#e8e8ec";
-  for (const sd of [-1, 1]) G.push(bar(-6, 16, 2, 13, 2.4, 2.6, sd * 3.2, "#2c3e57"), bar(2, 13, 1, 6, 2.2, 2.2, sd * 3.4, "#2c3e57"));
-  G.push(bar(-6, 16, 0, 27, 4.5, 6.5, 0, jacket), bar(-1, 26, 8, 19, 1.8, 1.8, 3.6, jacket), bar(-1, 26, 8, 19, 1.8, 1.8, -3.6, jacket));
-  G.push(ni(withColor(new THREE.SphereGeometry(3.4, 12, 10).scale(1.1, 1, 0.95).translate(0.5, 30.5, 0), C(helmet))), nb(1.5, 2, 5, 3.6, 30.4, 0, "#0b121c"));
-  const wheels: CarWheel[] = [{ x: 13, z: 0, r: 6, wd: 3, front: true }, { x: -13, z: 0, r: 6, wd: 3, front: false }];
-  const res: CarGeo = { body: mergeGeometries(B)!, glass: mergeGeometries(G)!, lights: mergeGeometries(Lg)!, wheels, roofY: 26 };
+  const k = model === "bicycle" ? 0.62 : model === "scooter" ? 0.72 : 1; // overall size
+  let wheels: CarWheel[];
+  if (model === "bicycle") {
+    // thin tubes, pedals, no engine
+    B.push(bar(-7, 4, 1, 4, 0.7, 0.7, 0, body), bar(1, 4, 7, 4, 0.7, 0.7, 0, body), bar(-7, 4, -2, 11, 0.7, 0.7, 0, body), bar(-2, 11, 6, 11, 0.7, 0.7, 0, body), bar(1, 4, -2, 11, 0.7, 0.7, 0, body), bar(6, 11, 7, 4, 0.7, 0.7, 0, body));
+    B.push(nb(4, 1, 2.4, -2.5, 12, 0, "#1d1d22"), nb(0.6, 0.6, 7, 6.5, 13.5, 0, trim), nb(3, 0.5, 1.2, 1, 3, 1.6, trim), nb(3, 0.5, 1.2, 1, 3, -1.6, trim));
+    wheels = [{ x: 7.5, z: 0, r: 4.4, wd: 1, front: true }, { x: -7.5, z: 0, r: 4.4, wd: 1, front: false }];
+  } else if (model === "scooter") {
+    B.push(rbox(16, 3, 6, 0, 4.5, 0, body, 1.2), rbox(6, 9, 6, 7, 9, 0, body, 1.4), rbox(7, 4, 6, -5, 8, 0, body, 1.6), rbox(7, 1.6, 5, -5, 10.6, 0, "#1d1d22", 0.6));
+    B.push(nb(1, 6, 1, 9, 14, 0, trim), nb(1, 1, 9, 9, 17, 0, trim));
+    Lg.push(nb(1, 1.6, 2.4, 10.3, 12, 0, "#fff4d6", 3.2), nb(0.8, 1, 2.4, -8.6, 8, 0, "#ff1838", 2.6));
+    wheels = [{ x: 9, z: 0, r: 4, wd: 2.4, front: true }, { x: -8, z: 0, r: 4, wd: 2.4, front: false }];
+  } else {
+    B.push(bar(-13, 6, 2, 11, 1.6, 1.6, 0, trim), bar(2, 11, 12, 6, 1.6, 1.6, 0, trim), bar(-4, 7, 9, 14, 1.4, 1.4, 0, trim));
+    B.push(rbox(11, 5, 7, 2, 14.5, 0, body, 1.8), rbox(10, 2.2, 6, -6, 15.5, 0, "#1d1d22", 0.8), rbox(7, 4, 7.5, -12, 11.5, 0, body, 1.4));
+    B.push(bar(9, 14, 12.5, 6, 1, 1, 2.2, chrome), bar(9, 14, 12.5, 6, 1, 1, -2.2, chrome), nb(1, 1, 13, 9.5, 19, 0, trim), nb(1, 6, 1, 9, 16.5, 0, trim));
+    B.push(cylX(1.3, 12, -9, 7, 3.2, chrome, 8), nb(8, 4, 4, 0, 8, 0, "#3a3d45"));
+    Lg.push(nb(1, 2.4, 3, 13.4, 15, 0, "#fff4d6", 3.2), nb(0.8, 1.4, 3, -15.6, 12, 0, "#ff1838", 2.6));
+    if (model === "policebike") { B.push(rbox(8, 7, 9, 10, 18, 0, "#f4f6fa", 1.5), rbox(9, 6, 10, -13, 13, 0, "#f4f6fa", 1.5)); Lg.push(nb(1, 1.4, 2, 9, 22, 2.5, "#ff1838", 3), nb(1, 1.4, 2, 9, 22, -2.5, "#2a5bff", 3)); }
+    wheels = [{ x: 13, z: 0, r: 6, wd: 3, front: true }, { x: -13, z: 0, r: 6, wd: 3, front: false }];
+  }
+  // rider: legs, torso, helmet (scaled with the vehicle)
+  const jacket = model === "policebike" ? "#1f3a6e" : "#23252c", helmet = "#e8e8ec";
+  const R: THREE.BufferGeometry[] = [];
+  for (const sd of [-1, 1]) R.push(bar(-6, 16, 2, 13, 2.4, 2.6, sd * 3.2, "#2c3e57"), bar(2, 13, 1, 6, 2.2, 2.2, sd * 3.4, "#2c3e57"));
+  R.push(bar(-6, 16, 0, 27, 4.5, 6.5, 0, jacket), bar(-1, 26, 8, 19, 1.8, 1.8, 3.6, jacket), bar(-1, 26, 8, 19, 1.8, 1.8, -3.6, jacket));
+  R.push(ni(withColor(new THREE.SphereGeometry(3.4, 12, 10).scale(1.1, 1, 0.95).translate(0.5, 30.5, 0), C(model === "bicycle" ? "#3b2a1e" : helmet))), nb(1.5, 2, 5, 3.6, 30.4, 0, "#0b121c"));
+  G.push(...R);
+  if (k !== 1) for (const g of G) { g.scale(k * 1.25, k * 1.25, 1); g.translate(model === "bicycle" ? 1 : 0, model === "bicycle" ? -4 : -5, 0); }
+  const res: CarGeo = { body: mergeGeometries(B)!, glass: mergeGeometries(G)!, lights: Lg.length ? mergeGeometries(Lg)! : nb(0.01, 0.01, 0.01, 0, -50, 0, "#000"), wheels, roofY: 26 * k };
   for (const g of [...B, ...G, ...Lg]) g.dispose();
   return res;
 }
 
-// speedboat: hull below the waterline, white deck, windshield, outboard motor
-function boatGeo(color: string): CarGeo {
+// boats: hull below the waterline, deck, windshield, outboard motor (jetski, fishing boat and police boat are variants)
+function boatGeo(color: string, model: CarModel): CarGeo {
   const B: THREE.BufferGeometry[] = [], G: THREE.BufferGeometry[] = [], Lg: THREE.BufferGeometry[] = [];
   const body = C(color), dark = body.clone().multiplyScalar(0.45);
-  B.push(prof([[-25, -3], [14, -3], [31, 6], [-26, 6]], 22, 2, body));
-  B.push(nb(42, 1, 19, -4, 6.4, 0, "#f4f4f6"), nb(44, 1.4, 22.4, -2, 2.5, 0, dark));
-  B.push(nb(8, 3, 16, -14, 8.3, 0, "#e9e4d8"), nb(6, 5, 8, -2, 9, 0, "#2a2d36"), nb(5, 9, 6, -27.5, 7, 0, "#22252b"), nb(2, 6, 2, -29, 1, 0, "#22252b"));
-  for (const sd of [-1, 1]) B.push(nb(30, 1.6, 1, -2, 8, sd * 10.6, "#c9ced8"));
-  G.push(prof([[3, 6.5], [9, 6.5], [5, 12.5], [1, 12.5]], 17, 0.5, "#0b121c"));
-  Lg.push(nb(1, 1.2, 1.2, 24, 7, 6, "#3dff8b", 2.4), nb(1, 1.2, 1.2, 24, 7, -6, "#ff1838", 2.4), nb(1.6, 1.6, 1.6, -22, 12, 0, "#fff4d6", 2.4));
+  if (model === "jetski") {
+    B.push(prof([[-13, -2], [8, -2], [15, 4], [-13, 4]], 11, 1.5, body), rbox(10, 3, 6, -3, 6, 0, "#1d1d22", 1), rbox(4, 4, 6, 5, 7, 0, body, 1), nb(1, 1, 8, 7, 10, 0, "#15161b"));
+    Lg.push(nb(0.8, 1, 2, 14, 4.5, 0, "#fff4d6", 2.4));
+    const res: CarGeo = { body: mergeGeometries(B)!, glass: nb(0.01, 0.01, 0.01, 0, -50, 0, "#000"), lights: mergeGeometries(Lg)!, wheels: [], roofY: 10 };
+    for (const g of [...B, ...Lg]) g.dispose();
+    return res;
+  }
+  if (model === "fishboat") {
+    B.push(prof([[-32, -4], [20, -4], [36, 8], [-33, 8]], 26, 2, body), nb(60, 1, 23, -2, 8.4, 0, "#c9b48c"), rbox(18, 14, 18, -10, 16, 0, "#f4f1ea", 1));
+    B.push(nb(1.5, 30, 1.5, 8, 23, 0, "#5c4632"), nb(26, 1, 1, 8, 30, 0, "#5c4632"), nb(14, 3, 10, -24, 10, 0, "#7a5a3a"));
+    G.push(nb(1, 6, 15, -0.8, 19, 0, "#0b121c"));
+    Lg.push(nb(1, 1.2, 1.2, 34, 9, 6, "#3dff8b", 2.4), nb(1, 1.2, 1.2, 34, 9, -6, "#ff1838", 2.4), nb(1.6, 1.6, 1.6, -10, 24, 0, "#fff4d6", 2.4));
+  } else {
+    B.push(prof([[-25, -3], [14, -3], [31, 6], [-26, 6]], 22, 2, body));
+    B.push(nb(42, 1, 19, -4, 6.4, 0, model === "policeboat" ? "#1f3a6e" : "#f4f4f6"), nb(44, 1.4, 22.4, -2, 2.5, 0, dark));
+    B.push(nb(8, 3, 16, -14, 8.3, 0, "#e9e4d8"), nb(6, 5, 8, -2, 9, 0, "#2a2d36"), nb(5, 9, 6, -27.5, 7, 0, "#22252b"), nb(2, 6, 2, -29, 1, 0, "#22252b"));
+    for (const sd of [-1, 1]) B.push(nb(30, 1.6, 1, -2, 8, sd * 10.6, "#c9ced8"));
+    G.push(prof([[3, 6.5], [9, 6.5], [5, 12.5], [1, 12.5]], 17, 0.5, "#0b121c"));
+    Lg.push(nb(1, 1.2, 1.2, 24, 7, 6, "#3dff8b", 2.4), nb(1, 1.2, 1.2, 24, 7, -6, "#ff1838", 2.4), nb(1.6, 1.6, 1.6, -22, 12, 0, "#fff4d6", 2.4));
+    if (model === "policeboat") { B.push(rbox(12, 8, 14, -6, 11, 0, "#f4f6fa", 1)); Lg.push(nb(2, 1.4, 4, -6, 15.7, 3, "#ff1838", 3), nb(2, 1.4, 4, -6, 15.7, -3, "#2a5bff", 3)); }
+  }
   const res: CarGeo = { body: mergeGeometries(B)!, glass: mergeGeometries(G)!, lights: mergeGeometries(Lg)!, wheels: [], roofY: 14 };
   for (const g of [...B, ...G, ...Lg]) g.dispose();
   return res;
 }
 // helicopter: fuselage, tail boom, skids, cockpit glass (the rotor is a separate mesh, see makeCar)
-function heliGeo(color: string): CarGeo {
+function heliGeo(color: string, police = false): CarGeo {
   const B: THREE.BufferGeometry[] = [], G: THREE.BufferGeometry[] = [], Lg: THREE.BufferGeometry[] = [];
   const body = C(color), y = 14;
   B.push(ni(withColor(new THREE.SphereGeometry(12, 14, 10).scale(1.6, 1, 1).translate(0, y, 0), body)), nb(30, 6, 6, -30, y + 2, 0, body), nb(2, 12, 2, -45, y + 8, 0, body), nb(8, 2, 10, -45, y + 2, 0, "#f4f6fa"));
   for (const sd of [-1, 1]) B.push(nb(26, 1.6, 1.6, 0, 2, sd * 8, "#2a2d36"), nb(1.5, 6, 1.5, 6, 5, sd * 8, "#2a2d36"), nb(1.5, 6, 1.5, -6, 5, sd * 8, "#2a2d36"));
   B.push(nb(3, 4, 3, 0, y + 12, 0, "#2a2d36"));
+  if (police) { B.push(nb(30, 3, 19.4, -2, y - 2, 0, "#f4f6fa"), cylY(2.2, 3, 14, y - 9, 0, "#c9ced8", 10)); Lg.push(nb(1.4, 1.4, 1.4, 14, y - 11, 0, "#fff8e0", 3)); }
   G.push(ni(withColor(new THREE.SphereGeometry(7, 10, 8).scale(1, 0.8, 1.1).translate(9, y + 2, 0), C("#0b121c"))));
   Lg.push(nb(1.4, 1.4, 1.4, -46, y + 14, 0, "#ff1838", 2.6), nb(1.2, 1.2, 1.2, 0, y - 9, 0, "#fff4d6", 2.4));
   const res: CarGeo = { body: mergeGeometries(B)!, glass: mergeGeometries(G)!, lights: mergeGeometries(Lg)!, wheels: [], roofY: y + 12 };
@@ -164,9 +211,9 @@ function getCarGeo(model: CarModel, color: string): CarGeo {
   const key = model + color;
   const hit = carGeoCache.get(key);
   if (hit) return hit;
-  if (model === "bike") { const g = bikeGeo(color); carGeoCache.set(key, g); return g; }
-  if (model === "boat") { const g = boatGeo(color); carGeoCache.set(key, g); return g; }
-  if (model === "heli") { const g = heliGeo(color); carGeoCache.set(key, g); return g; }
+  if (isTwoWheel(model)) { const g = bikeGeo(color, model); carGeoCache.set(key, g); return g; }
+  if (isBoat(model)) { const g = boatGeo(color, model); carGeoCache.set(key, g); return g; }
+  if (isHeli(model)) { const g = heliGeo(color, model === "policeheli"); carGeoCache.set(key, g); return g; }
   const B: THREE.BufferGeometry[] = [], G: THREE.BufferGeometry[] = [], Lg: THREE.BufferGeometry[] = [];
   const s = SPECS[model] ?? SEDAN;
   const body = C(color), dark = body.clone().multiplyScalar(0.45);
@@ -176,13 +223,21 @@ function getCarGeo(model: CarModel, color: string): CarGeo {
   // lower body (rounded flanks) + greenhouse glass + roof + pillars
   const bev = Math.min(2.2, (s.noseY - s.y0) * 0.38);
   B.push(prof([[-hl, s.y0], [hl, s.y0], [hl, s.noseY], [s.xCowl, s.beltY], [s.xDeck, s.beltY], [-hl, s.deckY]], s.W, bev, body));
-  G.push(prof([[s.xCowl - 0.5, s.beltY - 0.3], [s.xRoofF, s.roofY], [s.xRoofR, s.roofY], [s.xDeck + 0.5, s.beltY - 0.3]], s.W - 3.2, 0, "#0b121c"));
-  B.push(rbox(s.xRoofF - s.xRoofR + 1.5, 1.6, s.W - 3, rm, s.roofY + 0.2, 0, body, 0.7));
-  for (const sd of [-1, 1]) {
-    const z = sd * (hw - 1.7);
-    B.push(bar(s.xCowl, s.beltY, s.xRoofF, s.roofY, 1.5, 1.8, z, body));
-    B.push(bar(s.xDeck, s.beltY, s.xRoofR, s.roofY, 1.7, 1.8, z, body));
-    B.push(bar(rm, s.beltY, rm, s.roofY, 1.1, 1.8, z, trim));
+  if (model === "roadster") {
+    // open two-seater: windshield frame, seats, roll hoops
+    G.push(bar(s.xCowl - 0.5, s.beltY, s.xCowl - 4, s.roofY, 0.6, s.W - 4, 0, "#0b121c"));
+    B.push(bar(s.xCowl, s.beltY, s.xCowl - 4, s.roofY, 1, 1.4, hw - 2, trim), bar(s.xCowl, s.beltY, s.xCowl - 4, s.roofY, 1, 1.4, -hw + 2, trim));
+    for (const sd of [-1, 1]) B.push(rbox(6, 7, 7, -4, s.beltY + 1, sd * 5, "#3a2a22", 1.2), rbox(2, 6, 6, -8, s.beltY + 5, sd * 5, "#3a2a22", 1));
+    B.push(nb(10, 0.6, s.W - 4, -2, s.beltY - 0.5, 0, "#1a1a1e"));
+  } else {
+    G.push(prof([[s.xCowl - 0.5, s.beltY - 0.3], [s.xRoofF, s.roofY], [s.xRoofR, s.roofY], [s.xDeck + 0.5, s.beltY - 0.3]], s.W - 3.2, 0, "#0b121c"));
+    B.push(rbox(s.xRoofF - s.xRoofR + 1.5, 1.6, s.W - 3, rm, s.roofY + 0.2, 0, body, 0.7));
+    for (const sd of [-1, 1]) {
+      const z = sd * (hw - 1.7);
+      B.push(bar(s.xCowl, s.beltY, s.xRoofF, s.roofY, 1.5, 1.8, z, body));
+      B.push(bar(s.xDeck, s.beltY, s.xRoofR, s.roofY, 1.7, 1.8, z, body));
+      B.push(bar(rm, s.beltY, rm, s.roofY, 1.1, 1.8, z, trim));
+    }
   }
   // underbody, bumpers, grille
   const hbF = (s.noseY - s.y0) * 0.5 + 0.6, hbR = (s.deckY - s.y0) * 0.45 + 0.6;
@@ -223,6 +278,46 @@ function getCarGeo(model: CarModel, color: string): CarGeo {
       B.push(bar(s.xCowl, s.beltY + 0.15, hl, s.noseY + 0.15, 0.3, 2.4, 2.3, "#f0f0f0"), bar(s.xCowl, s.beltY + 0.15, hl, s.noseY + 0.15, 0.3, 2.4, -2.3, "#f0f0f0"));
       B.push(nb(s.xRoofF - s.xRoofR + 1.5, 0.3, 2.4, rm, s.roofY + 1.05, 2.3, "#f0f0f0"), nb(s.xRoofF - s.xRoofR + 1.5, 0.3, 2.4, rm, s.roofY + 1.05, -2.3, "#f0f0f0"));
       B.push(bar(s.xDeck, s.beltY + 0.15, -hl, s.deckY + 0.15, 0.3, 2.4, 2.3, "#f0f0f0"), bar(s.xDeck, s.beltY + 0.15, -hl, s.deckY + 0.15, 0.3, 2.4, -2.3, "#f0f0f0"));
+      break;
+    case "pickup":
+      // open load bed behind the cab
+      for (const sd of [-1, 1]) B.push(nb(hl + s.xDeck - 1, 5, 1.2, (-hl + s.xDeck) / 2, s.beltY + 2, sd * (hw - 0.6), body));
+      B.push(nb(1.2, 5, s.W - 1, -hl + 0.8, s.beltY + 2, 0, body), nb(hl + s.xDeck - 2, 0.6, s.W - 3, (-hl + s.xDeck) / 2, s.beltY - 0.3, 0, "#1a1a1e"));
+      break;
+    case "offroad":
+      B.push(nb(26, 1.2, s.W - 6, rm, s.roofY + 2.4, 0, "#2a2c33"), nb(20, 4, s.W - 10, rm, s.roofY + 4.6, 0, "#5a5040"));
+      B.push(cylX(6, 2.6, -hl - 1.8, 14, 0, "#121214", 18), nb(2, 4, s.W - 2, hl + 1.5, s.noseY - 2, 0, "#2a2c33"));
+      break;
+    case "tow":
+      B.push(nb(s.xDeck + hl - 2, 2, s.W, (-hl + s.xDeck) / 2, s.deckY, 0, "#3a3d45"));
+      B.push(bar(-8, s.deckY + 1, -hl - 2, s.deckY + 16, 2.4, 3, 0, "#d9b23a"), bar(-8, s.deckY + 1, -8, s.deckY + 14, 2.4, 3, 0, "#d9b23a"));
+      B.push(nb(1, 10, 1, -hl - 2, s.deckY + 10, 0, "#15161b"), nb(3, 2, 6, -hl - 2, s.deckY + 4, 0, "#15161b"));
+      Lg.push(nb(3, 1.4, 10, s.xRoofR + 4, s.roofY + 1.5, 0, "#ffb020", 2.6));
+      break;
+    case "garbage":
+      B.push(rbox(s.xDeck + hl - 1.5, 26, s.W + 1, (-hl + s.xDeck - 1.5) / 2, s.y0 + 15, 0, "#3c6e47", 1.6), nb(2, 18, s.W - 2, -hl - 0.5, s.y0 + 12, 0, "#2a2d36"));
+      for (const sd of [-1, 1]) B.push(nb(s.xDeck + hl - 4, 1.4, 0.4, (-hl + s.xDeck) / 2, s.y0 + 12, sd * (hw + 0.8), "#f4f4f6"));
+      Lg.push(nb(3, 1.4, 10, s.xRoofR + 4, s.roofY + 1.5, 0, "#ffb020", 2.6));
+      break;
+    case "ambulance": case "icecream": {
+      B.push(rbox(s.xDeck + hl - 1, 22, s.W + 0.6, (-hl + s.xDeck - 1) / 2, s.y0 + 12, 0, model === "ambulance" ? "#f4f4f6" : "#f2c7d8", 1.4));
+      if (model === "ambulance") {
+        for (const sd of [-1, 1]) B.push(nb(s.xDeck + hl - 4, 2.4, 0.4, (-hl + s.xDeck) / 2, s.y0 + 9, sd * (hw + 0.6), "#c0392b"), nb(4, 8, 0.4, -12, s.y0 + 15, sd * (hw + 0.6), "#c0392b"), nb(8, 2.4, 0.4, -12, s.y0 + 15, sd * (hw + 0.6), "#c0392b"));
+      } else {
+        for (const sd of [-1, 1]) B.push(nb(20, 9, 0.4, -10, s.y0 + 15, sd * (hw + 0.6), "#2a2d36"), nb(22, 1.4, 4, -10, s.y0 + 10, sd * (hw + 2), "#f4f4f6"));
+        B.push(ni(withColor(new THREE.ConeGeometry(4, 10, 12).rotateX(Math.PI).translate(-10, s.y0 + 30, 0), C("#e0a860"))), ni(withColor(new THREE.SphereGeometry(4.2, 12, 8).translate(-10, s.y0 + 36, 0), C("#ffb3c6"))));
+      }
+      break;
+    }
+    case "fire":
+      B.push(rbox(s.xDeck + hl - 1.5, 20, s.W + 1, (-hl + s.xDeck - 1.5) / 2, s.y0 + 11, 0, body, 1.4));
+      for (const sd of [-1, 1]) for (let i = 0; i < 4; i++) B.push(nb(9, 12, 0.4, -hl + 8 + i * 11, s.y0 + 11, sd * (hw + 1), "#c9ced8"));
+      B.push(nb(s.xDeck + hl - 4, 1.2, 8, (-hl + s.xDeck) / 2, s.y0 + 23, 0, "#c9ced8"));
+      for (let i = 0; i < 10; i++) B.push(nb(0.8, 1.2, 8, -hl + 4 + i * 5, s.y0 + 24.5, 0, "#c9ced8"));
+      B.push(nb(s.L - 2, 1.4, s.W + 0.4, 0, s.y0 + 4, 0, "#f4f4f6"));
+      break;
+    case "unmarked":
+      Lg.push(nb(0.6, 1, 3, hl + 0.3, s.noseY - 3.6, 4, "#2a5bff", 2), nb(0.6, 1, 3, hl + 0.3, s.noseY - 3.6, -4, "#ff1838", 2));
       break;
     case "suv":
       for (const sd of [-1, 1]) B.push(nb(26, 0.8, 0.8, rm, s.roofY + 1.7, sd * (hw - 3), "#2a2c33"), nb(0.8, 1.4, 0.8, rm + 10, s.roofY + 1.1, sd * (hw - 3), "#2a2c33"), nb(0.8, 1.4, 0.8, rm - 10, s.roofY + 1.1, sd * (hw - 3), "#2a2c33"));
@@ -418,7 +513,7 @@ class PedModel {
   }
   update(g: Game, dt: number) {
     const pd = g.ped;
-    const vis = g.onFoot && g.state !== "menu";
+    const vis = g.onFoot && g.state !== "menu" && !g.hide.hiddenIn;
     this.group.visible = vis;
     if (!vis) return;
     this.group.position.set(pd.x, pd.z, pd.y);
@@ -1125,11 +1220,11 @@ export class Renderer3D {
     group.add(shadow, pool);
     const obj: CarObj = { group, tilt, body, glass, lights, pool, wheels, model: c.model, color: c.color, wreck: false, pitch: 0, roll: 0, spinA: 0, steerA: 0 };
     if (c.kind === "player") { obj.glow = new THREE.Mesh(this.glowGeo, this.glowMat); obj.glow.renderOrder = 2; group.add(obj.glow); }
-    if (c.model === "heli") { obj.rotor = new THREE.Mesh(this.rotorGeo, this.rotorMat); obj.rotor.position.y = 27; tilt.add(obj.rotor); shadow.visible = false; }
-    if (c.model === "boat") { shadow.visible = false; pool.visible = false; }
-    if (c.model === "bike") shadow.scale.set(0.6, 1, 0.35);
+    if (isHeli(c.model)) { obj.rotor = new THREE.Mesh(this.rotorGeo, this.rotorMat); obj.rotor.position.y = 27; tilt.add(obj.rotor); shadow.visible = false; }
+    if (isBoat(c.model)) { shadow.visible = false; pool.visible = false; }
+    if (isTwoWheel(c.model)) shadow.scale.set(0.6, 1, 0.35);
     else if (c.model === "bus" || c.model === "truck") shadow.scale.set(1.5, 1, 1.15);
-    if (c.model === "police" || c.model === "swat") {
+    if (c.model === "police" || c.model === "swat" || c.model === "ambulance" || c.model === "fire") {
       const reds = new THREE.MeshBasicMaterial({ color: this.copRed.clone(), toneMapped: false });
       const blues = new THREE.MeshBasicMaterial({ color: this.copBlue.clone(), toneMapped: false });
       const white = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1, 1), toneMapped: false });
@@ -1179,21 +1274,21 @@ export class Renderer3D {
       const k = Math.min(1, dt * (c.air ? 3 : 12));
       o.pitch += (tp - o.pitch) * k; o.roll += (tr - o.roll) * k;
       o.group.rotation.set(o.roll, -c.a, o.pitch);
-      if (c.model === "heli") {
+      if (isHeli(c.model)) {
         // nose down when flying forward, bank into turns, spinning rotor
         o.tilt.rotation.z = clamp(-c.vF / 1400, -0.3, 0.2);
         o.tilt.rotation.x = clamp(-c.av * 0.12, -0.3, 0.3);
         if (o.rotor) o.rotor.rotation.y = c.rotor;
-      } else if (c.model === "boat") {
+      } else if (isBoat(c.model)) {
         o.tilt.rotation.z = clamp(c.vF / 2600, -0.05, 0.16) + Math.sin(t * 2.1 + c.x * 0.01) * 0.02; // bow up when fast
         o.tilt.rotation.x = clamp(-c.av * 0.06, -0.15, 0.15) + Math.sin(t * 1.7 + c.y * 0.01) * 0.02;
-      } else if (c.model === "bike") {
+      } else if (isTwoWheel(c.model)) {
         // lean into the curve; the rider is only there when somebody rides it
         o.tilt.rotation.x = clamp(-c.av * Math.min(1, c.speed / 250) * 0.22, -0.55, 0.55);
         o.glass.visible = c === g.player ? !g.onFoot : c.kind !== "civ" || c.driver;
       } else o.tilt.rotation.x = clamp(-c.vR / 900, -0.09, 0.09);
       if (!isCraft(c.model)) o.tilt.rotation.z = c.dead ? 0 : c.throttle > 0 ? 0.025 * c.throttle : c.throttle < 0 && c.vF > 50 ? -0.04 : 0;
-      o.pool.visible = !c.air && !c.dead && c.model !== "boat";
+      o.pool.visible = !c.air && !c.dead && !isBoat(c.model);
       if (c.dead && !o.wreck) {
         o.wreck = true; o.body.material = this.wreckMat; o.glass.material = this.wreckMat; o.lights.visible = false; o.pool.visible = false;
         if (o.glow) o.glow.visible = false;
@@ -1500,6 +1595,42 @@ export class Renderer3D {
     this.heliSpot.position.set(sx, terrainH(sx, sy) + 1, sy);
   }
 
+  // hide and seek spots (static) and job props (bins, burning bins) plus the bin you carry
+  private propBins: THREE.InstancedMesh | null = null;
+  private carryBin: THREE.Mesh | null = null;
+  private buildProps() {
+    const P: THREE.BufferGeometry[] = [];
+    for (const f of buildHideFields(this.world)) for (const s of f.spots) {
+      const z = terrainH(s.x, s.y);
+      if (s.kind === "bin") P.push(cyl(6, 5.4, 14, s.x, z + 7, s.y, "#2f6b3a", 10), cyl(6.6, 6.6, 1.5, s.x, z + 14.6, s.y, "#244f2c", 10));
+      else if (s.kind === "toilet") P.push(box(14, 30, 14, s.x, z + 15, s.y, "#2b7bd1"), box(15, 2, 15, s.x, z + 31, s.y, "#e8e8ec"), box(1, 22, 8, s.x + 7.2, z + 13, s.y, "#1d5aa0"));
+      else if (s.kind === "chair") P.push(box(16, 4, 12, s.x, z + 2, s.y, "#e8dcc4"), box(16, 20, 3, s.x, z + 12, s.y - 6, "#e8dcc4"), box(17, 3, 13, s.x, z + 22, s.y - 3, "#c0392b"));
+      else if (s.kind === "bush") for (let k = 0; k < 3; k++) P.push(withColor(new THREE.SphereGeometry(9 - k * 1.5, 8, 6).scale(1.2, 0.8, 1.1).translate(s.x + (k - 1) * 6, z + 6 + k, s.y + (k % 2) * 4), C(k % 2 ? "#3f6f2e" : "#4c7d34")));
+    }
+    if (P.length) { const m = new THREE.Mesh(mergeGeometries(P)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 })); m.castShadow = true; m.receiveShadow = true; m.userData.cast = true; this.scene.add(m); this.cityMeshes.push(m); for (const g of P) g.dispose(); }
+    const binGeo = mergeGeometries([withColor(new THREE.CylinderGeometry(6, 5.4, 14, 10).translate(0, 7, 0), C("#3a3d45")), withColor(new THREE.CylinderGeometry(6.6, 6.6, 1.5, 10).translate(0, 14.6, 0), C("#2a2d36"))])!;
+    this.propBins = new THREE.InstancedMesh(binGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }), 24);
+    this.propBins.frustumCulled = false; this.propBins.castShadow = true;
+    this.scene.add(this.propBins);
+    this.carryBin = new THREE.Mesh(binGeo, this.propBins.material as THREE.Material);
+    this.carryBin.visible = false;
+    this.scene.add(this.carryBin);
+  }
+  private syncProps(g: Game) {
+    if (!this.propBins) this.buildProps();
+    const m = this.tmpM, list = g.jobs.props;
+    for (let i = 0; i < 24; i++) {
+      const p = list[i];
+      if (!p) { m.makeScale(0, 0, 0); this.propBins!.setMatrixAt(i, m); continue; }
+      m.makeTranslation(p.x, terrainH(p.x, p.y), p.y);
+      this.propBins!.setMatrixAt(i, m);
+    }
+    this.propBins!.instanceMatrix.needsUpdate = true;
+    const cb = this.carryBin!;
+    cb.visible = g.jobs.carrying && g.onFoot;
+    if (cb.visible) { const pd = g.ped; cb.position.set(pd.x + Math.cos(pd.a) * 8, pd.z + 4, pd.y + Math.sin(pd.a) * 8); cb.rotation.set(0, -pd.a, 0); }
+  }
+
   private tmpM = new THREE.Matrix4(); private tmpQ = new THREE.Quaternion(); private tmpS = new THREE.Vector3(); private tmpP = new THREE.Vector3(); private up = new THREE.Vector3(0, 1, 0);
 
   private updateCamera(g: Game, dt: number) {
@@ -1554,7 +1685,7 @@ export class Renderer3D {
         let desired = p.a;
         if (p.vF > 60) desired = p.a + wrapA(Math.atan2(p.vy, p.vx) - p.a) * 0.55;
         this.camYaw += wrapA(desired - this.camYaw) * (1 - Math.exp(-dt * 5));
-        const fly = p.model === "heli";
+        const fly = isHeli(p.model);
         const full = 112 + sp * 0.07 + (fly ? 70 : 0);
         let dist = full;
         const cx = Math.cos(this.camYaw), cy = Math.sin(this.camYaw);
@@ -1607,7 +1738,8 @@ export class Renderer3D {
     this.syncHeli(g);
     this.syncSpikes(g);
     this.ped.update(g, dt);
-    this.crowd.update(g.peds.list, g.state !== "menu");
+    this.crowd.update(g.peds.list, g.state !== "menu", g.fx, g.fy);
+    this.syncProps(g);
     this.lightsMesh?.update(g.traffic.lights);
     this.updateCamera(g, dt);
     const scale = this.renderer.domElement.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360));

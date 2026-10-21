@@ -83,12 +83,13 @@ export class CrowdRenderer {
     this.looks[i] = look;
   }
 
-  update(list: readonly Civilian[], visible: boolean) {
+  // px, py: the player (people hiding in hide and seek only show up close to you)
+  update(list: readonly Civilian[], visible: boolean, px = 0, py = 0) {
     const M = this.meshes;
     let colors = false;
     for (let i = 0; i < this.max; i++) {
       const c = list[i];
-      if (!visible || !c || !c.active) {
+      if (!visible || !c || !c.active || (c.tag === "hiding" && Math.hypot(c.x - px, c.y - py) > 45)) {
         for (const p of PARTS) M[p].setMatrixAt(i, _zero);
         this.shadow.setMatrixAt(i, _zero);
         continue;

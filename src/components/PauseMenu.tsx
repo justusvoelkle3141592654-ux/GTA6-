@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import type { CameraMode, Game, GameConfig, HudData } from "../game/engine";
 import type { SaveResult } from "../game/save";
 import { MISSIONS } from "../game/missions";
-import { HIDE_ROUNDS } from "../game/hide";
-import { JOB_DEFS, JOB_KINDS, RACES } from "../game/jobs";
+import { JOB_DEFS, JOB_KINDS, RACES, jobLevel } from "../game/jobs";
+import { ContactsTab, GarageTab, HideTab, JobsTab } from "./GameTabs";
 import { ACTIONS, ACTION_LABEL, keyLabel, type Action } from "../game/input";
 import { CHANNELS } from "../game/audio";
 import { SPAWN_MODELS, type SpawnPeople } from "../game/spawner";
@@ -13,7 +13,7 @@ import BigMap from "./BigMap";
 import Help from "./Help";
 import { Btn, fmt, fmtTime } from "./ui";
 
-export type PauseTab = "menu" | "map" | "progress" | "spawn" | "settings" | "help";
+export type PauseTab = "menu" | "map" | "jobs" | "hide" | "contacts" | "progress" | "garage" | "spawn" | "settings" | "help";
 const CAM_LABEL: Record<CameraMode, string> = { chase: "3D Verfolger", fp: "Ego (im Auto)", top: "Vogelperspektive" };
 const SAVE_MSG: Record<SaveResult, string> = {
   saved: "Gespeichert ✓", memory: "Nur vorübergehend gespeichert – der Browser blockiert den lokalen Speicher",
@@ -29,7 +29,9 @@ export default function PauseMenu({ game, tab, setTab, hud, config, isTouch, mut
   const open = config.mode === "open";
   const [saveMsg, setSaveMsg] = useState("");
   const [, redraw] = useState(0);
-  const tabs: [PauseTab, string][] = open ? [["menu", "Menü"], ["map", "Karte"], ["progress", "Fortschritt"], ["spawn", "Spawnen"], ["settings", "Optionen"], ["help", "Hilfe"]] : [["menu", "Menü"], ["settings", "Optionen"], ["help", "Hilfe"]];
+  const tabs: [PauseTab, string][] = open
+    ? [["menu", "Weiter"], ["map", "Karte"], ["jobs", "Jobs"], ["hide", "Verstecken"], ["contacts", "Kontakte"], ["progress", "Fortschritt"], ["garage", "Garage"], ["spawn", "Spawnen"], ["settings", "Einstellungen"], ["help", "Hilfe"]]
+    : [["menu", "Menü"], ["settings", "Einstellungen"], ["help", "Hilfe"]];
   return (
     <div className="absolute inset-0 z-20 flex flex-col items-center overflow-y-auto bg-[#0b0614]/80 p-4 backdrop-blur-sm sm:p-6">
       <h2 className="popin font-display text-6xl tracking-wider text-white neon-text sm:text-7xl">PAUSE</h2>
@@ -53,6 +55,10 @@ export default function PauseMenu({ game, tab, setTab, hud, config, isTouch, mut
           </div>
         )}
         {tab === "map" && <BigMap game={game} onChange={() => redraw((n) => n + 1)} />}
+        {tab === "jobs" && <JobsTab game={game} onDone={onResume} />}
+        {tab === "hide" && <HideTab game={game} onDone={onResume} />}
+        {tab === "contacts" && <ContactsTab game={game} />}
+        {tab === "garage" && <GarageTab game={game} onDone={onResume} />}
         {tab === "progress" && <Progress game={game} />}
         {tab === "spawn" && <SpawnTab game={game} onResume={onResume} />}
         {tab === "settings" && <SettingsTab game={game} isTouch={isTouch} />}
@@ -87,9 +93,9 @@ function Progress({ game }: { game: Game }) {
           <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Nebenbei</h3>
           <div>🐚 Muscheln: <b>{pr.shells.length}/{game.jobs.shells.length}</b></div>
           <div>🛹 Stuntsprünge: <b>{pr.jumps.length}/{game.jobs.jumps.length}</b></div>
-          {JOB_KINDS.map((k) => <div key={k}>💼 {JOB_DEFS[k].name}: <b>{pr.jobs[k] ?? 0}</b> erledigt <span className="text-xs text-white/45">({JOB_DEFS[k].models.join("/")})</span></div>)}
+          {JOB_KINDS.map((k) => <div key={k}>{JOB_DEFS[k].name}: <b>Stufe {jobLevel(pr.jobs[k] ?? 0)}</b> · {pr.jobs[k] ?? 0} erledigt</div>)}
           {RACES.map((r) => <div key={r.id}>🏁 {r.name}: <b>{pr.records[r.id] ? `${pr.records[r.id].toFixed(1)} s` : "–"}</b> <span className="text-xs text-white/45">(Ziel {r.par} s)</span></div>)}
-          <div>🙈 Versteckspiel: <b>{pr.records.hide ?? 0}/{HIDE_ROUNDS.length}</b> Runden</div>
+          <div>Versteckspiel: <b>{Object.entries(pr.records).filter(([k]) => k.startsWith("hide_")).reduce((a, [, v]) => a + v, 0)}</b> gewonnene Runden</div>
           <div>🏦 Bankkonto: <b>${fmt(game.bank)}</b></div>
         </div>
         <div className="rounded-2xl border border-white/10 bg-black/50 p-4 text-sm">

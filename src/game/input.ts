@@ -1,22 +1,22 @@
 // keyboard bindings (rebindable in the settings, stored in localStorage)
 export type Action =
   | "up" | "down" | "left" | "right" | "handbrake" | "nitro" | "fire" | "enter"
-  | "nextWeapon" | "wheel" | "reload" | "detonate" | "camera" | "radio" | "job" | "map" | "pause";
+  | "nextWeapon" | "wheel" | "reload" | "detonate" | "camera" | "radio" | "job" | "phone" | "map" | "pause";
 
-export const ACTIONS: Action[] = ["up", "down", "left", "right", "handbrake", "nitro", "fire", "enter", "nextWeapon", "wheel", "reload", "detonate", "camera", "radio", "job", "map", "pause"];
+export const ACTIONS: Action[] = ["up", "down", "left", "right", "handbrake", "nitro", "fire", "enter", "nextWeapon", "wheel", "reload", "detonate", "camera", "radio", "job", "phone", "map", "pause"];
 
 export const ACTION_LABEL: Record<Action, string> = {
   up: "Gas / vorwärts", down: "Bremse / rückwärts", left: "Links", right: "Rechts", handbrake: "Handbremse / Drift · Hubschrauber steigen",
   nitro: "Nitro / Sprint · Hubschrauber sinken", fire: "Feuer", enter: "Einsteigen / Aussteigen / Betreten", nextWeapon: "Nächste Waffe",
   wheel: "Waffenrad (halten)", reload: "Nachladen", detonate: "Haftbomben zünden", camera: "Kamera wechseln",
-  radio: "Radiosender", job: "Job beenden", map: "Karte", pause: "Pause",
+  radio: "Radiosender", job: "Jobs (Menü) / Job beenden", phone: "Handy", map: "Karte", pause: "Pause",
 };
 
 // the first key of each list is the one you can rebind; the others stay as alternatives
 export const DEFAULT_KEYS: Record<Action, string[]> = {
   up: ["KeyW", "ArrowUp"], down: ["KeyS", "ArrowDown"], left: ["KeyA", "ArrowLeft"], right: ["KeyD", "ArrowRight"],
   handbrake: ["Space"], nitro: ["ShiftLeft", "ShiftRight"], fire: ["KeyF", "ControlLeft", "ControlRight"], enter: ["KeyE"],
-  nextWeapon: ["KeyQ"], wheel: ["Tab"], reload: ["KeyR"], detonate: ["KeyG"], camera: ["KeyC", "KeyV"], radio: ["KeyN"], job: ["KeyJ"],
+  nextWeapon: ["KeyQ"], wheel: ["Tab"], reload: ["KeyR"], detonate: ["KeyG"], camera: ["KeyC", "KeyV"], radio: ["KeyN"], job: ["KeyJ"], phone: ["KeyT"],
   map: ["KeyM"], pause: ["KeyP", "Escape"],
 };
 

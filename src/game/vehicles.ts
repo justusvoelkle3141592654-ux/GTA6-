@@ -1,13 +1,23 @@
 // vehicle data and the shared car entity
 import { noTune, type Tune } from "./garage";
 
-export type CarModel = "sport" | "super" | "muscle" | "suv" | "sedan" | "van" | "police" | "taxi" | "bike" | "truck" | "bus" | "swat" | "armor" | "boat" | "heli";
-export const CAR_MODELS: CarModel[] = ["sport", "super", "muscle", "suv", "sedan", "van", "police", "taxi", "bike", "truck", "bus", "swat", "armor", "boat", "heli"];
+export type CarModel = "sport" | "super" | "muscle" | "suv" | "sedan" | "van" | "police" | "taxi" | "bike" | "truck" | "bus" | "swat" | "armor" | "boat" | "heli"
+  | "roadster" | "pickup" | "compact" | "wagon" | "offroad" | "tow" | "garbage" | "ambulance" | "fire" | "icecream" | "policebike" | "unmarked"
+  | "scooter" | "bicycle" | "jetski" | "fishboat" | "policeboat" | "policeheli";
+export const CAR_MODELS: CarModel[] = ["sport", "super", "muscle", "suv", "sedan", "van", "police", "taxi", "bike", "truck", "bus", "swat", "armor", "boat", "heli",
+  "roadster", "pickup", "compact", "wagon", "offroad", "tow", "garbage", "ambulance", "fire", "icecream", "policebike", "unmarked", "scooter", "bicycle", "jetski", "fishboat", "policeboat", "policeheli"];
+export const isBoat = (m: CarModel) => m === "boat" || m === "jetski" || m === "fishboat" || m === "policeboat";
+export const isHeli = (m: CarModel) => m === "heli" || m === "policeheli";
+export const isTwoWheel = (m: CarModel) => m === "bike" || m === "policebike" || m === "scooter" || m === "bicycle";
+export const isPoliceModel = (m: CarModel) => m === "police" || m === "swat" || m === "policebike" || m === "unmarked" || m === "policeboat" || m === "policeheli";
 // not a car: drives on water / flies (own physics, no garage, no traffic)
-export const isCraft = (m: CarModel) => m === "boat" || m === "heli";
+export const isCraft = (m: CarModel) => isBoat(m) || isHeli(m);
 export const MODEL_NAME: Record<CarModel, string> = {
   sport: "Corsaro", super: "Zephyra", muscle: "Torvan", suv: "Granit", sedan: "Limousine", van: "Lieferwagen", police: "Streifenwagen",
   taxi: "Taxi", bike: "Motorrad", truck: "Lastwagen", bus: "Stadtbus", swat: "SEK-Transporter", armor: "Radpanzer", boat: "Speedboot", heli: "Hubschrauber",
+  roadster: "Velocia", pickup: "Bravado-Pickup", compact: "Kompaktwagen", wagon: "Kombi", offroad: "Geländewagen", tow: "Abschleppwagen",
+  garbage: "Müllwagen", ambulance: "Krankenwagen", fire: "Löschfahrzeug", icecream: "Eiswagen", policebike: "Polizeimotorrad", unmarked: "Zivilstreife",
+  scooter: "Roller", bicycle: "Fahrrad", jetski: "Jetski", fishboat: "Fischerboot", policeboat: "Polizeiboot", policeheli: "Polizeihubschrauber",
 };
 
 export interface CarDef { id: string; name: string; model: CarModel; color: string; maxV: number; acc: number; grip: number; hp: number; mass: number; desc: string; }
@@ -38,6 +48,24 @@ export const MODEL_STATS: Record<CarModel, ModelStats> = {
   armor: { maxV: 440, acc: 430, grip: 13, hp: 600, mass: 4, price: 9000 },
   boat: { maxV: 520, acc: 520, grip: 2.6, hp: 140, mass: 1.2, price: 6000 },
   heli: { maxV: 480, acc: 380, grip: 2, hp: 200, mass: 1.5, price: 12000 },
+  roadster: { maxV: 600, acc: 700, grip: 11, hp: 90, mass: 1.1, price: 6000 },
+  pickup: { maxV: 500, acc: 560, grip: 10, hp: 170, mass: 1.7, price: 2600 },
+  compact: { maxV: 450, acc: 520, grip: 11, hp: 80, mass: 0.75, price: 900 },
+  wagon: { maxV: 470, acc: 520, grip: 11, hp: 100, mass: 0.95, price: 1300 },
+  offroad: { maxV: 470, acc: 540, grip: 12, hp: 190, mass: 1.9, price: 3200 },
+  tow: { maxV: 380, acc: 380, grip: 12, hp: 220, mass: 2.6, price: 1800 },
+  garbage: { maxV: 320, acc: 280, grip: 13, hp: 280, mass: 3.4, price: 1600 },
+  ambulance: { maxV: 480, acc: 520, grip: 12, hp: 180, mass: 2, price: 2400 },
+  fire: { maxV: 400, acc: 380, grip: 12, hp: 300, mass: 3.4, price: 3000 },
+  icecream: { maxV: 360, acc: 380, grip: 12, hp: 140, mass: 1.8, price: 1200 },
+  policebike: { maxV: 600, acc: 780, grip: 13, hp: 70, mass: 0.6, price: 2200 },
+  unmarked: { maxV: 580, acc: 660, grip: 11, hp: 120, mass: 1.3, price: 2600 },
+  scooter: { maxV: 340, acc: 500, grip: 12, hp: 40, mass: 0.4, price: 600 },
+  bicycle: { maxV: 230, acc: 320, grip: 12, hp: 30, mass: 0.25, price: 200 },
+  jetski: { maxV: 560, acc: 640, grip: 2.8, hp: 60, mass: 0.5, price: 3000 },
+  fishboat: { maxV: 330, acc: 300, grip: 2, hp: 200, mass: 2, price: 4000 },
+  policeboat: { maxV: 540, acc: 540, grip: 2.6, hp: 180, mass: 1.4, price: 6000 },
+  policeheli: { maxV: 500, acc: 400, grip: 2, hp: 260, mass: 1.6, price: 14000 },
 };
 
 // half length / half width of each model (collision boxes match the drawn models)
@@ -45,6 +73,10 @@ export const MODEL_DIM: Record<CarModel, { hl: number; hw: number }> = {
   sport: { hl: 24, hw: 12 }, super: { hl: 25, hw: 12.5 }, muscle: { hl: 25, hw: 12.5 }, suv: { hl: 25, hw: 13 }, sedan: { hl: 24, hw: 12 },
   van: { hl: 26, hw: 12.5 }, police: { hl: 25, hw: 12.5 }, taxi: { hl: 24, hw: 12 }, bike: { hl: 17, hw: 4.5 }, truck: { hl: 33, hw: 13.5 },
   bus: { hl: 41, hw: 14 }, swat: { hl: 27, hw: 13 }, armor: { hl: 31, hw: 14.5 }, boat: { hl: 28, hw: 11 }, heli: { hl: 30, hw: 12 },
+  roadster: { hl: 23, hw: 11.5 }, pickup: { hl: 27, hw: 13 }, compact: { hl: 20, hw: 11 }, wagon: { hl: 25, hw: 12 }, offroad: { hl: 25, hw: 13.5 },
+  tow: { hl: 33, hw: 13.5 }, garbage: { hl: 36, hw: 14 }, ambulance: { hl: 28, hw: 13 }, fire: { hl: 40, hw: 14 }, icecream: { hl: 27, hw: 13 },
+  policebike: { hl: 17, hw: 4.5 }, unmarked: { hl: 24, hw: 12 }, scooter: { hl: 12, hw: 4 }, bicycle: { hl: 11, hw: 3 },
+  jetski: { hl: 14, hw: 6 }, fishboat: { hl: 34, hw: 13 }, policeboat: { hl: 30, hw: 12 }, policeheli: { hl: 30, hw: 12 },
 };
 
 export type CarKind = "player" | "cop" | "civ";

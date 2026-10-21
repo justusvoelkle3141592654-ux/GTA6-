@@ -5,11 +5,11 @@ import { Bar, Stars, ammoText, fmt, fmtTime, wIcon, wName } from "./ui";
 
 interface Props {
   hud: HudData; isTouch: boolean; rules: ModeRules; camera: CameraMode;
-  onPause: () => void; onCam: () => void; onToggleCar: () => void; onInteract: () => void; onRadio: () => void; onJob: () => void;
+  onPause: () => void; onCam: () => void; onToggleCar: () => void; onInteract: () => void; onRadio: () => void; onJob: () => void; onPhone: () => void;
   onDetonate: () => void; onWeapon: (w: Weapon) => void; onWheel: () => void;
 }
 
-export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onToggleCar, onInteract, onRadio, onJob, onDetonate, onWeapon, onWheel }: Props) {
+export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onToggleCar, onInteract, onRadio, onJob, onPhone, onDetonate, onWeapon, onWheel }: Props) {
   const ammo = ammoText(hud.ammo, hud.reserve);
   return (
     <div className="pointer-events-none absolute inset-0 z-10 select-none">
@@ -43,7 +43,8 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onTog
           {hud.onFoot ? "🚗 EINSTEIGEN" : "🚪 AUSSTEIGEN"}
         </button>
         {!hud.onFoot && rules.city && <button onClick={onRadio} className="flex h-11 items-center justify-center rounded-full border border-white/20 bg-black/40 px-3 text-xs font-bold backdrop-blur active:scale-90" aria-label="Radio">📻</button>}
-        {hud.job && <button onClick={onJob} className={"flex h-11 items-center justify-center rounded-full border px-3 text-xs font-bold backdrop-blur active:scale-90 " + (hud.job === "starten" ? "border-cyan-300 bg-cyan-400/25" : "border-white/20 bg-black/40")}>💼 JOB {hud.job === "starten" ? "" : "ENDE"}{!isTouch && " [J]"}</button>}
+        {hud.job && rules.city && <button onClick={onJob} className={"flex h-11 items-center justify-center rounded-full border px-3 text-xs font-bold backdrop-blur active:scale-90 " + (hud.job === "beenden" ? "border-cyan-300 bg-cyan-400/25" : "border-white/20 bg-black/40")}>{hud.job === "beenden" ? "JOB ENDE" : "JOBS"}{!isTouch && " [J]"}</button>}
+        {rules.city && <button onClick={onPhone} className="flex h-11 items-center justify-center rounded-full border border-white/20 bg-black/40 px-3 text-xs font-bold backdrop-blur active:scale-90" aria-label="Handy">HANDY{!isTouch && " [T]"}</button>}
       </div>
       <div className="absolute left-1/2 top-16 -translate-x-1/2 text-center text-xs font-semibold tracking-widest text-white/60">{fmtTime(hud.time)}{rules.cops && !rules.respawn && <> · {hud.takedowns} 🚓</>}</div>
 

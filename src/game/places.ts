@@ -1,5 +1,7 @@
 import { BLOCK, ROAD, GRID, HELIPAD, type Building, type World } from "./world";
 import type { EndReason } from "./engine";
+import type { JobKind } from "./jobs";
+import { STUNT_PARK } from "./terrain";
 
 export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport" | "park" | "job";
 export type PlaceAccess = "foot" | "car" | "both" | "none";
@@ -12,7 +14,7 @@ export interface PlaceDef {
   robbable?: boolean;
   at?: [number, number, number]; // fixed spot outside the city blocks (x, y, facing); vehicles wait next to it
   inPark?: boolean;              // entrance at the west edge of the nearest park (cx, cy: middle of the park)
-  job?: "taxi" | "delivery" | "bounty"; // job start point: the vehicle waits at the car spot, drive into the ring to start
+  job?: JobKind;                 // job start point: the vehicle waits at the car spot, drive into the ring to start
 }
 // boat jetty on the beach and the helipad north of the industrial district
 export const DOCK_SPOT = { x: -340, y: 3455, a: Math.PI };
@@ -41,6 +43,18 @@ export const PLACE_DEFS: PlaceDef[] = [
   { id: "taxistand", kind: "job", job: "taxi", name: "Taxistand", color: "#ffc21a", icon: "X", near: [6, 10], access: "both" },
   { id: "depot", kind: "job", job: "delivery", name: "Lieferdepot", color: "#e67e22", icon: "P", near: [13, 9], access: "both" },
   { id: "patrol", kind: "job", job: "bounty", name: "Streife (Revier)", color: "#3d8bff", icon: "S", near: [10, 3], access: "both" },
+  { id: "ambulance", kind: "job", job: "ambulance", name: "Rettungswache", color: "#ff4d6d", icon: "N", near: [5, 10], access: "both" },
+  { id: "firestation", kind: "job", job: "fire", name: "Feuerwache", color: "#ff5a3d", icon: "Q", near: [11, 7], access: "both" },
+  { id: "trashyard", kind: "job", job: "trash", name: "Müllhof", color: "#3c9a57", icon: "U", near: [14, 6], access: "both" },
+  { id: "towyard", kind: "job", job: "tow", name: "Abschlepphof", color: "#e1b12c", icon: "Y", near: [15, 10], access: "both" },
+  { id: "busdepot", kind: "job", job: "bus", name: "Busdepot", color: "#2bb3ff", icon: "O", near: [8, 12], access: "both" },
+  { id: "icefactory", kind: "job", job: "icecream", name: "Eisfabrik", color: "#ff9ad5", icon: "E", near: [6, 13], access: "both" },
+  { id: "courier", kind: "job", job: "courier", name: "Kurierzentrale", color: "#ff8a1f", icon: "C", near: [7, 4], access: "both" },
+  { id: "hunter", kind: "job", job: "hunter", name: "Kopfgeldbüro", color: "#9d4dff", icon: "Z", near: [11, 4], access: "both" },
+  { id: "racescene", kind: "job", job: "race", name: "Rennszene", color: "#c86bff", icon: "1", near: [3, 2], access: "both" },
+  { id: "watertaxi", kind: "job", job: "watertaxi", name: "Wassertaxi", color: "#2bf0ff", icon: "J", near: [0, 6], access: "foot", at: [-150, 3330, Math.PI] },
+  { id: "tours", kind: "job", job: "heli", name: "Rundflüge", color: "#ffd23f", icon: "G", near: [15, 1], access: "foot", at: [HELIPAD.x - 100, HELIPAD.y - 150, Math.PI] },
+  { id: "stuntpark", kind: "job", job: "stunt", name: "Stunt-Park", color: "#ffd23f", icon: "2", near: [14, 0], access: "both", at: [STUNT_PARK.x0 - 130, (STUNT_PARK.y0 + STUNT_PARK.y1) / 2 + 60, Math.PI] },
   // hide and seek in the park
   { id: "hide", kind: "park", name: "Versteckspiel im Park", color: "#3dff8b", icon: "V", near: [9, 10], access: "foot", inPark: true },
   { id: "jetty", kind: "dock", name: "Bootssteg", color: "#2bb3ff", icon: "B", near: [0, 9], access: "none", at: [-196, 3455, Math.PI] },

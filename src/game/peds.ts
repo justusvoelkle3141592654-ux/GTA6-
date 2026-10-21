@@ -562,7 +562,7 @@ export class PedSystem {
       const lx = dx * ca + dy * sa, ly = -dx * sa + dy * ca;
       if (Math.abs(lx) > car.hl + PED_R || Math.abs(ly) > car.hw + PED_R) continue; // the real size of this car
       const sp = car.speed;
-      if (sp > 60 && !car.dead && (c.role !== "seeker" || (car.kind === "player" && !h.onFoot))) { // traffic never runs over the hide-and-seek players
+      if (sp > 60 && !car.dead && (c.role !== "seeker" || (car.kind === "player" && !h.onFoot && sp > 150))) { // hide and seek: only running them over on purpose counts
         const s = sp * 0.7;
         const side = ly >= 0 ? 1 : -1;
         this.knockDown(c, car.vx * 0.7 - sa * side * 40, car.vy * 0.7 + ca * side * 40, 60 + s * 0.35);

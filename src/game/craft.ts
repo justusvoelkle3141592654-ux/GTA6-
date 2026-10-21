@@ -1,4 +1,4 @@
-import { Car, MODEL_STATS, type CarModel } from "./vehicles";
+import { Car, MODEL_STATS, isBoat, isHeli, type CarModel } from "./vehicles";
 import { WATER_Y, isWater, terrainH } from "./world";
 import { DOCK_SPOT, HELI_SPOT } from "./places";
 import { steerTo } from "./traffic";
@@ -40,7 +40,7 @@ export class Craft {
     for (const c of g.cars) if (c.model === model && !c.dead && Math.hypot(c.x - x, c.y - y) < SPOT_FREE) return;
     const c = new Car("civ", model, color);
     const st = MODEL_STATS[model];
-    c.x = x; c.y = y; c.a = a; c.z = model === "boat" ? WATER_Y : terrainH(x, y) + (model === "heli" ? 3 : 0);
+    c.x = x; c.y = y; c.a = a; c.z = isBoat(model) ? WATER_Y : terrainH(x, y) + (isHeli(model) ? 3 : 0);
     c.hp = c.maxHp = st.hp; c.mass = st.mass;
     c.parked = true; c.handbrake = true; c.owned = true; // free to use: no crime
     g.cars.push(c);
@@ -107,7 +107,7 @@ export class Craft {
   // ---------- helicopter ----------
   // lift: +1 climb, -1 descend, 0 hold the altitude; the player's input or -1 (lands by itself when empty)
   fly(c: Car, dt: number, lift: number, engine: boolean) {
-    const g = this.g, st = MODEL_STATS.heli;
+    const g = this.g, st = MODEL_STATS[c.model];
     const ground = g.groundAt(c.x, c.y);
     c.rotor += dt * (engine ? 42 : c.z > ground + 1 ? 30 : 6);
     const ca = Math.cos(c.a), sa = Math.sin(c.a);

@@ -20,6 +20,7 @@ export interface Progress {
   jobs: Record<string, number>;     // side job level per kind
   rep: Record<FactionId, number>;   // gang reputation (-100 hostile .. 100 friendly)
   records: Record<string, number>;  // best race times etc.
+  unlocks: string[];                // rewards of job levels ("paint:#hex", "outfit:kind", "slot:kind")
 }
 export interface SaveData {
   v: typeof SAVE_VERSION;
@@ -43,7 +44,7 @@ export interface SaveData {
 export type SaveResult = "saved" | "memory" | "wanted" | "busy" | "mode";
 
 export const emptyStats = (): SaveStats => ({ playTime: 0, carsStolen: 0, pedsHit: 0, deaths: 0, arrests: 0, maxStars: 0, earned: 0, jobsDone: 0 });
-export const emptyProgress = (): Progress => ({ missions: [], shells: [], jumps: [], jobs: {}, rep: { halcones: 0, kings: 0 }, records: {} });
+export const emptyProgress = (): Progress => ({ missions: [], shells: [], jumps: [], jobs: {}, rep: { halcones: 0, kings: 0 }, records: {}, unlocks: [] });
 
 // fallback when localStorage is missing or blocked: keeps the save until the page is reloaded
 let memory: string | null = null;
@@ -146,6 +147,7 @@ function validate(d: unknown): SaveData | null {
     progress.missions = Array.isArray(pr.missions) ? pr.missions.filter((m): m is string => typeof m === "string") : [];
     progress.shells = numList(pr.shells); progress.jumps = numList(pr.jumps);
     progress.jobs = numMap(pr.jobs); progress.records = numMap(pr.records);
+    progress.unlocks = Array.isArray(pr.unlocks) ? pr.unlocks.filter((u): u is string => typeof u === "string").slice(0, 100) : [];
     if (isObj(pr.rep)) { progress.rep.halcones = clampN(pr.rep.halcones, -100, 100, 0); progress.rep.kings = clampN(pr.rep.kings, -100, 100, 0); }
   }
   const garage: OwnedCar[] = [];
