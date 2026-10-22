@@ -1762,10 +1762,11 @@ export class Renderer3D {
         if (Math.hypot(pd.vx, pd.vy) > 30) this.camYaw += wrapA(Math.atan2(pd.vy, pd.vx) - this.camYaw) * (1 - Math.exp(-dt * 2.5));
         const cx = Math.cos(this.camYaw + this.lookYaw), cy = Math.sin(this.camYaw + this.lookYaw);
         // inside a shop: closer, the walls on the camera side become see-through (interiors3d)
-        const it = g.inside, far = it ? 56 : 108;
+        // "near" (setting / zoom button): about half the distance, people look twice as big
+        const it = g.inside, near = currentSettings.camNear, far = it ? 56 : near ? 54 : 108, chk = near ? 48 : 95;
         let dist = far;
-        if (!it) for (let s = 0.15; s <= 1.0001; s += 0.1) if (this.world.isSolid(fx - cx * 95 * s, fy - cy * 95 * s, 6)) { dist = Math.max(28, 95 * s - 10); break; }
-        tgt.set(fx - cx * dist * Math.cos(this.lookPitch * 0.6), fz + (it ? 62 : 54) + this.lookPitch * 60, fy - cy * dist * Math.cos(this.lookPitch * 0.6));
+        if (!it) for (let s = 0.15; s <= 1.0001; s += 0.1) if (this.world.isSolid(fx - cx * chk * s, fy - cy * chk * s, 6)) { dist = Math.max(24, chk * s - 8); break; }
+        tgt.set(fx - cx * dist * Math.cos(this.lookPitch * 0.6), fz + (it ? 62 : near ? 30 : 54) + this.lookPitch * (near ? 40 : 60), fy - cy * dist * Math.cos(this.lookPitch * 0.6));
         // the camera stays inside the room (from above, the roof is hidden)
         if (it) { tgt.x = clamp(tgt.x, it.x0 + 6, it.x1 - 6); tgt.z = clamp(tgt.z, it.y0 + 6, it.y1 - 6); }
         lx = fx + cx * 30; ly = fz + 16; lz = fy + cy * 30; fov = 60; kp = 9;
@@ -1774,12 +1775,13 @@ export class Renderer3D {
         if (p.vF > 60) desired = p.a + wrapA(Math.atan2(p.vy, p.vx) - p.a) * 0.55;
         this.camYaw += wrapA(desired - this.camYaw) * (1 - Math.exp(-dt * 5));
         const fly = isHeli(p.model);
-        const full = 128 + sp * 0.07 + (fly ? 70 : 0);
+        const zoom = currentSettings.camNear ? (fly ? 0.75 : 0.6) : 1;
+        const full = (128 + sp * 0.07 + (fly ? 70 : 0)) * zoom;
         let dist = full;
         const cx = Math.cos(this.camYaw + this.lookYaw), cy = Math.sin(this.camYaw + this.lookYaw);
         for (let s = 0.12; s <= 1.0001; s += 0.08) if (this.world.isSolid(p.x - cx * full * s, p.y - cy * full * s, 6)) { dist = Math.max(36, full * s - 12); break; }
         const behindH = terrainH(p.x - cx * dist, p.y - cy * dist);
-        let h = (46 + sp * 0.025 + (fly ? 45 : 0)) * (0.55 + 0.45 * (dist / full)) + (g.ending ? 40 : 0) + this.lookPitch * 70;
+        let h = (46 + sp * 0.025 + (fly ? 45 : 0)) * zoom * (0.55 + 0.45 * (dist / full)) + (g.ending ? 40 : 0) + this.lookPitch * 70;
         // in the tunnel the camera stays under the ceiling, close behind the car
         const tf = tunnelAt(p.x, p.y), tb = tunnelAt(p.x - cx * dist, p.y - cy * dist);
         const inTunnel = (!isNaN(tf) && p.z < tf + TUNNEL.clear) || (!isNaN(tb) && p.z < tb + TUNNEL.clear);
@@ -1791,7 +1793,7 @@ export class Renderer3D {
       }
     } else {
       const ax = fx + g.fvx * 0.35, az = fy + g.fvy * 0.35;
-      const h = (g.onFoot ? 320 : 560 + sp * 0.35) + (g.ending ? -120 : 0);
+      const h = (g.onFoot ? 320 : 560 + sp * 0.35) * (currentSettings.camNear ? 0.6 : 1) + (g.ending ? -120 : 0);
       tgt.set(ax, fz + h, az + h * 0.42);
       lx = ax; ly = fz; lz = az; fov = 50 + (p.nitro && !g.onFoot ? 5 : 0); kp = 5;
       this.camYaw = -Math.PI / 2;

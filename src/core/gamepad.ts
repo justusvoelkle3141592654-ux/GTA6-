@@ -5,12 +5,12 @@ import type { Action } from "./input";
 // button index (standard mapping) -> action; in the car some buttons mean something else (see carAction)
 const FOOT: Partial<Record<number, Action>> = {
   0: "enter", 1: "handbrake", 2: "reload", 3: "camera", 4: "nextWeapon", 5: "nitro", 7: "fire",
-  8: "map", 9: "pause", 10: "radio", 11: "wheel", 12: "job", 13: "detonate", 14: "radio", 15: "phone",
+  8: "map", 9: "pause", 10: "radio", 11: "wheel", 12: "job", 13: "detonate", 14: "zoom", 15: "phone",
 };
 const CAR: Partial<Record<number, Action>> = { 2: "fire", 7: "up", 6: "down" }; // X shoots from the car, triggers: gas and brake
 export const PAD_LABEL: Partial<Record<Action, string>> = {
   enter: "A", handbrake: "B", reload: "X", camera: "Y", nextWeapon: "LB", nitro: "RB", fire: "RT (im Auto X)", up: "RT / linker Stick",
-  down: "LT / linker Stick", map: "Back", pause: "Start", radio: "L3 / Steuerkreuz links", wheel: "R3", job: "Steuerkreuz oben", detonate: "Steuerkreuz unten", phone: "Steuerkreuz rechts",
+  down: "LT / linker Stick", map: "Back", pause: "Start", radio: "L3", zoom: "Steuerkreuz links", wheel: "R3", job: "Steuerkreuz oben", detonate: "Steuerkreuz unten", phone: "Steuerkreuz rechts",
 };
 
 export interface PadState { active: boolean; lx: number; ly: number; rx: number; ry: number; lt: number; rt: number; name: string }

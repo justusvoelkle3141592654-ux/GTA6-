@@ -228,6 +228,7 @@ function SettingsTab({ game, isTouch }: { game: Game; isTouch: boolean }) {
         <Slider label="HUD-Größe" value={s.hudScale} min={0.8} max={1.3} step={0.05} fmt={(v) => `${Math.round(v * 100)} %`} onChange={(v) => update({ ...s, hudScale: v })} />
         <Slider label="Untertitel" value={s.subtitle} min={0.8} max={1.4} step={0.05} fmt={(v) => `${Math.round(v * 100)} %`} onChange={(v) => update({ ...s, subtitle: v })} />
         <Slider label="Kamera-Tempo" value={s.camSens} min={0.5} max={2} step={0.1} fmt={(v) => `${v.toFixed(1).replace(".", ",")}x`} onChange={(v) => update({ ...s, camSens: v })} />
+        <label className="mb-1 flex items-center gap-2"><input type="checkbox" checked={s.camNear} onChange={(e) => update({ ...s, camNear: e.target.checked })} className="accent-pink-500" /> Kamera nah (Figuren und Autos größer im Bild)</label>
         <label className="mb-1 flex items-center gap-2"><input type="checkbox" checked={s.invertY} onChange={(e) => update({ ...s, invertY: e.target.checked })} className="accent-pink-500" /> Y-Achse umkehren</label>
         <label className="mb-1 flex items-center gap-2"><input type="checkbox" checked={s.mapRotate} onChange={(e) => update({ ...s, mapRotate: e.target.checked })} className="accent-pink-500" /> Minikarte dreht mit</label>
         <label className="mb-1 flex items-center gap-2"><input type="checkbox" checked={s.seekerCones} onChange={(e) => update({ ...s, seekerCones: e.target.checked })} className="accent-pink-500" /> Sichtkegel der Sucher (Versteckspiel)</label>

@@ -15,12 +15,13 @@ export interface Settings {
   seekerCones: boolean;       // hide and seek: show the seekers' view on the minimap
   vehSpeed: number;           // multiplier for the top speed and pull of your own vehicle 1 .. 5
   traffic: number;            // multiplier for the number of cars driving around 0 .. 3
+  camNear: boolean;           // the follow camera stays close (people and cars look bigger)
 }
 
 const KEY = "solarabay.settings.v1";
 export const defaultSettings = (): Settings => ({
   volume: { master: 1, effects: 1, engine: 1, radio: 0.7 }, tips: true, shake: true,
-  dayMinutes: 24, weather: true, viewDist: 1, shadows: true, hudScale: 1, subtitle: 1, camSens: 1, invertY: false, mapRotate: false, seekerCones: true, vehSpeed: 1, traffic: 1,
+  dayMinutes: 24, weather: true, viewDist: 1, shadows: true, hudScale: 1, subtitle: 1, camSens: 1, invertY: false, mapRotate: false, seekerCones: true, vehSpeed: 1, traffic: 1, camNear: true,
 });
 
 export function loadSettings(): Settings {
@@ -36,7 +37,7 @@ export function loadSettings(): Settings {
     const num = (v: unknown, a: number, b: number, def: number) => (typeof v === "number" && Number.isFinite(v) ? Math.max(a, Math.min(b, v)) : def);
     s.viewDist = num(d.viewDist, 0.6, 1.4, 1); s.hudScale = num(d.hudScale, 0.8, 1.3, 1); s.subtitle = num(d.subtitle, 0.8, 1.4, 1); s.camSens = num(d.camSens, 0.5, 2, 1);
     s.vehSpeed = num(d.vehSpeed, 1, 5, 1); s.traffic = num(d.traffic, 0, 3, 1);
-    for (const k of ["weather", "shadows", "invertY", "mapRotate", "seekerCones"] as const) if (typeof d[k] === "boolean") s[k] = d[k] as boolean;
+    for (const k of ["weather", "shadows", "invertY", "mapRotate", "seekerCones", "camNear"] as const) if (typeof d[k] === "boolean") s[k] = d[k] as boolean;
   } catch { /* ignore */ }
   return s;
 }

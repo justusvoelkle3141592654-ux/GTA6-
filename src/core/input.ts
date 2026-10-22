@@ -1,14 +1,14 @@
 // keyboard bindings (rebindable in the settings, stored in localStorage)
 export type Action =
   | "up" | "down" | "left" | "right" | "handbrake" | "nitro" | "fire" | "enter"
-  | "nextWeapon" | "wheel" | "reload" | "detonate" | "camera" | "radio" | "job" | "phone" | "map" | "pause";
+  | "nextWeapon" | "wheel" | "reload" | "detonate" | "camera" | "zoom" | "radio" | "job" | "phone" | "map" | "pause";
 
-export const ACTIONS: Action[] = ["up", "down", "left", "right", "handbrake", "nitro", "fire", "enter", "nextWeapon", "wheel", "reload", "detonate", "camera", "radio", "job", "phone", "map", "pause"];
+export const ACTIONS: Action[] = ["up", "down", "left", "right", "handbrake", "nitro", "fire", "enter", "nextWeapon", "wheel", "reload", "detonate", "camera", "zoom", "radio", "job", "phone", "map", "pause"];
 
 export const ACTION_LABEL: Record<Action, string> = {
   up: "Gas / vorwärts", down: "Bremse / rückwärts", left: "Links", right: "Rechts", handbrake: "Handbremse / Drift · Hubschrauber steigen",
   nitro: "Nitro / Sprint · Hubschrauber sinken", fire: "Feuer", enter: "Einsteigen / Aussteigen / Betreten", nextWeapon: "Nächste Waffe",
-  wheel: "Waffenrad (halten)", reload: "Nachladen", detonate: "Haftbomben zünden", camera: "Kamera wechseln",
+  wheel: "Waffenrad (halten)", reload: "Nachladen", detonate: "Haftbomben zünden", camera: "Kamera wechseln", zoom: "Kamera nah / weit",
   radio: "Radiosender", job: "Jobs (Menü) / Job beenden", phone: "Handy", map: "Karte", pause: "Pause",
 };
 
@@ -16,7 +16,7 @@ export const ACTION_LABEL: Record<Action, string> = {
 export const DEFAULT_KEYS: Record<Action, string[]> = {
   up: ["KeyW", "ArrowUp"], down: ["KeyS", "ArrowDown"], left: ["KeyA", "ArrowLeft"], right: ["KeyD", "ArrowRight"],
   handbrake: ["Space"], nitro: ["ShiftLeft", "ShiftRight"], fire: ["KeyF", "ControlLeft", "ControlRight"], enter: ["KeyE"],
-  nextWeapon: ["KeyQ"], wheel: ["Tab"], reload: ["KeyR"], detonate: ["KeyG"], camera: ["KeyC", "KeyV"], radio: ["KeyN"], job: ["KeyJ"], phone: ["KeyT"],
+  nextWeapon: ["KeyQ"], wheel: ["Tab"], reload: ["KeyR"], detonate: ["KeyG"], camera: ["KeyC", "KeyV"], zoom: ["KeyX"], radio: ["KeyN"], job: ["KeyJ"], phone: ["KeyT"],
   map: ["KeyM"], pause: ["KeyP", "Escape"],
 };
 

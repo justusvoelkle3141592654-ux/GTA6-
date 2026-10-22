@@ -21,7 +21,7 @@ import { Bindings, type Action } from "./input";
 import { Gamepads } from "./gamepad";
 import { Missions } from "../gameplay/missions";
 import { Jobs, JOB_DEFS, JOB_KINDS, type JobKind } from "../gameplay/jobs";
-import { currentSettings } from "./settings";
+import { applySettings, currentSettings, saveSettings } from "./settings";
 import { findRoute, MAX_ROUTE } from "../world/route";
 import { Tips } from "./tips";
 import { Police } from "../ai/police";
@@ -84,6 +84,7 @@ export interface HudData {
   job: string;            // "starten" / "beenden" when the job key does something
   alt: number;            // flying: metres above the ground (-1 = not in the helicopter / fly mode)
   fly: boolean;           // fly mode on
+  camNear: boolean;       // follow camera close
   swim: boolean;          // swimming in the bay
 }
 export type EndReason = "dead" | "arrested";
@@ -297,6 +298,13 @@ export class Game {
     if (this.state === "menu" && this.player) { const d = this.carDef; this.player.model = d.model; this.player.color = d.color; }
   }
   setCamera(c: CameraMode) { this.config.camera = c; this.r3d.camMode = c; this.cb.onCamera(c); }
+  // follow camera close (default) or far; stored with the settings
+  toggleZoom() {
+    const s = { ...currentSettings, camNear: !currentSettings.camNear };
+    saveSettings(s); applySettings(s);
+    this.setHint(s.camNear ? "Kamera nah" : "Kamera weit", 1.5);
+    return s.camNear;
+  }
   cycleCamera() { const o: CameraMode[] = ["chase", "fp", "top"]; this.setCamera(o[(o.indexOf(this.config.camera) + 1) % 3]); }
 
   // ---------- input ----------
@@ -318,6 +326,7 @@ export class Game {
     if (b.is("pause", k) || k === "Escape") { if (this.state === "playing") this.pause(); else if (this.state === "paused") this.resume(); }
     if (b.is("map", k) && this.state === "playing" && this.rules.city) { this.pause(); this.cb.onMapKey?.(); }
     if (b.is("camera", k) && (this.state === "playing" || this.state === "paused")) this.cycleCamera();
+    if (b.is("zoom", k) && (this.state === "playing" || this.state === "paused")) this.toggleZoom();
     if (k === "Enter" || k === "KeyR") {
       if (this.state === "paused" && k === "KeyR" && this.rules.respawn) { /* no quick restart in the open world */ }
       else if (this.state === "over" || this.state === "menu" || (this.state === "paused" && k === "KeyR")) { if (this.cb.onStartKey) this.cb.onStartKey(); else this.start(); }
@@ -1472,6 +1481,7 @@ export class Game {
       job: this.jobs.active ? "beenden" : "jobs",
       alt: this.flyMode && this.onFoot ? Math.max(0, Math.round((this.ped.z - this.groundAt(this.ped.x, this.ped.y)) * 0.1)) : !this.onFoot && (isHeli(p.model) || (this.flyMode && !isCraft(p.model))) && !p.dead ? Math.max(0, Math.round((p.z - this.groundAt(p.x, p.y)) * 0.1)) : -1,
       fly: this.flyMode,
+      camNear: currentSettings.camNear,
       swim: this.onFoot && this.ped.swim,
     };
   }

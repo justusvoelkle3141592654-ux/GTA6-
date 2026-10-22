@@ -8,7 +8,7 @@ import Icon from "./icons";
 
 interface Props {
   hud: HudData; isTouch: boolean; rules: ModeRules; camera: CameraMode;
-  onPause: () => void; onCam: () => void; onToggleCar: () => void; onInteract: () => void; onRadio: () => void; onJob: () => void; onPhone: () => void;
+  onPause: () => void; onCam: () => void; onZoom: () => void; onToggleCar: () => void; onInteract: () => void; onRadio: () => void; onJob: () => void; onPhone: () => void;
   onDetonate: () => void; onWeapon: (w: Weapon) => void; onWheel: () => void;
 }
 
@@ -28,7 +28,7 @@ function Zone({ at, children, className = "", y = 0 }: { at: Corner; children: R
 }
 const pill = "flex h-10 items-center justify-center gap-1.5 rounded-full border border-white/15 bg-black/45 px-3 text-xs font-bold tracking-wider backdrop-blur-md active:scale-90";
 
-export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onToggleCar, onInteract, onRadio, onJob, onPhone, onDetonate, onWeapon, onWheel }: Props) {
+export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onZoom, onToggleCar, onInteract, onRadio, onJob, onPhone, onDetonate, onWeapon, onWheel }: Props) {
   const ammo = ammoText(hud.ammo, hud.reserve);
   const mm = (isTouch ? 104 : 150) * currentSettings.hudScale; // the minimap is drawn by the game in the top right
   return (
@@ -60,6 +60,7 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onTog
         <div className="pointer-events-auto flex gap-2">
           <button onClick={onPause} className={pill + " w-10 px-0"} aria-label="Pause"><Icon name="pause" size={18} /></button>
           <button onClick={onCam} className={pill} aria-label="Kamera wechseln"><Icon name="camera" size={16} />{camera === "chase" ? "3D" : camera === "fp" ? "EGO" : "TOP"}</button>
+          {camera !== "fp" && <button onClick={onZoom} className={pill} aria-label="Kamera nah oder weit">{hud.camNear ? "NAH" : "WEIT"}</button>}
           <button onClick={onToggleCar} className={pill + (hud.onFoot && hud.canEnter ? " animate-pulse border-yellow-300 bg-yellow-400/30" : "")}>
             <Icon name={hud.onFoot ? "car" : "exit"} size={16} />{hud.onFoot ? "EINSTEIGEN" : "AUSSTEIGEN"}
           </button>

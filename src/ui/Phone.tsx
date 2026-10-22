@@ -67,6 +67,7 @@ function PhoneSettings() {
   );
   return (
     <div className="space-y-2">
+      {row("Kamera nah", s.camNear, (b) => upd({ ...s, camNear: b }))}
       {row("Minikarte dreht mit", s.mapRotate, (b) => upd({ ...s, mapRotate: b }))}
       {row("Sichtkegel der Sucher", s.seekerCones, (b) => upd({ ...s, seekerCones: b }))}
       {row("Wetterwechsel", s.weather, (b) => upd({ ...s, weather: b }))}
