@@ -46,6 +46,13 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onTog
         </div>}
         {rules.cops && <div className={"mt-1.5" + (hud.searching ? " animate-pulse" : "")}><Stars n={hud.stars} max={rules.maxStars} size={isTouch ? "text-xl" : "text-2xl"} /></div>}
         {!rules.respawn && rules.cops && <div className="mt-1 flex items-center gap-1 text-xs text-white/60"><Icon name="siren" size={14} />{hud.takedowns}</div>}
+        {/* health, vest, car, nitro: top left under money and stars */}
+        <div className="mt-2 w-44 space-y-1.5 rounded-xl border border-white/10 bg-black/35 p-2 backdrop-blur-md sm:w-56">
+          {rules.damage && <Bar label="DU" value={hud.health01} from={hud.health01 < 0.3 ? "#ff1a3a" : "#3dff8b"} to={hud.health01 < 0.3 ? "#ff6b3d" : "#9dffc8"} />}
+          {rules.damage && hud.armor01 > 0 && <Bar label="WESTE" value={hud.armor01} from="#5aa0ff" to="#b5d6ff" />}
+          {rules.damage && !hud.onFoot && <Bar label="AUTO" value={hud.carHealth01} from={hud.carHealth01 < 0.3 ? "#ff1a3a" : "#ff3cac"} to={hud.carHealth01 < 0.3 ? "#ff6b3d" : "#ff8ad1"} />}
+          {!hud.onFoot && <Bar label="N2O" value={hud.nitro01} from="#2bf0ff" to="#9d4dff" />}
+        </div>
       </Zone>
 
       {/* top centre: menu buttons, clock, mission objective */}
@@ -79,16 +86,6 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onTog
         </Zone>
       )}
 
-      {/* bottom left: health, vest, car, nitro */}
-      <Zone at="bl" y={isTouch ? 150 : 0}>
-        <div className="w-40 space-y-1.5 rounded-xl border border-white/10 bg-black/35 p-2 backdrop-blur-md sm:w-52">
-          {rules.damage && <Bar label="DU" value={hud.health01} from={hud.health01 < 0.3 ? "#ff1a3a" : "#3dff8b"} to={hud.health01 < 0.3 ? "#ff6b3d" : "#9dffc8"} />}
-          {rules.damage && hud.armor01 > 0 && <Bar label="WESTE" value={hud.armor01} from="#5aa0ff" to="#b5d6ff" />}
-          {rules.damage && !hud.onFoot && <Bar label="AUTO" value={hud.carHealth01} from={hud.carHealth01 < 0.3 ? "#ff1a3a" : "#ff3cac"} to={hud.carHealth01 < 0.3 ? "#ff6b3d" : "#ff8ad1"} />}
-          {!hud.onFoot && <Bar label="N2O" value={hud.nitro01} from="#2bf0ff" to="#9d4dff" />}
-        </div>
-      </Zone>
-
       {/* bottom centre: hints, the button for places, speed */}
       <Zone at="bc" y={isTouch ? 64 : 0}>
         {hud.hint && <div className="popin mb-2 inline-block max-w-[90vw] rounded-full border border-white/10 bg-black/60 px-4 py-1.5 text-sm font-semibold text-yellow-100 backdrop-blur-md">{hud.hint}</div>}
@@ -104,7 +101,7 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onTog
           <div className="text-[10px] font-semibold tracking-[0.3em] text-white/50">KM/H</div>
         </>}
         {isTouch && <div className="cyan-text font-display text-2xl tracking-wider">{hud.kmh} <span className="text-xs text-white/50">KM/H</span></div>}
-        {hud.alt >= 0 && <div className="mt-1 font-display text-2xl tracking-wider text-yellow-200">Höhe {hud.alt} m</div>}
+        {hud.alt >= 0 && <div className="mt-1 font-display text-2xl tracking-wider text-yellow-200">{hud.fly ? "Fliegen · " : ""}Höhe {hud.alt} m</div>}
         {hud.swim && <div className="mt-1 font-display text-xl tracking-widest text-sky-300">SCHWIMMEN</div>}
       </Zone>
 

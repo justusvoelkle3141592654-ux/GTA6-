@@ -5,7 +5,7 @@ import type { Civilian } from "../ai/peds";
 
 // pedestrians far from the camera (the near ones are full figures, people3d.ts): one InstancedMesh per body part,
 // colours per instance, under 600 triangles per person
-const FAR_SCALE = 0.68; // the same height as the full figures (about 1.75 m)
+const FAR_SCALE = 0.68 * 1.2; // the same height as the full figures (about 1.75 m)
 const SKIN = ["#f1c7a5", "#e0a982", "#c68a62", "#a86b45", "#7d4a2c", "#5a3420"];
 const SHIRT = ["#e8e8ee", "#ff6f91", "#2bb3ff", "#ffd23f", "#3dd68c", "#ff8a3d", "#9b6bff", "#1f2a44", "#c0392b", "#16a085", "#f5f0e1", "#ff3cac"];
 const PANTS = ["#2c3e57", "#3b3b44", "#c9b48c", "#1c1c22", "#5b6e8c", "#e6e1d6"];

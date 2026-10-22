@@ -3,7 +3,7 @@ import type { CameraMode, Game, GameConfig, HudData } from "../core/engine";
 import type { SaveResult } from "../core/save";
 import { MISSIONS } from "../gameplay/missions";
 import { JOB_DEFS, JOB_KINDS, RACES, jobLevel } from "../gameplay/jobs";
-import { ContactsTab, GarageTab, HideTab, JobsTab } from "./GameTabs";
+import { ContactsTab, FlightTab, GarageTab, HideTab, JobsTab } from "./GameTabs";
 import { ACTIONS, ACTION_LABEL, keyLabel, type Action } from "../core/input";
 import { CHANNELS } from "../audio/audio";
 import { SPAWN_MODELS, type SpawnPeople } from "../gameplay/spawner";
@@ -14,7 +14,7 @@ import Help from "./Help";
 import { Btn, fmt, fmtTime } from "./ui";
 import Icon from "./icons";
 
-export type PauseTab = "menu" | "map" | "jobs" | "hide" | "contacts" | "progress" | "garage" | "spawn" | "settings" | "help";
+export type PauseTab = "menu" | "map" | "jobs" | "hide" | "contacts" | "progress" | "garage" | "flight" | "spawn" | "settings" | "help";
 const CAM_LABEL: Record<CameraMode, string> = { chase: "3D Verfolger", fp: "Ego (im Auto)", top: "Vogelperspektive" };
 const SAVE_MSG: Record<SaveResult, string> = {
   saved: "Gespeichert", memory: "Nur vorübergehend gespeichert – der Browser blockiert den lokalen Speicher",
@@ -31,7 +31,7 @@ export default function PauseMenu({ game, tab, setTab, hud, config, isTouch, mut
   const [saveMsg, setSaveMsg] = useState("");
   const [, redraw] = useState(0);
   const tabs: [PauseTab, string][] = open
-    ? [["menu", "Weiter"], ["map", "Karte"], ["jobs", "Jobs"], ["hide", "Verstecken"], ["contacts", "Kontakte"], ["progress", "Fortschritt"], ["garage", "Garage"], ["spawn", "Spawnen"], ["settings", "Einstellungen"], ["help", "Hilfe"]]
+    ? [["menu", "Weiter"], ["map", "Karte"], ["jobs", "Jobs"], ["hide", "Verstecken"], ["contacts", "Kontakte"], ["progress", "Fortschritt"], ["garage", "Garage"], ["flight", "Flug"], ["spawn", "Spawnen"], ["settings", "Einstellungen"], ["help", "Hilfe"]]
     : [["menu", "Menü"], ["settings", "Einstellungen"], ["help", "Hilfe"]];
   return (
     <div className="absolute inset-0 z-20 flex flex-col items-center overflow-y-auto bg-[#0b0614]/80 p-4 backdrop-blur-sm sm:p-6">
@@ -61,6 +61,7 @@ export default function PauseMenu({ game, tab, setTab, hud, config, isTouch, mut
         {tab === "contacts" && <ContactsTab game={game} />}
         {tab === "garage" && <GarageTab game={game} onDone={onResume} />}
         {tab === "progress" && <Progress game={game} />}
+        {tab === "flight" && <FlightTab game={game} onDone={onResume} />}
         {tab === "spawn" && <SpawnTab game={game} onResume={onResume} />}
         {tab === "settings" && <SettingsTab game={game} isTouch={isTouch} />}
         {tab === "help" && <div className="rounded-2xl border border-white/10 bg-black/50 p-4"><Help isTouch={isTouch} bind={game.bind} /></div>}
@@ -219,6 +220,10 @@ function SettingsTab({ game, isTouch }: { game: Game; isTouch: boolean }) {
         <div className="mb-2 mt-1 flex items-center gap-2"><span className="w-28 text-white/70">Tag-Nacht-Dauer</span>
           {([12, 24, 48] as const).map((m) => <button key={m} onClick={() => update({ ...s, dayMinutes: m })} className={"rounded-lg border px-2 py-1 text-xs font-bold " + (s.dayMinutes === m ? "border-pink-400 bg-pink-500/30" : "border-white/15 bg-white/5")}>{m} min</button>)}
         </div>
+        <h3 className="mb-2 mt-3 font-display text-2xl tracking-widest text-pink-300">Fahrzeuge</h3>
+        <Slider label="Tempo-Faktor" value={s.vehSpeed} min={1} max={5} step={0.25} fmt={(v) => `${v.toFixed(2).replace(".", ",").replace(/,?0+$/, "")}x`} onChange={(v) => update({ ...s, vehSpeed: v })} />
+        <Slider label="Verkehr" value={s.traffic} min={0} max={3} step={0.25} fmt={(v) => (v === 0 ? "aus" : `${Math.round(v * 100)} %`)} onChange={(v) => update({ ...s, traffic: v })} />
+        <div className="mb-2 text-[11px] text-white/45">Tempo-Faktor gilt für dein Auto, Boot und deinen Hubschrauber (Höchsttempo und Beschleunigung).</div>
         <h3 className="mb-2 mt-3 font-display text-2xl tracking-widest text-pink-300">Anzeige & Steuerung</h3>
         <Slider label="HUD-Größe" value={s.hudScale} min={0.8} max={1.3} step={0.05} fmt={(v) => `${Math.round(v * 100)} %`} onChange={(v) => update({ ...s, hudScale: v })} />
         <Slider label="Untertitel" value={s.subtitle} min={0.8} max={1.4} step={0.05} fmt={(v) => `${Math.round(v * 100)} %`} onChange={(v) => update({ ...s, subtitle: v })} />

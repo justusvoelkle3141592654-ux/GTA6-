@@ -1,7 +1,8 @@
 // the player figure and the people near the camera as skinned, animated humans (human.ts);
 // people further away stay instanced simple figures (crowd3d.ts, the far detail level)
 import * as THREE from "three";
-import { HumanRig, kaiLook, lookFromSeed, weaponGeo, type Look } from "../characters/human";
+import { HumanRig, PERSON_SCALE, kaiLook, lookFromSeed, weaponGeo, type Look } from "../characters/human";
+import { VEH_SCALE } from "../vehicles/vehicles";
 import { OUTFITS, type Style } from "../gameplay/economy";
 import { WEAPONS, WEAPON_DEFS, type Weapon } from "../gameplay/weapons";
 import type { Game } from "../core/engine";
@@ -16,13 +17,8 @@ export function outfitLook(i: number, style?: Style): Look {
   return kaiLook({ top: o.top, topCol: o.shirt, top2Col: o.top2, bottom: o.bottom, bottomCol: o.pants, shoes: o.shoes, shoeCol: o.shoeCol, accent: o.accent, hair: o.hair, hatCol: o.hatCol }, style);
 }
 
-// walking, running, sprinting by speed (the step rate follows the speed within limits)
-function locomote(r: HumanRig, sp: number, sprint: boolean, panic = false) {
-  if (sp < 6) r.play("idle", 0.25);
-  else if (sp < 60 && !sprint) r.play("walk", 0.25, clamp((sp * 1.05) / 13, 0.6, 1.8));
-  else if (!sprint && sp < 200) r.play(panic ? "panic" : "run", 0.2, clamp((sp * 0.72) / 24, 0.7, 1.9));
-  else r.play("sprint", 0.2, clamp((sp * 0.56) / 30, 0.8, 2));
-}
+// walking, running, sprinting blended by speed (see HumanRig.move)
+function locomote(r: HumanRig, sp: number, _sprint: boolean, panic = false) { r.move(sp, panic); }
 
 const gunMats = {
   metal: new THREE.MeshStandardMaterial({ color: 0x23252c, metalness: 0.7, roughness: 0.35 }),
@@ -42,7 +38,7 @@ export class PlayerFigure {
   rig: HumanRig;
   shadow: THREE.Mesh;
   private guns = {} as Record<Weapon, THREE.Mesh | null>;
-  private lookKey = ""; private lastShoot = 0; private lastHit = 0; private actKey = ""; private wasAir = false;
+  private lookKey = ""; private lastA = 0; private lean = 0; private lastShoot = 0; private lastHit = 0; private actKey = ""; private wasAir = false;
   constructor(private scene: THREE.Scene, shadowGeo: THREE.BufferGeometry, shadowMat: THREE.Material) {
     this.rig = new HumanRig(outfitLook(0), 0);
     const hand = this.rig.bone("handR");
@@ -54,7 +50,7 @@ export class PlayerFigure {
       hand.add(m); this.guns[w] = m;
     }
     this.shadow = new THREE.Mesh(shadowGeo, shadowMat);
-    this.shadow.scale.set(0.3, 1, 0.42); this.shadow.renderOrder = 1;
+    this.shadow.scale.set(0.36, 1, 0.5); this.shadow.renderOrder = 1;
     scene.add(this.rig.root, this.shadow);
     this.rig.root.visible = false;
   }
@@ -69,7 +65,9 @@ export class PlayerFigure {
     if (car && !g.onFoot) {
       // at the wheel: hands on the wheel, the head turns a little into the curve
       if (root.parent !== car.host) car.host.add(root);
-      const h = r.look.height * (r.look.sex === "f" ? HIPS * 0.94 : HIPS);
+      // the car group is already scaled up (VEH_SCALE): inside it the figure keeps its own height
+      const sc = (r.look.height * PERSON_SCALE) / VEH_SCALE, h = sc * (r.look.sex === "f" ? HIPS * 0.94 : HIPS);
+      root.scale.setScalar(sc);
       root.position.set(car.seat[0], car.seat[1] - h, car.seat[2]); root.rotation.set(0, 0, 0);
       r.play(car.ride ? "ride" : "drive", 0.2); r.playUpper("");
       r.lookYaw += (clamp(-car.steer * 0.45, -0.5, 0.5) - r.lookYaw) * Math.min(1, dt * 4);
@@ -86,8 +84,15 @@ export class PlayerFigure {
     root.visible = g.onFoot && !hidden;
     this.shadow.visible = root.visible && !pd.swim;
     if (!root.visible) return;
+    root.scale.setScalar(r.look.height * PERSON_SCALE);
     root.position.set(pd.x, pd.z, pd.y);
-    root.rotation.set(0, -pd.a, 0);
+    // lean into curves when running (roll about the forward axis), smoothed
+    const turn = Math.atan2(Math.sin(pd.a - this.lastA), Math.cos(pd.a - this.lastA)) / Math.max(dt, 1e-3);
+    this.lastA = pd.a;
+    const spd = Math.hypot(pd.vx, pd.vy);
+    this.lean += (clamp(turn * spd * 0.0009, -0.22, 0.22) - this.lean) * Math.min(1, dt * 6);
+    root.rotation.order = "YXZ";
+    root.rotation.set(pd.swim ? 0 : this.lean, -pd.a, 0);
     this.shadow.position.set(pd.x, pd.z + 0.3, pd.y); this.shadow.rotation.y = -pd.a;
     r.lookYaw *= 0.9;
     const sp = Math.hypot(pd.vx, pd.vy);
@@ -103,6 +108,8 @@ export class PlayerFigure {
       r.play("bench", 0.3);
     } else if (pd.swim) {
       if (sp > 20) r.play("swim", 0.3, clamp(sp / 60, 0.6, 1.6)); else r.play("tread", 0.3);
+    } else if (g.travel || (g.flyMode && pd.air)) {
+      r.play(g.travel || sp > 120 ? "fly" : "hover", 0.3);
     } else if (pd.air && pd.vz < -150) {
       r.play("fall", 0.25);
     } else if (pd.air && !this.wasAir && pd.vz > 0) {
@@ -195,7 +202,7 @@ export class CrowdFigures {
   private animate(s: Slot, c: Civilian, list: readonly Civilian[], d: number, dt: number) {
     const r = s.rig, root = r.root;
     root.visible = true;
-    const scale = r.look.height * c.scale;
+    const scale = r.look.height * c.scale * PERSON_SCALE;
     root.scale.setScalar(scale);
     root.position.set(c.x, c.z, c.y);
     root.rotation.set(0, -c.a, 0);

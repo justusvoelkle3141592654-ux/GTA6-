@@ -4,14 +4,14 @@ import { JOB_DEFS } from "../gameplay/jobs";
 import { applySettings, loadSettings, saveSettings } from "../core/settings";
 import BigMap from "./BigMap";
 import Icon from "./icons";
-import { ContactsTab, GarageTab, HideTab, JobsTab, MessagesApp, RadioApp } from "./GameTabs";
+import { ContactsTab, FlightTab, GarageTab, HideTab, JobsTab, MessagesApp, RadioApp } from "./GameTabs";
 
-type App = "home" | "jobs" | "contacts" | "map" | "messages" | "garage" | "radio" | "hide" | "settings";
+type App = "home" | "jobs" | "contacts" | "map" | "messages" | "garage" | "radio" | "hide" | "flight" | "settings";
 const APPS: [App, string, string][] = [
   ["jobs", "Jobs", "#ff3cac"], ["contacts", "Kontakte", "#3dff8b"], ["map", "Karte", "#2bf0ff"], ["messages", "Nachrichten", "#ffd23f"],
-  ["garage", "Fahrzeug", "#ff8a1f"], ["radio", "Radio", "#c86bff"], ["hide", "Verstecken", "#5ad1c4"], ["settings", "Einstellungen", "#9aa3ad"],
+  ["garage", "Fahrzeug", "#ff8a1f"], ["radio", "Radio", "#c86bff"], ["hide", "Verstecken", "#5ad1c4"], ["flight", "Flug", "#7fb2ff"], ["settings", "Einstellungen", "#9aa3ad"],
 ];
-const ICON: Record<App, string> = { home: "phone", jobs: "money", contacts: "contacts", map: "map", messages: "messages", garage: "garage", radio: "radio", hide: "hide", settings: "settings" };
+const ICON: Record<App, string> = { home: "phone", jobs: "money", contacts: "contacts", map: "map", messages: "messages", garage: "garage", radio: "radio", hide: "hide", flight: "plane", settings: "settings" };
 
 // the in-game phone (T): apps on a phone screen; the game waits while it is open
 export default function Phone({ game, onClose }: { game: Game; onClose: () => void }) {
@@ -51,6 +51,7 @@ export default function Phone({ game, onClose }: { game: Game; onClose: () => vo
           {app === "garage" && <GarageTab game={game} onDone={close} />}
           {app === "radio" && <RadioApp game={game} />}
           {app === "hide" && <HideTab game={game} onDone={close} />}
+          {app === "flight" && <FlightTab game={game} onDone={close} />}
           {app === "settings" && <PhoneSettings />}
         </div>
       </div>
@@ -70,6 +71,10 @@ function PhoneSettings() {
       {row("Sichtkegel der Sucher", s.seekerCones, (b) => upd({ ...s, seekerCones: b }))}
       {row("Wetterwechsel", s.weather, (b) => upd({ ...s, weather: b }))}
       {row("Tutorial-Hinweise", s.tips, (b) => upd({ ...s, tips: b }))}
+      <label className="block rounded-xl bg-white/5 px-3 py-2 text-sm">Tempo-Faktor Fahrzeug: <b>{s.vehSpeed.toString().replace(".", ",")}x</b>
+        <input type="range" min={1} max={5} step={0.25} value={s.vehSpeed} onChange={(e) => upd({ ...s, vehSpeed: Number(e.target.value) })} className="mt-1 w-full accent-pink-500" /></label>
+      <label className="block rounded-xl bg-white/5 px-3 py-2 text-sm">Verkehr: <b>{s.traffic === 0 ? "aus" : `${Math.round(s.traffic * 100)} %`}</b>
+        <input type="range" min={0} max={3} step={0.25} value={s.traffic} onChange={(e) => upd({ ...s, traffic: Number(e.target.value) })} className="mt-1 w-full accent-pink-500" /></label>
       <div className="text-[11px] text-white/45">Alle Einstellungen findest du im Pausenmenü.</div>
     </div>
   );

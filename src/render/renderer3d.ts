@@ -15,7 +15,7 @@ import { currentSettings } from "../core/settings";
 import { WaterSurface } from "./water";
 import { buildHideFields } from "../gameplay/hide";
 const inStuntPark = (x: number, y: number) => x > STUNT_PARK.x0 - 60 && x < STUNT_PARK.x1 + 60 && y > STUNT_PARK.y0 - 60 && y < STUNT_PARK.y1 + 60;
-import { isCraft, isBoat, isHeli, isTwoWheel } from "../vehicles/vehicles";
+import { isCraft, isBoat, isHeli, isTwoWheel, VEH_SCALE } from "../vehicles/vehicles";
 import { CarRig, carMaterials, hasRig, topAt, type CarMats } from "../vehicles/carmodel";
 import { JETTY, HELI_SPOT, WALKABLE, type Place } from "../world/places";
 import type { Interior } from "../world/interiors";
@@ -1139,7 +1139,7 @@ export class Renderer3D {
     const rig = new CarRig(c.model, c.color, mats, `SB · ${plateNo}`);
     const s = rig.geo.shape, hi = this.quality === "high" || this.quality === "ultra";
     const group = rig.root, tilt = rig.tilt;
-    group.rotation.order = "YXZ";
+    group.rotation.order = "YXZ"; group.scale.setScalar(VEH_SCALE);
     rig.body.castShadow = this.quality !== "low"; rig.trim.castShadow = hi;
     if (rig.extra) rig.extra.castShadow = this.quality !== "low";
     for (const w of rig.wheels) for (const m of w.spin.children) m.castShadow = hi;
@@ -1188,7 +1188,7 @@ export class Renderer3D {
     if (hasRig(c.model)) return this.makeRigCar(c);
     const geo = getCarGeo(c.model, c.color);
     const group = new THREE.Group();
-    group.rotation.order = "YXZ";
+    group.rotation.order = "YXZ"; group.scale.setScalar(VEH_SCALE);
     const tilt = new THREE.Group();
     group.add(tilt);
     const body = new THREE.Mesh(geo.body, this.bodyMat);
@@ -1309,7 +1309,7 @@ export class Renderer3D {
       const steerTarget = c.dead ? 0 : clamp(-c.steer, -1, 1) * 0.5;
       o.steerA += (steerTarget - o.steerA) * Math.min(1, dt * 14);
       o.spinA += (c.dead ? 0 : c.vF) * dt;
-      for (const w of o.wheels) { if (w.front) w.pivot.rotation.y = o.steerA; w.spin.rotation.z = -o.spinA / w.r; }
+      for (const w of o.wheels) { if (w.front) w.pivot.rotation.y = o.steerA; w.spin.rotation.z = -o.spinA / (w.r * VEH_SCALE); }
       if (o.rig) o.rig.steering.rotation.x = -o.steerA * 3.2; // the steering wheel turns about 3 times as far as the wheels
     }
     for (const [c, o] of this.carObjs) if (!seen.has(c)) { this.disposeCar(o); this.carObjs.delete(c); }
@@ -1334,7 +1334,7 @@ export class Renderer3D {
     rig.setPaint(c.color, c.hp < c.maxHp * 0.45 || c.dents.length >= 12);
     if (c.hitFlash > 0.07) { rig.body.material = this.flashMat; }
     // dents where the car was hit (only new ones are added)
-    while (o.dentN * 3 < c.dents.length) { const i = o.dentN * 3; rig.dent(c.dents[i], c.dents[i + 1], c.dents[i + 2]); o.dentN++; }
+    while (o.dentN * 3 < c.dents.length) { const i = o.dentN * 3; rig.dent(c.dents[i] / VEH_SCALE, c.dents[i + 1] / VEH_SCALE, c.dents[i + 2]); o.dentN++; }
     if (o.glassV !== c.glassV) { o.glassV = c.glassV; rig.setGlass((id) => (c.glass[id] ?? 0) as 0 | 1 | 2); }
     if (c.bumpers & 1 && !(o.bumpers & 1)) { rig.dropBumper(true); o.bumpers |= 1; }
     if (c.bumpers & 2 && !(o.bumpers & 2)) { rig.dropBumper(false); o.bumpers |= 2; }
@@ -1748,7 +1748,7 @@ export class Renderer3D {
         const roll = clamp(-p.vR / 900, -0.09, 0.09);
         // eye of the driver: from the seat of a realistic car, else below the roof
         const rg = this.carObjs.get(p)?.rig?.geo;
-        const eye = rg ? rg.eye[1] : getCarGeo(p.model, p.color).roofY - 3.2, fw = rg ? rg.eye[0] : 3, sd = rg ? -rg.eye[2] : 5;
+        const eye = (rg ? rg.eye[1] : getCarGeo(p.model, p.color).roofY - 3.2) * VEH_SCALE, fw = (rg ? rg.eye[0] : 3) * VEH_SCALE, sd = (rg ? -rg.eye[2] : 5) * VEH_SCALE;
         tgt.set(p.x + cx * fw - rx * sd, p.z + eye + roll * 3, p.y + cy * fw - ry * sd);
         lx = p.x + cx * 220 - rx * sd; ly = p.z + eye - 2 + (p.air ? p.vz * 0.05 : 0); lz = p.y + cy * 220 - ry * sd;
       }
@@ -1762,10 +1762,10 @@ export class Renderer3D {
         if (Math.hypot(pd.vx, pd.vy) > 30) this.camYaw += wrapA(Math.atan2(pd.vy, pd.vx) - this.camYaw) * (1 - Math.exp(-dt * 2.5));
         const cx = Math.cos(this.camYaw + this.lookYaw), cy = Math.sin(this.camYaw + this.lookYaw);
         // inside a shop: closer, the walls on the camera side become see-through (interiors3d)
-        const it = g.inside, far = it ? 50 : 95;
+        const it = g.inside, far = it ? 56 : 108;
         let dist = far;
         if (!it) for (let s = 0.15; s <= 1.0001; s += 0.1) if (this.world.isSolid(fx - cx * 95 * s, fy - cy * 95 * s, 6)) { dist = Math.max(28, 95 * s - 10); break; }
-        tgt.set(fx - cx * dist * Math.cos(this.lookPitch * 0.6), fz + (it ? 58 : 48) + this.lookPitch * 60, fy - cy * dist * Math.cos(this.lookPitch * 0.6));
+        tgt.set(fx - cx * dist * Math.cos(this.lookPitch * 0.6), fz + (it ? 62 : 54) + this.lookPitch * 60, fy - cy * dist * Math.cos(this.lookPitch * 0.6));
         // the camera stays inside the room (from above, the roof is hidden)
         if (it) { tgt.x = clamp(tgt.x, it.x0 + 6, it.x1 - 6); tgt.z = clamp(tgt.z, it.y0 + 6, it.y1 - 6); }
         lx = fx + cx * 30; ly = fz + 16; lz = fy + cy * 30; fov = 60; kp = 9;
@@ -1774,7 +1774,7 @@ export class Renderer3D {
         if (p.vF > 60) desired = p.a + wrapA(Math.atan2(p.vy, p.vx) - p.a) * 0.55;
         this.camYaw += wrapA(desired - this.camYaw) * (1 - Math.exp(-dt * 5));
         const fly = isHeli(p.model);
-        const full = 112 + sp * 0.07 + (fly ? 70 : 0);
+        const full = 128 + sp * 0.07 + (fly ? 70 : 0);
         let dist = full;
         const cx = Math.cos(this.camYaw + this.lookYaw), cy = Math.sin(this.camYaw + this.lookYaw);
         for (let s = 0.12; s <= 1.0001; s += 0.08) if (this.world.isSolid(p.x - cx * full * s, p.y - cy * full * s, 6)) { dist = Math.max(36, full * s - 12); break; }

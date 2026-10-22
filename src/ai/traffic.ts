@@ -13,7 +13,7 @@ const LANE = 34; // traffic drives this far right of the road centre
 export interface ParkingSpot { id: number; x: number; y: number; a: number; model: CarModel; color: string; d: number; }
 export const PARKED_LIMIT = { high: 14, low: 8 };
 const PARK_OFF = 62;          // distance from the road centre (lane cars pass at 34)
-const PARK_STEP = 66, PARK_MARGIN = 55, PARK_CHANCE = 0.22;
+const PARK_STEP = 76, PARK_MARGIN = 55, PARK_CHANCE = 0.22;
 const PARK_SPAWN_MIN = 380, PARK_SPAWN_MAX = 1100, PARK_DESPAWN = 1350, PARK_FREE = 1900;
 const PARKED_MODELS: CarModel[] = ["sedan", "sedan", "sedan", "suv", "van", "muscle", "taxi", "sport", "bike", "truck", "super"];
 const GANG_COLORS: Record<FactionId, string> = { halcones: "#c0392b", kings: "#7d3c98" };

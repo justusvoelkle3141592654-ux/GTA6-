@@ -57,6 +57,7 @@ const P: Record<string, string> = {
   info: "M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18zM12 11v6M12 7v.01",
   save: "M4 4h13l3 3v13H4zM8 4v5h8V4M7 14h10v6H7z",
   shop: "M3 9l2-5h14l2 5M3 9h18v11H3zM9 20v-6h6v6",
+  plane: "M2 13l8-1 4-8h2l-2 8 6 1 2-3h1l-1 4 1 4h-1l-2-3-6 1 2 8h-2l-4-8-8-1z",
   city: "M3 21V9h6v12M9 21V4h7v17M16 21V11h5v10M2 21h20",
   heliIcon: "M3 6h18M12 6v3M6 9h10a3 3 0 0 1 0 6H8a2 2 0 0 1-2-2zM16 12h6M7 19h10",
 };

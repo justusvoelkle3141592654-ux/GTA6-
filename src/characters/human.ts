@@ -3,6 +3,9 @@
 // and keyframe animations played by an AnimationMixer with crossfades
 import * as THREE from "three";
 
+// people are drawn this much bigger than real (same factor as the vehicles, so they still fit in the seats)
+export const PERSON_SCALE = 1.2;
+
 // ----------------------------------------------------------------------------------------------- looks
 export type Sex = "m" | "f";
 export type Top = "tshirt" | "shirt" | "polo" | "suit" | "hoodie" | "leather" | "jacket" | "tank" | "track" | "dress" | "police" | "swat" | "army" | "hawaii" | "bomber";
@@ -496,6 +499,9 @@ const CLIPS: Record<string, ClipDef> = {
   phone: { dur: 3, keys: [[0, P(relaxed, arm("R", 0.35, 0.35, 2.35, 0.3, 0.3), fist("R", 0.6), headP(0.05, 0, 0.15))], [1.5, P(relaxed, arm("R", 0.35, 0.38, 2.35, 0.3, 0.3), fist("R", 0.6), headP(0.1, 0.2, 0.15), arm("L", 0.15, 0.25, 0.6))], [3, P(relaxed, arm("R", 0.35, 0.35, 2.35, 0.3, 0.3), fist("R", 0.6), headP(0.05, 0, 0.15))]] },
   smoke: { dur: 4, keys: [[0, P(relaxed, arm("R", 0.2, 0.15, 1.2, 0, 0.3))], [1.2, P(relaxed, arm("R", 0.5, 0.1, 2.45, 0.3, 0.2), headP(-0.1))], [1.8, P(relaxed, arm("R", 0.5, 0.1, 2.45, 0.3, 0.2), headP(-0.1))], [2.6, P(relaxed, arm("R", 0.2, 0.15, 1.2, 0, 0.3), headP(-0.15))], [4, P(relaxed, arm("R", 0.2, 0.15, 1.2, 0, 0.3))]] },
   talk: { dur: 3, keys: [[0, P(relaxed, arm("R", 0.5, 0.2, 1.2, 0.3))], [0.7, P(relaxed, arm("R", 0.7, 0.35, 1.0, 0.5), headP(0.1, 0.1))], [1.4, P(relaxed, arm("L", 0.6, 0.3, 1.1, 0.4), arm("R", 0.3, 0.2, 0.9), headP(-0.05, -0.1))], [2.2, P(relaxed, arm("R", 0.55, 0.25, 1.3, 0.3), headP(0.12))], [3, P(relaxed, arm("R", 0.5, 0.2, 1.2, 0.3))]] },
+  // fly mode: body stretched forward, one fist ahead; hovering upright with the arms out and the legs dangling
+  fly: { dur: 1.6, keys: [0, 0.8, 1.6].map((t, i) => [t, P(turn(0, 0, -1.2), headP(-0.75), arm("R", 2.95, 0.12, 0.08), fist("R", 0.9), arm("L", -0.15, 0.2 + (i % 2) * 0.06, 0.15), fist("L", 0.4), leg("L", -0.05 + (i % 2) * 0.05, 0.12), leg("R", 0.05 - (i % 2) * 0.05, 0.18), spine(-0.12))] as [number, Pose]) },
+  hover: { dur: 2, keys: [0, 1, 2].map((t, i) => [t, P(drop((i % 2) * -0.6), arm("L", 0.3, 0.75 + (i % 2) * 0.1, 0.25), arm("R", 0.3, 0.75 + (i % 2) * 0.1, 0.25), fist("L", 0.3), fist("R", 0.3), leg("L", 0.12 + (i % 2) * 0.08, 0.3), leg("R", -0.05, 0.22 + (i % 2) * 0.1, 0.4), spine(-0.04), headP(0.05))] as [number, Pose]) },
   handsUp: { dur: 1.2, keys: [[0, P(arm("L", 2.6, 0.45, 0.6, 0, -0.3), arm("R", 2.6, 0.45, 0.6, 0, -0.3), spine(-0.08), headP(-0.1))], [0.6, P(arm("L", 2.65, 0.5, 0.55, 0, -0.3), arm("R", 2.55, 0.42, 0.65, 0, -0.3), spine(-0.1), headP(-0.05, 0.15))], [1.2, P(arm("L", 2.6, 0.45, 0.6, 0, -0.3), arm("R", 2.6, 0.45, 0.6, 0, -0.3), spine(-0.08), headP(-0.1))]] },
   lookAround: { dur: 3.2, keys: [[0, P(relaxed, headP(0, 0.8))], [1.2, P(relaxed, headP(0.05, -0.8), spine(0, -0.2))], [2.2, P(relaxed, headP(-0.1, 0.2))], [3.2, P(relaxed, headP(0, 0.8))]] },
   // getting into a car (stands at the driver's door, the car is on the right of the person)
@@ -509,7 +515,7 @@ const CLIPS: Record<string, ClipDef> = {
   roll: { dur: 0.9, keys: [0, 0.2, 0.4, 0.6, 0.9].map((t, i) => [t, P(turn(0, 0, [0, -1.6, -3.14, -4.7, -6.28][i]), drop([0, 6, 7.5, 6, 0][i], [0, 1, 1.5, 1, 0][i]), sit(i && i < 4 ? 2.0 : 0.3, i && i < 4 ? 2.3 : 0.3, 0), spine(i && i < 4 ? 0.9 : 0.1), arm("L", 1.5, 0.4, 1.6), arm("R", 1.5, 0.4, 1.6), headP(0.7))] as [number, Pose]) },
   climb: { dur: 0.8, keys: [[0, P(relaxed)], [0.3, P(arm("L", 2.2, 0.2, 0.4), arm("R", 2.2, 0.2, 0.4), leg("R", 1.5, 1.8), spine(0.3), drop(-2))], [0.6, P(arm("L", 0.8, 0.3, 0.2), arm("R", 0.8, 0.3, 0.2), leg("L", 1.2, 1.6), leg("R", 0.3, 0.3), spine(0.4), drop(-4))], [0.8, P(relaxed)]] },
 };
-const DEFAULT_LOOP = new Set(["handsUp", "idle", "walk", "run", "sprint", "panic", "fall", "swim", "tread", "drive", "ride", "bench", "aimPistol", "aimRifle", "lying", "ragdoll", "cower", "crouch", "phone", "smoke", "talk", "lookAround"]);
+const DEFAULT_LOOP = new Set(["fly", "hover", "handsUp", "idle", "walk", "run", "sprint", "panic", "fall", "swim", "tread", "drive", "ride", "bench", "aimPistol", "aimRifle", "lying", "ragdoll", "cower", "crouch", "phone", "smoke", "talk", "lookAround"]);
 export type Anim = keyof typeof CLIPS;
 
 const clipCache = new Map<string, THREE.AnimationClip>();
@@ -581,7 +587,7 @@ export class HumanRig {
     this.mesh.bind(this.skeleton);
     this.mesh.castShadow = castShadow; this.mesh.frustumCulled = false;
     this.root.add(this.mesh);
-    this.root.scale.setScalar(look.height);
+    this.root.scale.setScalar(look.height * PERSON_SCALE);
     this.mixer = new THREE.AnimationMixer(this.mesh);
     this.key = bodyKey(look, detail);
     this.play("idle", 0);
@@ -593,7 +599,7 @@ export class HumanRig {
     const k = bodyKey(look, detail);
     if (k !== this.key) { const old = this.key; this.key = k; this.mesh.geometry = bodyGeo(look, detail); releaseBody(old); }
     paintPerson(this.mat, look);
-    this.root.scale.setScalar(look.height);
+    this.root.scale.setScalar(look.height * PERSON_SCALE);
     if (this.vest) { this.vest.geometry = vestGeo(look); }
     return true;
   }
@@ -621,29 +627,35 @@ export class HumanRig {
   private active = new Set<THREE.AnimationAction>();
   private apply(fade: number, keepTime: number, restartUp: boolean, speed: number, upSpeed: number) {
     const want = new Set<THREE.AnimationAction>();
-    const base = this.action(this.current, this.upper ? "lo" : "");
-    base.timeScale = speed; want.add(base);
+    const part = this.upper ? "lo" : "";
+    const base = this.action(this.current === "loco" ? "walk" : this.current, part);
+    if (this.current === "loco") {
+      // walking, running and sprinting play together; update() sets their weights and their common phase
+      for (const n of this.gaits()) { const a = this.action(n, part); want.add(a); }
+      this.locoFade = this.active.size ? 0 : 1; this.locoFadeT = Math.max(0.01, fade);
+    } else { base.timeScale = speed; want.add(base); }
     let up: THREE.AnimationAction | null = null;
     if (this.upper) { up = this.action(this.upper, "up"); up.timeScale = upSpeed; want.add(up); }
     for (const a of this.active) if (!want.has(a)) { if (fade > 0) a.fadeOut(fade); else a.stop(); }
     for (const a of want) {
       if (!this.active.has(a) || (a === up && restartUp)) {
         a.reset(); if (a === base && keepTime >= 0) a.time = keepTime;
-        a.enabled = true; a.setEffectiveWeight(1); a.play(); if (fade > 0) a.fadeIn(fade);
+        a.enabled = true; a.setEffectiveWeight(1); a.play();
+        if (this.current === "loco" && a !== up) a.setEffectiveWeight(0); else if (fade > 0) a.fadeIn(fade);
       }
     }
     this.active = want;
   }
   // switch the body animation with a crossfade (0.15–0.3 s); restart plays a one-shot again
   play(name: Anim | string, fade = 0.2, speed = 1, restart = false) {
-    if (this.current === name && !restart) { this.action(name, this.upper ? "lo" : "").timeScale = speed; return; }
+    if (this.current === name && !restart) { if (name !== "loco") this.action(name, this.upper ? "lo" : "").timeScale = speed; return; }
     this.current = name;
     this.apply(fade, -1, false, speed, 1);
   }
   // an animation for the arms and the upper body on top of the legs ("" ends it)
   playUpper(name: Anim | string, fade = 0.15, speed = 1, restart = false) {
     if (this.upper === name && !restart) return;
-    const was = this.action(this.current, this.upper ? "lo" : "");
+    const was = this.action(this.current === "loco" ? "walk" : this.current, this.upper ? "lo" : "");
     this.upper = name;
     this.apply(fade, was.time, restart, was.timeScale, speed);
   }
@@ -653,9 +665,37 @@ export class HumanRig {
     if (!a || (this.current !== name && this.upper !== name)) return true;
     return !a.isRunning() && a.time >= a.getClip().duration - 1e-3;
   }
+  // ---- moving on foot: walk / run / sprint blended by speed, the step rate follows the speed (no sliding feet)
+  private locoSpeed = 0; private locoPhase = 0; private locoFade = 1; private locoFadeT = 0.2; private panic = false;
+  private gaits() { return ["walk", this.panic ? "panic" : "run", "sprint"]; }
+  // speed in world units per second (0: stand); panic: run with raised arms
+  move(speed: number, panic = false, fade = 0.25) {
+    if (speed < 6) { this.play("idle", fade); return; }
+    if (panic !== this.panic && this.current === "loco") { this.panic = panic; this.current = ""; }
+    this.panic = panic;
+    this.locoSpeed = speed;
+    this.play("loco", fade);
+  }
+  private updateLoco(dt: number) {
+    const v = this.locoSpeed, k = this.root.scale.x || 1; // bigger people take longer steps
+    const ramp = (a: number, b: number) => Math.max(0, Math.min(1, (v - a) / (b - a)));
+    const toRun = ramp(45, 80), toSprint = ramp(175, 215);
+    const w = [1 - toRun, toRun * (1 - toSprint), toSprint];
+    const len = [14, 24, 30].map((l) => l * k); // distance of one full step cycle (two steps)
+    const L = w[0] * len[0] + w[1] * len[1] + w[2] * len[2];
+    this.locoPhase = (this.locoPhase + (v * dt) / L) % 1;
+    this.locoFade = Math.min(1, this.locoFade + dt / this.locoFadeT);
+    const part = this.upper ? "lo" : "";
+    this.gaits().forEach((n, i) => {
+      const a = this.action(n, part);
+      a.timeScale = 0; a.time = this.locoPhase * a.getClip().duration;
+      a.setEffectiveWeight(w[i] * this.locoFade);
+    });
+  }
   update(dt: number) {
     // head and neck back to rest first: the extra look turn must not add up when no clip moves them
     this.bone("head").quaternion.identity(); this.bone("neck").quaternion.identity();
+    if (this.current === "loco") this.updateLoco(dt);
     this.mixer.update(dt);
     // head and eyes on top of the animation, blinking
     if (this.lookYaw || this.lookPitch) {

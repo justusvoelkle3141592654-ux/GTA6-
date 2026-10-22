@@ -93,10 +93,10 @@ export default function TouchControls({ input, nitro01, relative = false, onFoot
             <WeaponIcon w={weapon} size={26} />
             <span className="mt-0.5 font-display text-xs tracking-wider text-white/80">{ammo}</span>
           </button>
-          {!onFoot && btn(flying ? "HOCH" : "DRIFT", drift, setDrift, "drift", "#ff3cac", "h-16 w-16")}
+          {(!onFoot || flying) && btn(flying ? "HOCH" : "DRIFT", drift, setDrift, "drift", "#ff3cac", "h-16 w-16")}
         </div>
         <div className="flex flex-col items-center gap-3">
-          {btn(onFoot ? "SPRINT" : flying ? "RUNTER" : "NITRO", nitro, setNitro, "nitro", "#2bf0ff", "h-16 w-16",
+          {btn(flying ? "RUNTER" : onFoot ? "SPRINT" : "NITRO", nitro, setNitro, "nitro", "#2bf0ff", "h-16 w-16",
             !onFoot && !flying ? (
               <svg className="absolute inset-0 -rotate-90" viewBox="0 0 80 80">
                 <circle cx="40" cy="40" r="36" fill="none" stroke="#2bf0ff" strokeWidth="4" strokeDasharray={`${nitro01 * 226} 226`} opacity="0.9" />

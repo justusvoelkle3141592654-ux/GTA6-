@@ -106,7 +106,8 @@ export class Craft {
 
   // ---------- helicopter ----------
   // lift: +1 climb, -1 descend, 0 hold the altitude; the player's input or -1 (lands by itself when empty)
-  fly(c: Car, dt: number, lift: number, engine: boolean) {
+  // mul: vehicle multiplier from the settings (top speed and pull)
+  fly(c: Car, dt: number, lift: number, engine: boolean, mul = 1) {
     const g = this.g, st = MODEL_STATS[c.model];
     const ground = g.groundAt(c.x, c.y);
     c.rotor += dt * (engine ? 42 : c.z > ground + 1 ? 30 : 6);
@@ -117,9 +118,9 @@ export class Craft {
       vF *= Math.exp(-6 * dt); vR *= Math.exp(-6 * dt); c.vz = 0; c.z = ground;
       c.av += ((engine ? c.steer * 0.8 : 0) - c.av) * Math.min(1, dt * 5);
     } else {
-      if (engine) vF += c.throttle * st.acc * dt;
+      if (engine) vF += c.throttle * st.acc * mul * dt;
       vF -= vF * (engine && c.throttle !== 0 ? 0.25 : 0.9) * dt;
-      vF = clamp(vF, -st.maxV * 0.4, st.maxV);
+      vF = clamp(vF, -st.maxV * 0.4 * mul, st.maxV * mul);
       vR *= Math.exp(-2.2 * dt);
       c.av += ((engine ? c.steer * HELI_TURN : 0) - c.av) * Math.min(1, dt * 5);
       c.vz += (lift * HELI_CLIMB - c.vz) * Math.min(1, dt * 3);

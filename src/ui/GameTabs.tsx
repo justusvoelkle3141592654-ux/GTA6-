@@ -170,6 +170,54 @@ export function GarageTab({ game, onDone }: { game: Game; onDone: () => void }) 
   );
 }
 
+// ---------------------------------------------------------------- flight: fly mode, aircraft, travel (shops: straight inside)
+export function FlightTab({ game, onDone }: { game: Game; onDone: () => void }) {
+  const [msg, setMsg] = useState("");
+  const [filter, setFilter] = useState<"Läden" | "Stadtteile" | "Orte">("Läden");
+  const [, redraw] = useState(0);
+  const blocked = !game.rules.city ? "Nur in der Open World" : game.missions.active || game.hide.active ? "Nicht während einer Mission oder des Versteckspiels" : "";
+  const go = (id: string, instant: boolean) => { const m = game.travelTo(id, instant); if (m) setMsg(m); else onDone(); };
+  const craft = (m: "heli" | "policeheli") => { const r = game.spawner.vehicle(m); if (/ist da$/.test(r)) onDone(); else setMsg(r); };
+  const list = game.flightTargets().filter((t) => t.group === filter);
+  return (
+    <div className="space-y-2">
+      <div className={card}>
+        <div className="flex items-center justify-between gap-2">
+          <div><div className={h3}>Fliegen-Modus</div><div className="text-[11px] text-white/55">Zu Fuß oder mit jedem Auto frei fliegen. {game.mobile ? "HOCH / RUNTER" : `${game.bind.label("handbrake")} steigen · ${game.bind.label("nitro")} sinken`}.</div></div>
+          <button className={game.flyMode ? btnHi : btn} onClick={() => { game.toggleFly(); redraw((n) => n + 1); onDone(); }}>{game.flyMode ? "An" : "Aus"}</button>
+        </div>
+      </div>
+      <div className={card}>
+        <div className={h3}>Fluggerät holen</div>
+        <div className="mt-1 grid grid-cols-2 gap-2">
+          <button className={btn} disabled={!!blocked} onClick={() => craft("heli")}>{MODEL_NAME.heli}</button>
+          <button className={btn} disabled={!!blocked} onClick={() => craft("policeheli")}>{MODEL_NAME.policeheli}</button>
+        </div>
+      </div>
+      <div className={card}>
+        <div className={h3}>Schnellreise</div>
+        <div className="text-[11px] text-white/55">„Fliegen“ bringt dich in ein paar Sekunden durch die Luft hin, „Sofort“ teleportiert. Bei Läden landest du direkt drinnen.</div>
+        {blocked && <div className="mt-1 text-xs text-yellow-200">{blocked}</div>}
+        <div className="mt-2 flex gap-1">
+          {(["Läden", "Stadtteile", "Orte"] as const).map((g) => <button key={g} className={(filter === g ? btnHi : btn) + " flex-1"} onClick={() => setFilter(g)}>{g}</button>)}
+        </div>
+        <div className="mt-2 space-y-1.5">
+          {list.map((t) => (
+            <div key={t.id} className="flex items-center justify-between gap-2 rounded-lg bg-white/5 px-2 py-1.5">
+              <span className="text-sm">{t.name}</span>
+              <span className="flex shrink-0 gap-1">
+                <button className={btn} disabled={!!blocked} onClick={() => go(t.id, false)}>Fliegen</button>
+                <button className={btn} disabled={!!blocked} onClick={() => go(t.id, true)}>Sofort</button>
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+      {msg && <div className="popin rounded-lg bg-white/10 px-3 py-2 text-center text-sm text-yellow-100">{msg}</div>}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- phone apps: messages and radio
 export function MessagesApp({ game }: { game: Game }) {
   if (!game.messages.length) return <div className="p-3 text-sm text-white/50">Keine Nachrichten.</div>;

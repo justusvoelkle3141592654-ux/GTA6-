@@ -69,6 +69,8 @@ export const MODEL_STATS: Record<CarModel, ModelStats> = {
 };
 
 // half length / half width of each model (collision boxes match the drawn models)
+// all vehicles are drawn and collide this much bigger than their real size (arcade proportions next to the streets)
+export const VEH_SCALE = 1.2;
 export const MODEL_DIM: Record<CarModel, { hl: number; hw: number }> = {
   // real sizes of the car bodies (10 units = 1 m), see SHAPES in carmodel.ts
   sport: { hl: 22.5, hw: 9.5 }, super: { hl: 23, hw: 10 }, muscle: { hl: 24.5, hw: 9.8 }, suv: { hl: 24, hw: 10 }, sedan: { hl: 24, hw: 9.3 },
@@ -122,8 +124,8 @@ export class Car {
   alarmT = 0;              // car alarm sounding (seconds left)
   constructor(public kind: CarKind, public model: CarModel, public color: string) {}
   get speed() { return Math.hypot(this.vx, this.vy); }
-  get hl() { return MODEL_DIM[this.model].hl; }
-  get hw() { return MODEL_DIM[this.model].hw; }
+  get hl() { return MODEL_DIM[this.model].hl * VEH_SCALE; }
+  get hw() { return MODEL_DIM[this.model].hw * VEH_SCALE; }
 }
 
 // a hit at the world point (wx, wy): dents in the body, cracked or broken windows, a bumper that falls off

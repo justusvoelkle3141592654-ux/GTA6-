@@ -5,14 +5,14 @@ import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, CRIMES, type Crime } from "../ai/wanted";
 import { buildPlaces, onJetty, respawnCost, RESPAWN_RULES, type Place } from "../world/places";
 import { PedSystem, PED_LIMIT, isPolice, type Civilian, type Team } from "../ai/peds";
-import { Car, CARS, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, hitCar, copyBody, repairBody, type CarDef, type FactionId } from "../vehicles/vehicles";
+import { Car, CARS, VEH_SCALE, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, hitCar, copyBody, repairBody, type CarDef, type FactionId } from "../vehicles/vehicles";
 import { Inventory, WEAPONS, WEAPON_DEFS, type Weapon } from "../gameplay/weapons";
 import { SHAPES, hasRig } from "../vehicles/carmodel";
 import { buildInteriors, interiorAt, interiorFloor, type Interior, type Seat } from "../world/interiors";
 import type { ActKind } from "../render/people3d";
 import { AUTOSAVE_EVERY, SAVE_VERSION, emptyProgress, emptyStats, writeSave, type Progress, type SaveData, type SaveResult, type SaveStats } from "./save";
 import { Traffic, PARKED_LIMIT } from "../ai/traffic";
-import { DISTRICTS, districtAt, type DistrictId } from "../world/districts";
+import { DISTRICTS, districtAt, districtLabels, type DistrictId } from "../world/districts";
 import { Radio } from "../audio/radio";
 import { GARAGE_SLOTS, tuneAcc, tuneDamage, tuneGrip, tuneSpeed, type OwnedCar, type TunePart } from "../vehicles/garage";
 import { DEFAULT_STYLE, type ShopAction, type Style } from "../gameplay/economy";
@@ -82,7 +82,8 @@ export interface HudData {
   radio: string;          // station name while driving ("" = off)
   objective: string; objTimer: number; // mission text and seconds left (-1 = no timer)
   job: string;            // "starten" / "beenden" when the job key does something
-  alt: number;            // flying: metres above the ground (-1 = not in the helicopter)
+  alt: number;            // flying: metres above the ground (-1 = not in the helicopter / fly mode)
+  fly: boolean;           // fly mode on
   swim: boolean;          // swimming in the bay
 }
 export type EndReason = "dead" | "arrested";
@@ -395,7 +396,7 @@ export class Game {
   setupMenu() {
     this.resetWorld();
     this.player.cruise = 260;
-    for (let i = 0; i < 14; i++) this.traffic.spawnCiv(this, true);
+    for (let i = 0; i < Math.round(14 * currentSettings.traffic); i++) this.traffic.spawnCiv(this, true);
     this.ending = null; this.timeScale = 1;
     const now = new Date(); this.clock = now.getHours() + now.getMinutes() / 60; // the menu shows the city at the real time of day
     this.setState("menu");
@@ -434,7 +435,7 @@ export class Game {
     for (let i = 0; i < 5; i++) this.spawnPickup("repair", true);
     for (let i = 0; i < 5; i++) this.spawnPickup("rocket", true);
     for (let i = 0; i < 4; i++) this.spawnPickup("bomb", true);
-    for (let i = 0; i < 14; i++) this.traffic.spawnCiv(this, true);
+    for (let i = 0; i < Math.round(14 * currentSettings.traffic); i++) this.traffic.spawnCiv(this, true);
     this.peds.limit = this.config.quality === "low" ? PED_LIMIT.low : PED_LIMIT.high;
     this.traffic.reset();
     if (rules.city) { this.peds.populate(this.fx, this.fy); this.traffic.updateParking(this, 0, this.parkedLimit, true); }
@@ -1203,7 +1204,7 @@ export class Game {
 
   // where you stand at the driver's door (left front)
   private doorPoint(c: Car) {
-    const lx = (SHAPES[c.model]?.seatX ?? 0) + 2, lz = -(c.hw + 5), ca = Math.cos(c.a), sa = Math.sin(c.a);
+    const lx = ((SHAPES[c.model]?.seatX ?? 0) + 2) * VEH_SCALE, lz = -(c.hw + 5), ca = Math.cos(c.a), sa = Math.sin(c.a);
     return { x: c.x + lx * ca - lz * sa, y: c.y + lx * sa + lz * ca };
   }
   private startEnter(c: Car) {
@@ -1469,7 +1470,8 @@ export class Game {
       radio: !this.onFoot && st ? st.name : "",
       objective: this.objective, objTimer: this.objTimer,
       job: this.jobs.active ? "beenden" : "jobs",
-      alt: !this.onFoot && isHeli(p.model) && !p.dead ? Math.max(0, Math.round((p.z - this.groundAt(p.x, p.y)) * 0.1)) : -1,
+      alt: this.flyMode && this.onFoot ? Math.max(0, Math.round((this.ped.z - this.groundAt(this.ped.x, this.ped.y)) * 0.1)) : !this.onFoot && (isHeli(p.model) || (this.flyMode && !isCraft(p.model))) && !p.dead ? Math.max(0, Math.round((p.z - this.groundAt(p.x, p.y)) * 0.1)) : -1,
+      fly: this.flyMode,
       swim: this.onFoot && this.ped.swim,
     };
   }
@@ -1608,8 +1610,8 @@ export class Game {
       else if (this.config.camera !== "top") { p.steer = clamp(jx * 1.5, -1, 1); p.throttle = jy < -0.25 ? 1 : jy > 0.55 ? -1 : 0.85; }
       else { const diff = wrap(Math.atan2(jy, jx) - p.a); p.steer = clamp(diff * 2.6, -1, 1); p.throttle = m * (Math.abs(diff) > 1.9 ? 0.55 : 1); }
     } else { p.throttle = 0; p.steer = 0; }
-    if (isHeli(p.model)) {
-      // helicopter: Space / DRIFT climbs, Shift / NITRO descends (no nitro, no handbrake)
+    if (isHeli(p.model) || (this.flyMode && !isCraft(p.model))) {
+      // helicopter and fly mode: Space / DRIFT climbs, Shift / NITRO descends (no nitro, no handbrake)
       this.lift = (p.handbrake ? 1 : 0) - (wantNitro ? 1 : 0);
       p.handbrake = false; p.nitro = false; this.nitroWasOn = false;
       return;
@@ -1628,6 +1630,11 @@ export class Game {
     else if (this.pad.state.active && (this.pad.state.lx || this.pad.state.ly)) { jx = this.pad.state.lx; jy = this.pad.state.ly; }
     else if (this.touch.active) { jx = this.touch.jx; jy = this.touch.jy; }
     pd.sprint = b.held("nitro", k) || this.touch.nitro;
+    if (this.flyMode) {
+      // flying on foot: Space / HOCH climbs, Shift / RUNTER sinks, no sprint
+      this.lift = (b.held("handbrake", k) || this.touch.drift ? 1 : 0) - (pd.sprint ? 1 : 0);
+      pd.sprint = false;
+    }
     const m = Math.min(1, Math.hypot(jx, jy));
     let dx = 0, dy = 0;
     const cam = this.config.camera;
@@ -1646,7 +1653,7 @@ export class Game {
     if ((this.act || this.approach) && this.steerAct(dt, m > 0.15)) return;
     if (this.seat) { if (m > 0.15) this.seat = null; else { pd.vx = pd.vy = 0; pd.moving = false; pd.x = this.seat.x; pd.y = this.seat.y; pd.a = this.seat.a; return; } }
     const L = Math.hypot(dx, dy);
-    const spd = (pd.swim ? 75 : pd.sprint ? 250 : 165) * (this.energyT > 0 && !pd.swim ? 1.15 : 1);
+    const spd = this.flyMode ? 420 * currentSettings.vehSpeed : (pd.swim ? 75 : pd.sprint ? 250 : 165) * (this.energyT > 0 && !pd.swim ? 1.15 : 1);
     const tvx = L > 0 ? (dx / L) * spd * Math.min(1, m / 0.8) : 0, tvy = L > 0 ? (dy / L) * spd * Math.min(1, m / 0.8) : 0;
     const kk = Math.min(1, dt * 10);
     pd.vx += (tvx - pd.vx) * kk; pd.vy += (tvy - pd.vy) * kk;
@@ -1667,6 +1674,20 @@ export class Game {
     if (this.fall?.fade) return;
     if (this.act) this.stepAct(dt);
     this.stepDoors(dt);
+    if (this.travel) { this.stepTravel(dt); return; }
+    if (this.flyMode) {
+      // fly mode on foot: no gravity, up and down with the lift keys, never below the ground
+      const nx = pd.x + pd.vx * dt, ny = pd.y + pd.vy * dt;
+      if (!this.pedBlocked(nx, pd.y)) pd.x = nx; else pd.vx = 0;
+      if (!this.pedBlocked(pd.x, ny)) pd.y = ny; else pd.vy = 0;
+      const gnd = Math.max(this.groundH(pd.x, pd.y, pd.z + 4), isWater(pd.x, pd.y) ? WATER_Y : -Infinity);
+      pd.vz += (this.lift * 260 - pd.vz) * Math.min(1, dt * 6);
+      pd.z = Math.min(2400, Math.max(gnd, pd.z + pd.vz * dt));
+      pd.air = pd.z > gnd + 3; pd.swim = false; pd.fallFrom = pd.z;
+      pd.walk += dt * Math.hypot(pd.vx, pd.vy) * 0.05;
+      pd.shootT = Math.max(0, pd.shootT - dt); pd.hitFlash = Math.max(0, pd.hitFlash - dt);
+      return;
+    }
     const nx = pd.x + pd.vx * dt, ny = pd.y + pd.vy * dt;
     if (!this.pedBlocked(nx, pd.y)) pd.x = nx; else pd.vx = 0;
     if (!this.pedBlocked(pd.x, ny)) pd.y = ny; else pd.vy = 0;
@@ -1830,10 +1851,11 @@ export class Game {
     const def = this.carDef;
     for (const c of this.cars) {
       const grass = this.onGrass(c.x, c.y);
-      if (isHeli(c.model) && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.fly(c, dt, mine ? this.lift : -1, mine); this.collideWorld(c); continue; }
+      if (isHeli(c.model) && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.fly(c, dt, mine ? this.lift : -1, mine, mine ? currentSettings.vehSpeed : 1); this.collideWorld(c); continue; }
       if (isBoat(c.model) && !c.dead) {
         const st = MODEL_STATS[c.model], mine = c === p && playing;
-        this.craft.boat(c, dt, st.acc + (mine && p.nitro ? 400 : 0), !mine ? st.maxV * (c.kind === "cop" ? 0.9 : 0.8) : st.maxV + (mine && p.nitro ? 200 : 0) + (mine ? st.maxV * (tuneSpeed(p.tune) - 1) : 0));
+        const vs = mine ? currentSettings.vehSpeed : 1; // vehicle multiplier (settings)
+        this.craft.boat(c, dt, (st.acc + (mine && p.nitro ? 400 : 0)) * vs, !mine ? st.maxV * (c.kind === "cop" ? 0.9 : 0.8) : (st.maxV + (p.nitro ? 200 : 0) + st.maxV * (tuneSpeed(p.tune) - 1)) * vs);
         this.collideWorld(c);
         continue;
       }
@@ -1841,9 +1863,11 @@ export class Game {
         if (p.dead) this.wreckPhysics(c, dt);
         else if (playing) {
           const st = p.model === def.model ? def : MODEL_STATS[p.model];
-          const t = p.tune, top = st.maxV * tuneSpeed(t), grip = st.grip * tuneGrip(t);
+          // vehicle multiplier from the settings: more top speed and pull, a bit more grip so it stays drivable
+          const vs = currentSettings.vehSpeed;
+          const t = p.tune, top = st.maxV * tuneSpeed(t) * vs, grip = st.grip * tuneGrip(t) * Math.sqrt(vs);
           const maxV = (p.nitro ? top + 280 : top) * (p.flat ? 0.6 : 1);
-          const acc = (p.nitro ? st.acc + 500 : st.acc) * tuneAcc(t);
+          const acc = (p.nitro ? st.acc + 500 : st.acc) * tuneAcc(t) * vs;
           const g2 = (grass ? grip * 0.5 : grip) * (p.flat ? 0.45 : 1);
           this.drive(c, dt, acc, grass ? maxV * 0.8 : maxV, g2, 1.7);
           if (p.flat && p.speed > 120 && P60(0.3, dt)) this.sparks(p.x - Math.cos(p.a) * 14, p.y - Math.sin(p.a) * 14, p.z + 2, 1, -p.vx, -p.vy, 0.4);
@@ -1882,7 +1906,7 @@ export class Game {
       if (c.wrecked) c.wreckT += dt;
     }
 
-    const civTarget = this.mobile ? 12 : 16;
+    const civTarget = Math.round((this.mobile ? 12 : 16) * currentSettings.traffic); // traffic density (settings)
     let civs = 0, cops = 0;
     for (let i = this.cars.length - 1; i >= 0; i--) {
       const c = this.cars[i];
@@ -2029,8 +2053,77 @@ export class Game {
     return !!b && b.kind === "park";
   }
 
+  // ---------- fly mode, travel menu ----------
+  flyMode = false;
+  toggleFly() {
+    this.flyMode = !this.flyMode;
+    if (!this.flyMode) {
+      // back on the ground gently: no fall damage from up there
+      const pd = this.ped; pd.fallFrom = this.groundH(pd.x, pd.y, pd.z) + 40; pd.vz = 0;
+      const p = this.player; p.vz = Math.max(p.vz, -100);
+    }
+    this.setHint(this.flyMode ? (this.mobile ? "Fliegen an: HOCH steigen · RUNTER sinken" : `Fliegen an: ${this.bind.label("handbrake")} steigen · ${this.bind.label("nitro")} sinken`) : "Fliegen aus", 3);
+    return this.flyMode;
+  }
+  // a car in fly mode: gas pushes along the heading, steering turns, lift climbs and sinks, no gravity
+  private flyCar(c: Car, dt: number, acc: number, maxV: number) {
+    const ca = Math.cos(c.a), sa = Math.sin(c.a);
+    let vF = c.vx * ca + c.vy * sa;
+    vF += c.throttle * acc * 1.2 * dt;
+    vF -= vF * (c.throttle !== 0 ? 0.3 : 1.2) * dt;
+    vF = clamp(vF, -maxV * 0.4, maxV * 1.3);
+    c.av += (c.steer * 2.2 - c.av) * Math.min(1, dt * 5);
+    c.a += c.av * dt;
+    c.vx = Math.cos(c.a) * vF; c.vy = Math.sin(c.a) * vF;
+    c.vz += (this.lift * 320 - c.vz) * Math.min(1, dt * 4);
+    c.x += c.vx * dt; c.y += c.vy * dt;
+    this.sweep(c, dt);
+    const gh = this.carGround(c);
+    c.z = Math.min(3000, Math.max(gh, c.z + c.vz * dt));
+    c.air = c.z > gh + 2; c.airT = 0; c.onRamp = -1;
+    c.vF = vF; c.vR = 0;
+  }
+
+  // travel: places to go (shops: straight inside)
+  flightTargets(): { id: string; name: string; group: "Läden" | "Stadtteile" | "Orte"; x: number; y: number }[] {
+    const out: ReturnType<Game["flightTargets"]> = [];
+    for (const it of this.interiors) out.push({ id: "shop:" + it.id, name: it.name, group: "Läden", x: it.door.x + 22, y: it.door.y });
+    for (const l of districtLabels()) { const q = this.world.nearestSafeRoad(l.x, l.y); out.push({ id: "dist:" + l.id, name: DISTRICTS[l.id].name, group: "Stadtteile", x: q.x, y: q.y }); }
+    for (const pl of this.places) if (pl.kind === "dock" || pl.kind === "heliport" || pl.id === "stuntpark" || pl.id === "hospital" || pl.id === "police") out.push({ id: "place:" + pl.id, name: pl.name, group: "Orte", x: pl.x, y: pl.y });
+    if (this.waypoint) { const q = this.world.nearestSafeRoad(this.waypoint.x, this.waypoint.y); out.push({ id: "wp", name: "Mein Wegpunkt", group: "Orte", x: q.x, y: q.y }); }
+    return out;
+  }
+  travel: { sx: number; sy: number; sz: number; tx: number; ty: number; tz: number; t: number; dur: number; name: string } | null = null;
+  // fly there (visible, a few seconds) or jump there at once; returns a message ("" = started)
+  travelTo(id: string, instant: boolean): string {
+    if (!this.rules.city) return "Nur in der Open World";
+    if (this.missions.active || this.hide.active) return "Nicht während einer Mission oder des Versteckspiels";
+    const d = this.flightTargets().find((q) => q.id === id);
+    if (!d) return "";
+    if (!this.onFoot) { const p = this.player; p.vx = 0; p.vy = 0; p.throttle = 0; this.exitCar(false); }
+    this.act = null; this.approach = null; this.seat = null;
+    const pd = this.ped, tz = this.groundH(d.x, d.y, 0);
+    if (instant) { this.teleportOnFoot(d.x, d.y); this.setHint(d.name, 2); return ""; }
+    const dist = Math.hypot(d.x - pd.x, d.y - pd.y);
+    this.travel = { sx: pd.x, sy: pd.y, sz: pd.z, tx: d.x, ty: d.y, tz, t: 0, dur: clamp(dist / 1600, 2.5, 7), name: d.name };
+    sfx.nitro();
+    return "";
+  }
+  private stepTravel(dt: number) {
+    const tr = this.travel!, pd = this.ped;
+    tr.t += dt / tr.dur;
+    const k = Math.min(1, tr.t), e = k * k * (3 - 2 * k);
+    const dist = Math.hypot(tr.tx - tr.sx, tr.ty - tr.sy), h = 220 + dist * 0.12;
+    const px = tr.sx + (tr.tx - tr.sx) * e, py = tr.sy + (tr.ty - tr.sy) * e;
+    pd.vx = (px - pd.x) / Math.max(dt, 1e-3); pd.vy = (py - pd.y) / Math.max(dt, 1e-3);
+    pd.x = px; pd.y = py; pd.z = tr.sz + (tr.tz - tr.sz) * e + Math.sin(k * Math.PI) * h;
+    pd.a = Math.atan2(tr.ty - tr.sy, tr.tx - tr.sx); pd.air = k < 1; pd.vz = 0; pd.swim = false; pd.fallFrom = pd.z;
+    if (k >= 1) { pd.x = tr.tx; pd.y = tr.ty; pd.z = tr.tz; pd.vx = pd.vy = 0; pd.air = false; this.travel = null; this.r3d.resetCamera(pd.a); this.setHint(tr.name, 2); }
+  }
+
   // ---------- physics ----------
   private drive(c: Car, dt: number, acc: number, maxV: number, grip: number, gripDrift: number) {
+    if (c === this.player && this.flyMode && !this.onFoot && !isCraft(c.model)) { this.flyCar(c, dt, acc, maxV); return; }
     if (c.air) {
       c.airT += dt;
       // nitro in the air: thrust forward and float longer (less gravity)
