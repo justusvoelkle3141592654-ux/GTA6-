@@ -441,6 +441,8 @@ export class Game {
     const m = this.config.mode;
     if (save) this.banner("WILLKOMMEN ZURÜCK", "Spielstand geladen", "#3dff8b", 2.6);
     else this.banner(m === "free" ? "FREIE FAHRT" : m === "open" ? "SOLARA BAY" : "LOS GEHT'S", m === "free" ? "Keine Cops – erkunde Stadt & Berge" : m === "open" ? "Die Stadt gehört dir – benimm dich (oder nicht)" : "Schnapp dir das Cash!", "#ff3cac", 2.6);
+    // the camera jumps from the menu flight straight behind the player (no flight through the buildings)
+    this.r3d.flyCam = null; this.r3d.resetCamera(this.fa);
     this.setState("playing");
   }
 

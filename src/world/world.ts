@@ -389,6 +389,8 @@ export class World {
           const p = pal();
           block.buildings.push({ x: x0 + 95, y: y0 + 40, w: 180, h: 110, height: 34, wall: "#e8dcc4", wallDark: p[1], roof: "#7a5a4a", neon: null, detail: 0, seed: r(), type: 25 });
           block.buildings.push({ x: x0 + 165, y: y0 + 60, w: 40, h: 40, height: 95, wall: "#e8dcc4", wallDark: p[1], roof: "#3a5a4a", neon: null, detail: 0, seed: r(), type: 26 });
+          // the portico in front of the hall (drawn by landmarks3d): solid for people, cars and the camera
+          block.buildings.push({ x: x0 + 185 - 60, y: y0 + 150, w: 120, h: 26, height: 20, wall: "#e8dcc4", wallDark: p[1], roof: "#e8dcc4", neon: null, detail: 0, seed: 0, shell: true });
           for (const [tx, ty] of [[60, 230], [310, 230], [60, 330], [310, 330]]) block.trees.push({ x: x0 + tx, y: y0 + ty, r: 16, rot: r() * 6, kind: 0 });
         } else if (kind === "stadium") {
           block.buildings.push({ x: x0 + 30, y: y0 + 30, w: size - 60, h: size - 60, height: 28, wall: "#d9d6cf", wallDark: "#9a968e", roof: "#3c8a4a", neon: null, detail: 0, seed: r(), type: 27 });
