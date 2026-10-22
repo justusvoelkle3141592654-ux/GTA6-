@@ -62,6 +62,8 @@ const M = 18; // inset of buildings from the block edge
 
 // the ferris wheel on the beach promenade (drawn in worldmesh, solid base here)
 export const FERRIS = { x: -130, y: 3.4 * BLOCK, r: 70 };
+// the roundabout in the centre (crossing i, j); island radius, lane radius of the circling cars
+export const ROUNDABOUT = { i: 8, j: 8, r: 30, lane: 54 };
 
 export class World {
   blocks: Block[] = [];
@@ -275,6 +277,8 @@ export class World {
     }
     // ferris wheel base on the promenade
     this.extra(FERRIS.x - 30, FERRIS.y - 12, 60, 24, 6, "#c9ced8", { type: 28, low: true });
+    // roundabout island (drawn by landmarks3d)
+    { const n = this.nodePos(ROUNDABOUT.i, ROUNDABOUT.j), h = ROUNDABOUT.r * 0.85; this.extra(n.x - h, n.y - h, h * 2, h * 2, 3, "#4c7a3a", { type: 30, low: true }); }
     // palms along the beach promenade
     for (let y = 60; y < WORLD; y += 140) if (HIGHWAYS.every((i) => Math.abs(y - lineC(i)) > 110) && Math.abs(y - FERRIS.y) > 100) this.extraTrees.push({ x: -16, y, r: 14, rot: r() * 6, kind: 1 });
     // stunt park fence (gap on the west side, towards the highway) and a few containers to jump over
@@ -405,6 +409,13 @@ export class World {
         }
         this.blocks.push(block);
       }
+    }
+    // Vale Tower: the glass tower of the developer, the tallest building next to the town hall
+    for (const [bx, by] of [[6, 6], [7, 6], [6, 7]]) {
+      const b = this.blocks[by * GRID + bx].buildings.filter((q) => !q.garage).sort((p, q) => q.w * q.h - p.w * p.h)[0];
+      if (!b) continue;
+      b.type = 29; b.height = 230; b.neon = null;
+      break;
     }
   }
 

@@ -352,6 +352,7 @@ export function extrasMesh(world: World): THREE.Group {
   const signs: G[] = [];
   for (const e of world.extras as Building[]) {
     const b = e.base ?? 0, cx = e.x + e.w / 2, cy = e.y + e.h / 2, H = roofOf(e) - b;
+    if (e.type === 28 || e.type === 30) continue; // ferris wheel, roundabout: landmarks3d
     if (e.type === 23) { // fence: posts and mesh
       P.push(box(e.w, H, e.h, cx, b + H / 2, cy, "#9aa3ad"));
       const L = Math.max(e.w, e.h);
@@ -446,3 +447,38 @@ export class LightsMesh {
   }
 }
 void EDGE_LAND; void edgeDist; void MAP_MAX; void H_SCALE;
+
+// ---------------------------------------------------------------- street furniture on the sidewalks
+// benches, bins, hydrants, letter boxes and bus shelters (decoration: people and cars pass through them)
+export function furnitureMesh(world: World): THREE.Group {
+  const grp = new THREE.Group();
+  const P: G[] = [], Gl: G[] = [];
+  const stops = world.busStops();
+  const nearStop = (x: number, y: number) => stops.some((s) => Math.hypot(s.x - x, s.y - y) < 40);
+  const rot = (g: G, x: number, y: number, nx: number, ny: number) => { g.rotateY(Math.atan2(nx, ny)); g.translate(x, 0, y); return g; };
+  const part = (w: number, h: number, d: number, ox: number, oy: number, oz: number, col: string) => withColor(new THREE.BoxGeometry(w, h, d).translate(ox, oy, oz), C(col));
+  const pts = world.curbPoints();
+  pts.forEach((c, i) => {
+    if (nearStop(c.x, c.y)) return;
+    const k = (i * 2654435761) >>> 0;
+    // local frame: +z towards the street
+    if (k % 19 === 0) { // bench facing the street
+      for (const g of [part(16, 1, 5, 0, 5, 0, "#8a5a3a"), part(16, 5, 1, 0, 8, -2.6, "#8a5a3a"), part(1, 5, 4, -7, 2.5, 0, "#3a3d45"), part(1, 5, 4, 7, 2.5, 0, "#3a3d45")]) P.push(rot(g, c.x - c.nx * 3, c.y - c.ny * 3, c.nx, c.ny));
+    } else if (k % 13 === 4) { // litter bin
+      P.push(rot(withColor(new THREE.CylinderGeometry(2.6, 2.2, 8, 10).translate(0, 4, 0), C("#2f6b3a")), c.x, c.y, c.nx, c.ny), rot(part(1, 10, 1, 0, 5, -3, "#3a3d45"), c.x, c.y, c.nx, c.ny));
+    } else if (k % 23 === 6) { // hydrant
+      P.push(rot(withColor(mergeGeometries([new THREE.CylinderGeometry(1.5, 1.8, 6, 10).translate(0, 3, 0), new THREE.SphereGeometry(1.5, 10, 6).translate(0, 6, 0), new THREE.CylinderGeometry(0.6, 0.6, 4.4, 6).rotateZ(Math.PI / 2).translate(0, 4, 0)])!, C("#c0392b")), c.x, c.y, c.nx, c.ny));
+    } else if (k % 37 === 9) { // letter box on a post
+      P.push(rot(part(5, 7, 4, 0, 10, 0, "#f1c40f"), c.x - c.nx * 2, c.y - c.ny * 2, c.nx, c.ny), rot(part(1, 7, 1, 0, 3.5, 0, "#3a3d45"), c.x - c.nx * 2, c.y - c.ny * 2, c.nx, c.ny), rot(part(3, 0.6, 0.4, 0, 12, 2.1, "#1b1b1f"), c.x - c.nx * 2, c.y - c.ny * 2, c.nx, c.ny));
+    }
+  });
+  // bus stops: shelter with glass back wall, roof, bench, the H sign on a pole
+  for (const s of stops) {
+    const r = (g: G) => rot(g, s.x - s.nx * 2, s.y - s.ny * 2, s.nx, s.ny);
+    for (const g of [part(1, 22, 1, -12, 11, -5, "#5f666e"), part(1, 22, 1, 12, 11, -5, "#5f666e"), part(1, 22, 1, -12, 11, 5, "#5f666e"), part(1, 22, 1, 12, 11, 5, "#5f666e"), part(28, 1.2, 13, 0, 22.5, 0, "#3a3d45"), part(20, 1, 4, 0, 5, -3, "#8a5a3a"), part(1.2, 26, 1.2, 15, 13, 5, "#5f666e"), part(5, 5, 0.6, 15, 27, 5, "#1d8a4a"), part(3, 3, 0.7, 15, 27, 5.1, "#f1c40f")]) P.push(r(g));
+    Gl.push(r(part(24, 16, 0.5, 0, 12, -5, "#cfe6f2")), r(part(0.5, 16, 9, -12, 12, 0, "#cfe6f2")));
+  }
+  if (P.length) { const m = new THREE.Mesh(merge(P), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.2 })); m.castShadow = true; m.receiveShadow = true; m.userData.cast = true; grp.add(m); }
+  if (Gl.length) grp.add(new THREE.Mesh(merge(Gl), new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.05, transparent: true, opacity: 0.35, depthWrite: false })));
+  return grp;
+}

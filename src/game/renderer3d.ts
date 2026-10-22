@@ -8,7 +8,7 @@ import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { wrapA, clamp, canvasTex, radialTex, withColor, C, box, flat, cyl, sph } from "./meshutil";
 import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_SIZE, H_SCALE, EDGE_LAND, STUNT_PARK, terrainH, terrainGrad, cityDist, inCity, coast, edgeDist, mulberry32, type Building, tunnelAt, TUNNEL } from "./world";
-import { terrainMesh, backdropMesh, roadsMesh, rampsMesh, coastMesh, extrasMesh, LightsMesh } from "./worldmesh";
+import { terrainMesh, backdropMesh, roadsMesh, rampsMesh, coastMesh, extrasMesh, furnitureMesh, LightsMesh } from "./worldmesh";
 import { TrafficLights } from "./traffic";
 import { Atmosphere } from "./atmosphere";
 import { currentSettings } from "./settings";
@@ -22,6 +22,7 @@ import type { Interior } from "./interiors";
 import { CrowdRenderer } from "./crowd3d";
 import { PlayerFigure, CrowdFigures } from "./people3d";
 import { InteriorsRenderer } from "./interiors3d";
+import { Landmarks } from "./landmarks3d";
 import { DISTRICTS, blockDistrict } from "./districts";
 import { MAX_PEDS } from "./peds";
 import type { Game, Car, Pickup, CameraMode, Quality, CarModel, Proj, Bomb, PickupType } from "./engine";
@@ -489,6 +490,7 @@ export class Renderer3D {
   private arrow!: THREE.Mesh;
   private ped!: PlayerFigure;
   private rooms!: InteriorsRenderer;
+  private landmarks!: Landmarks;
   private people!: CrowdFigures;
   private crowd!: CrowdRenderer;
   private camPos = new THREE.Vector3(); private camLook = new THREE.Vector3(); private camInit = false; private orbit = 0; private fov = 62;
@@ -756,7 +758,7 @@ export class Renderer3D {
         L.prop.push(cyl(48, 48, 1, mx, 2.8, mz, "#8f8b84", 24));
       } else L.ground.push(box(size - 24, 0.4, size - 24, mx, 2.3, mz, "#a8a49a"));
       for (const b of blk.buildings) {
-        if (b.shell) continue; // walkable shops: interiors3d
+        if (b.shell || Landmarks.owns(b)) continue; // walkable shops: interiors3d; town hall, tower, stadium: landmarks3d
         if (b.garage) {
           // parking garage: concrete decks with open bands
           const H = b.height * H_SCALE + 14, cx = b.x + b.w / 2, cz = b.y + b.h / 2;
@@ -784,6 +786,7 @@ export class Renderer3D {
           L.neon.push(box(s * 0.04, 0.4, s * 0.22, cx - s * 0.07, H + 3.3, cz, "#ffd23f", 1.6), box(s * 0.04, 0.4, s * 0.22, cx + s * 0.07, H + 3.3, cz, "#ffd23f", 1.6), box(s * 0.14, 0.4, s * 0.04, cx, H + 3.3, cz, "#ffd23f", 1.6));
         } else if (b.detail === 2 && s > 70) { L.prop.push(box(b.w * 0.56, 2, b.h * 0.42, cx, H + 2.2, cz, "#e8e4f0")); L.neon.push(box(b.w * 0.5, 0.5, b.h * 0.36, cx, H + 3.3, cz, "#22c4ee", 1.1)); }
         else { L.prop.push(cyl(s * 0.09, s * 0.09, 14, b.x + b.w * 0.7, H + 10, b.y + b.h * 0.3, "#6b5a4a", 10), box(1.5, 46, 1.5, b.x + b.w * 0.3, H + 23, b.y + b.h * 0.65, "#555")); L.neon.push(box(3, 3, 3, b.x + b.w * 0.3, H + 47, b.y + b.h * 0.65, "#ff2040", 2.5)); }
+        this.facade(b, H, cx, cz, col, L, wallBox, r);
         const faces: [number, number, number, number][] = [[cx, b.y - 0.6, b.w * 0.8, 0], [cx, b.y + b.h + 0.6, b.w * 0.8, 0], [b.x - 0.6, cz, b.h * 0.8, 1], [b.x + b.w + 0.6, cz, b.h * 0.8, 1]];
         for (const [fx, fz, len, rot] of faces) {
           if (r() < 0.45) continue;
@@ -830,6 +833,49 @@ export class Renderer3D {
     this.buildEdge();
   }
 
+  // what makes the building types different (see Building.type): roofs, balconies, awnings, setbacks ...
+  private facade(b: Building, H: number, cx: number, cz: number, col: THREE.Color, L: { wall: THREE.BufferGeometry[]; prop: THREE.BufferGeometry[]; neon: THREE.BufferGeometry[] }, wallBox: (b: Building, H: number, col: THREE.Color) => THREE.BufferGeometry, r: () => number) {
+    const t = b.type ?? 0, dk = col.clone().multiplyScalar(0.6), lt = col.clone().lerp(new THREE.Color(1, 1, 1), 0.35);
+    const long = b.w >= b.h; // balconies and awnings on the long sides
+    const sides: [number, number, number, number][] = long ? [[cx, b.y, 1, 0], [cx, b.y + b.h, -1, 0]] : [[b.x, cz, 0, 1], [b.x + b.w, cz, 0, -1]]; // x, y, along-normal flags
+    const len = long ? b.w : b.h;
+    const onFace = (f: [number, number, number, number], u: number, w: number, h: number, d: number, y: number, c: string | THREE.Color, out = 0) => {
+      // u: offset along the face, out: distance in front of the wall
+      const [fx, fy, nyS, nxS] = f;
+      const nx = nxS ? -nxS : 0, ny = nyS ? -nyS : 0; // outward normal
+      if (long) L.prop.push(box(w, h, d, fx + u, y, fy + ny * (out + d / 2), c));
+      else L.prop.push(box(d, h, w, fx + nx * (out + d / 2), y, fy + u, c));
+    };
+    const awnings = (cols: string[]) => { for (const f of sides) for (let u = -len / 2 + 16; u < len / 2 - 16; u += 34) onFace(f, u, 26, 1.2, 9, 15.5, cols[Math.floor(r() * cols.length)], 0); };
+    const balconies = (every: number, from: number) => { for (const f of sides) for (let y = from; y < H - 10; y += every) for (let u = -len / 2 + 20; u < len / 2 - 14; u += 36) { onFace(f, u, 22, 1.2, 7, y, lt); onFace(f, u, 22, 4, 0.6, y + 2.6, "#e8e8ec", 6.6); } };
+    const acUnits = () => { for (const f of sides) for (let k = 0; k < Math.min(10, H / 20); k++) onFace(f, (r() - 0.5) * (len - 20), 5, 4, 3, 24 + r() * (H - 34), "#c9ced8"); };
+    const pitched = (h: number, c: string) => { const g = new THREE.ConeGeometry(Math.hypot(b.w, b.h) * 0.5, h, 4); g.rotateY(Math.PI / 4); g.scale(b.w / Math.hypot(b.w, b.h) * 1.45, 1, b.h / Math.hypot(b.w, b.h) * 1.45); g.translate(cx, H + h / 2 + 1, cz); L.prop.push(withColor(g, C(c))); };
+    const setback = (k: number, h: number) => { const b2 = { ...b, x: cx - (b.w * k) / 2, y: cz - (b.h * k) / 2, w: b.w * k, h: b.h * k }; L.wall.push(wallBox(b2, h, col).translate(0, H, 0)); L.prop.push(box(b2.w + 2, 2, b2.h + 2, cx, H + h, cz, dk)); };
+    switch (t) {
+      case 0: // glass tower: blue tint, vertical mullions
+        for (const f of sides) for (let u = -len / 2 + 8; u < len / 2; u += 16) onFace(f, u, 1, H - 12, 0.8, H / 2 + 6, "#b8c4cc");
+        break;
+      case 1: acUnits(); break; // office slab with AC units
+      case 2: if (H > 80) { setback(0.72, H * 0.25); setback(0.45, H * 0.5); } break; // stepped tower
+      case 3: if (H > 60) L.prop.push(cyl(Math.min(b.w, b.h) * 0.25, Math.min(b.w, b.h) * 0.3, 18, cx, H + 9, cz, "#3a3d45", 16)); L.neon.push(cyl(Math.min(b.w, b.h) * 0.26, Math.min(b.w, b.h) * 0.26, 1.2, cx, H + 17, cz, "#2bf0ff", 16, 1.2)); break; // tower with a lit crown
+      case 4: for (const f of sides) for (let y = 30; y < H - 6; y += 18) onFace(f, 0, len - 6, 1.6, 1.2, y, dk); break; // stone office: cornice bands
+      case 5: if (H > 70) setback(0.6, H * 0.18); break;
+      case 6: pitched(18, "#8a4a32"); break; // old town house, tiled roof
+      case 7: pitched(16, "#6a3a2a"); awnings(["#2d8a5a", "#c0392b", "#e1b12c"]); break;
+      case 8: pitched(16, "#7a4a3a"); balconies(18, 30); break;
+      case 9: for (const f of sides) for (let u = -len / 2 + 10; u <= len / 2 - 10; u += 20) onFace(f, u, 3, 13, 3, 6.5, lt, 6); for (const f of sides) onFace(f, 0, len, 1.5, 9, 13.5, lt); break; // arcade
+      case 10: balconies(16, 26); break; // beach hotel
+      case 11: balconies(18, 28); awnings(["#2bb3ff", "#ff6f91", "#f1c40f"]); break;
+      case 12: awnings(["#2bb3ff", "#ffffff", "#ff8a3d"]); break;
+      case 13: L.prop.push(box(b.w - 6, 4, b.h - 6, cx, H + 2, cz, "#7a7f88")); break; // warehouse with a vent ridge
+      case 14: for (const f of sides) for (let u = -len / 2 + 22; u < len / 2 - 20; u += 40) onFace(f, u, 24, 20, 0.6, 10, "#5f666e", 0.1); break; // loading doors
+      case 15: for (let k = 0; k < Math.floor(b.w / 30); k++) { const g = new THREE.CylinderGeometry(1, 1, b.h - 4, 3).rotateX(Math.PI / 2).rotateZ(Math.PI / 2).scale(15, 10, 1); g.translate(b.x + 15 + k * 30, H + 5, cz); L.prop.push(withColor(g, C("#8a8f98"))); } break; // sawtooth roof
+      case 16: L.prop.push(cyl(5, 7, 60, b.x + b.w * 0.8, H + 30, b.y + b.h * 0.25, "#7a5a4a", 12), cyl(5.4, 5.4, 4, b.x + b.w * 0.8, H + 52, b.y + b.h * 0.25, "#c0392b", 12)); break; // chimney
+      case 17: pitched(14, r() < 0.5 ? "#a85a3a" : "#5a5a62"); break; // house with a gable roof
+      case 18: L.prop.push(box(b.w * 0.4, 12, 8, cx, 6, b.y + b.h + 4, lt), box(b.w * 0.36, 10, 0.6, cx, 6, b.y + b.h + 8.2, "#c9ced8")); break; // flat house with a garage
+    }
+  }
+
   // deciduous tree: trunk and a few overlapping crowns
   private leafTree(out: THREE.BufferGeometry[], x: number, y: number, z0: number, rad: number, r: () => number) {
     const H = 18 + rad * 1.1;
@@ -846,6 +892,9 @@ export class Renderer3D {
   private buildEdge() {
     const c = coastMesh(this.world);
     this.scene.add(c); this.cityMeshes.push(c);
+    const fu = furnitureMesh(this.world);
+    fu.traverse((o) => { if ((o as THREE.Mesh).isMesh && o.userData.cast) this.cityMeshes.push(o as THREE.Mesh); });
+    this.scene.add(fu);
     const e = extrasMesh(this.world);
     e.traverse((o) => { if ((o as THREE.Mesh).isMesh && o.userData.cast) this.cityMeshes.push(o as THREE.Mesh); });
     this.scene.add(e);
@@ -1053,6 +1102,9 @@ export class Renderer3D {
 
     // player character and the people close to the camera: skinned and animated (people3d.ts)
     this.ped = new PlayerFigure(this.scene, this.shadowGeo, this.shadowMat);
+    this.landmarks = new Landmarks(this.world, this.scene);
+    this.landmarks.group.traverse((o) => { if ((o as THREE.Mesh).isMesh && o.userData.cast) this.cityMeshes.push(o as THREE.Mesh); });
+    this.atm.setupMaterials(this.landmarks.group);
     this.rooms = new InteriorsRenderer(this.scene, this.interiorList, (model, color) => {
       if (!hasRig(model as CarModel)) return null;
       const rig = new CarRig(model as CarModel, color, this.carMats ??= carMaterials(), "SB · NEU");
@@ -1748,6 +1800,7 @@ export class Renderer3D {
     this.syncHeli(g);
     this.syncSpikes(g);
     this.rooms.update(g, dt, this.camPos);
+    this.landmarks.update(g.clock, this.atm.state.night, g.t, dt);
     this.ped.update(g, dt, this.seatOf(g), this.camMode === "fp");
     this.people.update(g.peds.list, g.state !== "menu", this.camPos.x, this.camPos.z, g.fx, g.fy, dt);
     this.crowd.update(g.peds.list, g.state !== "menu", g.fx, g.fy, this.people.drawn);

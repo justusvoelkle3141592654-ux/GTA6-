@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Game } from "../game/engine";
 import { MAP_MIN, MAP_SIZE } from "../game/world";
 import { DISTRICTS, districtLabels } from "../game/districts";
+import { drawPlaceIcon, WALKABLE } from "../game/places";
 
 // whole map with districts, places, goals; click / tap sets a waypoint
 export default function BigMap({ game, onChange }: { game: Game; onChange: () => void }) {
@@ -32,9 +33,8 @@ export default function BigMap({ game, onChange }: { game: Game; onChange: () =>
     // places
     g.font = `bold ${Math.round(S / 60)}px Inter, sans-serif`;
     for (const pl of game.places) {
-      const p = toCanvas(pl.x, pl.y, S), r = S / 70;
-      g.fillStyle = pl.color; g.beginPath(); g.arc(p.x, p.y, r, 0, Math.PI * 2); g.fill();
-      g.fillStyle = "#fff"; g.fillText(pl.icon, p.x, p.y + 1);
+      const p = toCanvas(pl.x, pl.y, S);
+      drawPlaceIcon(g, pl, p.x, p.y, S / 70);
     }
     // goals
     for (const list of [game.missions.markers, game.jobs.markers]) for (const mk of list) {
@@ -67,6 +67,10 @@ export default function BigMap({ game, onChange }: { game: Game; onChange: () =>
   return (
     <div className="flex flex-col items-center gap-2">
       <canvas ref={ref} width={720} height={720} onPointerDown={click} className="aspect-square w-[min(86vw,62vh)] cursor-crosshair rounded-2xl border border-white/15 bg-[#0b3a5c]" />
+      <div className="flex w-full max-w-[min(86vw,62vh)] flex-wrap gap-x-3 gap-y-1 text-[11px] text-white/70">
+        <span className="font-semibold text-white/85">Begehbare Läden (Türsymbol):</span>
+        {game.places.filter((pl) => WALKABLE.has(pl.id)).map((pl) => <span key={pl.id} className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: pl.color }} />{pl.name}</span>)}
+      </div>
       <div className="flex items-center gap-3 text-xs text-white/60">
         <span>Tippen/Klicken setzt einen Wegpunkt – die Route erscheint auf der Minikarte.</span>
         {game.waypoint && <button onClick={() => { game.clearWaypoint(); draw(); onChange(); }} className="rounded-lg border border-white/20 px-2 py-1 text-white/80">Wegpunkt löschen</button>}

@@ -16,7 +16,7 @@ import { DISTRICTS, districtAt, type DistrictId } from "./districts";
 import { Radio } from "./radio";
 import { GARAGE_SLOTS, tuneAcc, tuneDamage, tuneGrip, tuneSpeed, type OwnedCar, type TunePart } from "./garage";
 import { DEFAULT_STYLE, type ShopAction, type Style } from "./economy";
-import { PLACE_RADIUS } from "./places";
+import { PLACE_RADIUS, drawPlaceIcon } from "./places";
 import { Bindings } from "./input";
 import { Missions } from "./missions";
 import { Jobs, JOB_DEFS, JOB_KINDS, type JobKind } from "./jobs";
@@ -2603,8 +2603,7 @@ export class Game {
         if (pl.kind === "contact") continue;
         const dx = (pl.x - fx) * m, dy = (pl.y - fy) * m;
         if (Math.hypot(dx, dy) > size / 2 - 7) continue;
-        ctx.fillStyle = pl.color; ctx.beginPath(); ctx.arc(cxm + dx, cym + dy, 6, 0, TAU); ctx.fill();
-        ctx.fillStyle = "#fff"; ctx.fillText(pl.icon, cxm + dx, cym + dy + 0.5);
+        drawPlaceIcon(ctx, pl, cxm + dx, cym + dy, 6);
       }
       // mission / job markers stay on the edge when far away
       // hide and seek: playing field

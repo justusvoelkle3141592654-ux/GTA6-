@@ -1,5 +1,6 @@
 import { BLOCK, ROAD, GRID, HIGHWAYS, mulberry32, isWater, inCity, cityDist, type World } from "./world";
 import { Car, MODEL_STATS, type CarModel, type FactionId } from "./vehicles";
+import { ROUNDABOUT } from "./world";
 import { DISTRICTS, districtAt } from "./districts";
 import type { PedSystem } from "./peds";
 import type { ModeRules } from "./modes";
@@ -100,6 +101,7 @@ export class TrafficLights {
       const centre = i >= 5 && i <= 11 && j >= 4 && j <= 11;
       if ((major && (HIGHWAYS.includes(i) && HIGHWAYS.includes(j) || (i + j) % 2 === 0)) || (centre && (i + j) % 2 === 1)) this.has[j * N + i] = 1;
     }
+    this.has[ROUNDABOUT.j * N + ROUNDABOUT.i] = 0; // the roundabout has no lights
   }
   update(dt: number) { this.t += dt; }
   // phase of crossing (i, j): 0 green for traffic along x, 1 yellow x, 2 green along y, 3 yellow y
@@ -228,7 +230,35 @@ export class Traffic {
       const rd = w.roads.roads.find((r) => r.node.i === c.wpI && r.node.j === c.wpJ && (c.wpI === 0 || c.wpJ === 0 || c.wpI === GRID || c.wpJ === GRID));
       if (rd && c.kind === "civ") { c.croad = rd.id; c.cp = 1; c.cdir = 1; }
     }
-    if (c.croad < 0 && Math.hypot(tx - c.x, ty - c.y) < 55) {
+    // roundabout: circle counter-clockwise on the map (island on the left), leave at the chosen road
+    let circling = false;
+    if (c.croad < 0 && c.wpI === ROUNDABOUT.i && c.wpJ === ROUNDABOUT.j) {
+      const C = w.nodePos(ROUNDABOUT.i, ROUNDABOUT.j), rx = c.x - C.x, ry = c.y - C.y, d = Math.hypot(rx, ry);
+      if (d < 140) {
+        if (c.rbI < 0) {
+          let n = 0;
+          for (const dd of DIRS) {
+            const ni = c.wpI + dd[0], nj = c.wpJ + dd[1];
+            if (ni < 0 || nj < 0 || ni > GRID || nj > GRID || (ni === c.prevI && nj === c.prevJ)) continue;
+            n++; if (Math.random() * n < 1) { c.rbI = ni; c.rbJ = nj; }
+          }
+        }
+        const exitTh = Math.atan2(c.rbJ - c.wpJ, c.rbI - c.wpI) + 0.55; // outgoing lane is right of the road centre
+        const th = Math.atan2(ry, rx);
+        const rem = (((th - exitTh) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+        if (rem < 0.45 && d > 30) {
+          c.prevI = c.wpI; c.prevJ = c.wpJ; c.wpI = c.rbI; c.wpJ = c.rbJ; c.rbI = -1; c.rbJ = -1; c.blink = 0;
+          const to2 = w.nodePos(c.wpI, c.wpJ), ex = Math.sign(to2.x - C.x), ey = Math.sign(to2.y - C.y);
+          tx = to2.x - ey * LANE; ty = to2.y + ex * LANE;
+        } else {
+          circling = true;
+          tx = C.x + Math.cos(th - 0.6) * ROUNDABOUT.lane; ty = C.y + Math.sin(th - 0.6) * ROUNDABOUT.lane;
+          cruise = Math.min(cruise, 95);
+          c.blink = rem < 1.6 ? 1 : 0;
+        }
+      }
+    }
+    if (c.croad < 0 && !circling && !(c.wpI === ROUNDABOUT.i && c.wpJ === ROUNDABOUT.j) && Math.hypot(tx - c.x, ty - c.y) < 55) {
       // pick the next crossing at random (fleeing cars: away from the player), never straight back
       let n = 0, ci = c.prevI, cj = c.prevJ, best = -Infinity;
       for (const d of DIRS) {

@@ -113,6 +113,7 @@ export class Car {
   rlx = NaN; rly = NaN; rrx = NaN; rry = NaN;
   siren = Math.random() * 10; cruise = 170; smokeT = 0; shootT = 0;
   blink = 0;               // indicator: -1 left, 1 right, 2 hazard lights
+  rbI = -1; rbJ = -1;      // roundabout: the crossing the car leaves it to
   dents: number[] = [];    // where the body was hit: local x, local z (right side +), depth
   glass: Record<string, number> = {}; glassV = 0; // window panes: 1 cracked, 2 broken (glassV counts changes)
   bumpers = 0;             // torn off: bit 1 front, bit 2 rear

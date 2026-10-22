@@ -1,5 +1,5 @@
 import { Car, type CarModel, type FactionId } from "./vehicles";
-import { BLOCK, ROAD, GRID, WATER_Y, terrainH, roofOf } from "./world";
+import { BLOCK, ROAD, GRID, WATER_Y, terrainH, roofOf, isWater } from "./world";
 import type { DialogLine, Game } from "./engine";
 import type { Civilian } from "./peds";
 import { STAR_HEAT } from "./wanted";
@@ -374,15 +374,20 @@ export class Missions {
     if (Math.hypot(g.fx - p.x, g.fy - p.y) > 750) return;
     this.spawned = true;
     if (s.kind === "catch") {
-      const c = g.peds.spawnRole("target", p.x + 75 + 12, p.y + 75 + 12);
+      // on a real sidewalk near the goal (not inside a building or on the street)
+      const sp = g.world.curbPoint(p.x, p.y, 0, 260) ?? { x: p.x, y: p.y };
+      const c = g.peds.spawnRole("target", sp.x, sp.y);
       if (c) { c.tag = "suspect"; c.shirt = "#e8e8ec"; c.pants = "#2b2f3a"; c.hp = c.maxHp = 40; g.peds.panic(c, g.fx, g.fy, 30); }
       this.suspect = c;
       return;
     }
     if (s.kind === "kill") {
+      const base = g.world.curbPoint(p.x, p.y, 0, 260) ?? { x: p.x, y: p.y };
       for (let i = 0; i < s.n; i++) {
         const a = (i / s.n) * Math.PI * 2;
-        const e = g.peds.spawnRole("gang", p.x + 75 + Math.cos(a) * 30, p.y + 75 + Math.sin(a) * 30, s.faction);
+        let ex = base.x + Math.cos(a) * 30, ey = base.y + Math.sin(a) * 30;
+        if (g.world.isSolid(ex, ey, 6) || isWater(ex, ey)) { ex = base.x; ey = base.y; }
+        const e = g.peds.spawnRole("gang", ex, ey, s.faction);
         if (e) { e.tag = "target"; this.enemies.push(e); }
       }
       return;

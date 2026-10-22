@@ -76,6 +76,18 @@ export const PLACE_RADIUS = { foot: 22, car: 46 };
 // shops with a room you walk into (door symbol on the maps)
 export const WALKABLE = new Set(["gunshop", "clothes", "food", "food2", "workshop", "safehouse", "market", "cardealer", "barber", "mall"]);
 
+// a place on a map: coloured circle with its letter; walkable shops get a door in the circle
+export function drawPlaceIcon(g: CanvasRenderingContext2D, pl: { id: string; color: string; icon: string }, x: number, y: number, r: number) {
+  g.fillStyle = pl.color; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  if (WALKABLE.has(pl.id)) {
+    g.strokeStyle = "rgba(0,0,0,0.55)"; g.lineWidth = Math.max(1, r * 0.18); g.stroke();
+    const w = r * 0.8, h = r * 1.25;
+    g.fillStyle = "#ffffff"; g.fillRect(x - w / 2, y - h / 2, w, h);
+    g.fillStyle = pl.color; g.fillRect(x - w / 2 + r * 0.14, y - h / 2 + r * 0.14, w - r * 0.28, h - r * 0.14);
+    g.fillStyle = "#ffffff"; g.beginPath(); g.arc(x + w * 0.22, y + h * 0.06, Math.max(0.8, r * 0.1), 0, Math.PI * 2); g.fill();
+  } else { g.fillStyle = "#fff"; g.fillText(pl.icon, x, y + 1); }
+}
+
 // what you lose when you are taken to a place after a run ends (open world)
 export interface RespawnRule { place: PlaceKind; cashPct: number; cashMin: number; title: string; sub: string; }
 export const RESPAWN_RULES: Record<EndReason, RespawnRule> = {
