@@ -124,7 +124,11 @@ const SPECS: Record<CarModel, CarSpec> = {
   fire: { L: 80, W: 28, y0: 5, noseY: 18, beltY: 22, deckY: 20, xCowl: 36, xRoofF: 32, xRoofR: 22, xDeck: 21, roofY: 34, r: 7.5, wx: 28, wxr: -25, wd: 5 },
   icecream: { L: 54, W: 26, y0: 4.5, noseY: 12, beltY: 15, deckY: 15, xCowl: 25, xRoofF: 17, xRoofR: 15, xDeck: 15, roofY: 25, r: 6.5, wx: 17, wxr: -17, wd: 4.5 },
   unmarked: { L: 48, W: 24, y0: 3.5, noseY: 9, beltY: 12.5, deckY: 13, xCowl: 8, xRoofF: 1, xRoofR: -9, xDeck: -14, roofY: 20, r: 6, wx: 15, wxr: -15, wd: 4.5 },
-  policebike: SEDAN, scooter: SEDAN, bicycle: SEDAN, jetski: SEDAN, fishboat: SEDAN, policeboat: SEDAN, policeheli: SEDAN, // own geometry
+  policebike: SEDAN, scooter: SEDAN, bicycle: SEDAN, jetski: SEDAN, fishboat: SEDAN, policeboat: SEDAN, policeheli: SEDAN, // own geometry  // only used if the realistic rig is missing (all four have one in carmodel.ts)
+  hyper: { L: 50, W: 25, y0: 2.5, noseY: 6, beltY: 10.5, deckY: 11.5, xCowl: 10, xRoofF: 1, xRoofR: -8, xDeck: -14, roofY: 16, r: 6, wx: 16, wxr: -15, wd: 5 },
+  formula: { L: 50, W: 14, y0: 2, noseY: 5, beltY: 8, deckY: 9, xCowl: 6, xRoofF: 0, xRoofR: -6, xDeck: -8, roofY: 12, r: 6, wx: 17, wxr: -15, wd: 5 },
+  monster: { L: 50, W: 28, y0: 14, noseY: 22, beltY: 26, deckY: 26, xCowl: 12, xRoofF: 6, xRoofR: -6, xDeck: -8, roofY: 34, r: 14, wx: 17, wxr: -16, wd: 9 },
+  lowrider: { L: 56, W: 24, y0: 2.5, noseY: 8, beltY: 11, deckY: 11, xCowl: 10, xRoofF: 1, xRoofR: -12, xDeck: -16, roofY: 15, r: 5.5, wx: 18, wxr: -17, wd: 4 },
 };
 
 // two wheelers: frame, tank, seat, handlebar; the rider goes into the "glass" mesh so it can be hidden

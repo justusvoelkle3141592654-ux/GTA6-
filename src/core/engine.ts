@@ -1889,6 +1889,9 @@ export class Game {
           const acc = (p.nitro ? st.acc + 500 : st.acc) * tuneAcc(t) * vs * bo;
           const g2 = (grass ? grip * 0.5 : grip) * (p.flat ? 0.45 : 1);
           this.drive(c, dt, acc, grass ? maxV * 0.8 : maxV, g2, 1.7);
+          // lowrider: hydraulics, the handbrake at a standstill makes it hop
+          this.hopCd -= dt;
+          if (p.model === "lowrider" && p.handbrake && p.speed < 60 && !p.air && this.hopCd <= 0) { p.vz = 240; p.air = true; p.airT = 0; this.hopCd = 0.9; sfx.land(); }
           if (p.flat && p.speed > 120 && P60(0.3, dt)) this.sparks(p.x - Math.cos(p.a) * 14, p.y - Math.sin(p.a) * 14, p.z + 2, 1, -p.vx, -p.vy, 0.4);
         } else this.drive(c, dt, 300, c.cruise + 20, 12, 3);
       } else if (c.dead || (c.kind === "civ" && c.wrecked && !c.parked)) this.wreckPhysics(c, dt);
@@ -2395,6 +2398,7 @@ export class Game {
     this.banner("ABGESOFFEN", "Der Wagen ist im Wasser versunken – schwimm an Land", "#2bb3ff", 2.2);
   }
 
+  private hopCd = 0;
   // boost pad in front of a launch ramp (driving towards the ramp): a big push forward and a full nitro tank
   private boostPad(c: Car, top: number) {
     const w = this.world, ids = w.rampsAt(c.x, c.y);

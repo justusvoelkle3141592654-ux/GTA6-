@@ -18,6 +18,8 @@ export interface Shape {
   box?: { x0: number; x1: number; h: number; col?: string }; // cargo box behind the cab (vans, trucks, bus)
   open?: boolean;                        // convertible: no roof
   seatX: number;                         // x of the driver's seat (hip)
+  track?: number;                        // wheel centre distance from the middle (open wheels outside the body)
+  wd?: number;                           // tyre width
 }
 const S = (o: Partial<Shape> & Pick<Shape, "L" | "W" | "R">): Shape => ({
   wf: o.L * 0.31, wr: -o.L * 0.29, y0: 2.2, nose: 6.8, cowl: 9.4, cowlX: o.L * 0.19, roofF: o.L * 0.035, roofR: -o.L * 0.235, roof: 14.5,
@@ -45,6 +47,10 @@ export const SHAPES: Partial<Record<CarModel, Shape>> = {
   garbage: S({ L: 72, W: 24.5, R: 4.8, y0: 4.4, nose: 13, cowl: 17, cowlX: 32, roofF: 29, roofR: 16, roof: 31, deckX: 15, deck: 15, tail: 14, belt: 17, taper: 0.97, doors: 2, box: { x0: -36, x1: 14, h: 32, col: "#3c6e47" }, seatX: 23 }),
   tow: S({ L: 66, W: 24, R: 4.8, y0: 4.4, nose: 13, cowl: 17, cowlX: 29, roofF: 26, roofR: 13, roof: 31, deckX: 12, deck: 15, tail: 13, belt: 17, taper: 0.97, doors: 2, seatX: 20 }),
   fire: S({ L: 82, W: 25, R: 4.9, y0: 4.4, nose: 14, cowl: 18, cowlX: 37, roofF: 33, roofR: 18, roof: 32, deckX: 17, deck: 16, tail: 15, belt: 18, taper: 0.97, doors: 4, box: { x0: -41, x1: 16, h: 30 }, seatX: 27 }),
+  hyper: S({ L: 47, W: 20.6, R: 3.6, nose: 4.6, cowl: 7.6, cowlX: 11, roofF: 2, roofR: -5, roof: 11, deckX: -12, deck: 9, tail: 9.6, belt: 7.8, doors: 2, taper: 0.66, seatX: 0 }),
+  lowrider: S({ L: 56, W: 19.8, R: 3.2, y0: 1.6, nose: 7.2, cowl: 8.6, cowlX: 10, roofF: 1, roofR: -12, roof: 13.6, deckX: -16, deck: 8.6, tail: 8.4, belt: 8.6, doors: 2, open: true, seatX: -5, wf: 18, wr: -17 }),
+  monster: S({ L: 50, W: 21, R: 9, y0: 14, nose: 20, cowl: 22.5, cowlX: 12, roofF: 6, roofR: -6, roof: 31, deckX: -8, deck: 22, tail: 22, belt: 22.5, doors: 2, taper: 0.9, seatX: 0, wf: 17, wr: -16, track: 13.5, wd: 8 }),
+  formula: S({ L: 50, W: 9, R: 3.6, y0: 1.2, nose: 3, cowl: 5.4, cowlX: 6, roofF: 0, roofR: -6, roof: 9, deckX: -8, deck: 7.6, tail: 6.2, belt: 5.4, doors: 2, open: true, taper: 0.9, seatX: -3, wf: 17, wr: -15, track: 9.6, wd: 3.8 }),
   bus: S({ L: 100, W: 25, R: 4.8, y0: 3.4, nose: 14, cowl: 16, cowlX: 49, roofF: 47, roofR: -49, roof: 31, deckX: -49.5, deck: 31, tail: 30, belt: 14, taper: 0.98, doors: 2, seatX: 41, wf: 32, wr: -28 }),
 };
 export const hasRig = (m: CarModel) => !!SHAPES[m];
@@ -306,7 +312,7 @@ export function rigGeo(model: CarModel): RigGeo {
   const wn = new THREE.Vector3(s.roof - s.belt, s.cowlX - s.roofF, 0).normalize(); // windshield normal
   const wipers = [-1, 1].map((k) => ({ geo: col(new THREE.BoxGeometry(0.35, 0.3, s.W * 0.36).translate(0, 0.25, s.W * 0.18), "#101114"), x: s.cowlX - 0.2, y: s.belt + 0.45, z: k * hw * 0.2 - hw * 0.42, n: wn }));
   // ---- wheels: tyre with tread, rim with spokes and a brake disc
-  const R = s.R, wd = Math.max(1.8, R * 0.62);
+  const R = s.R, wd = s.wd ?? Math.max(1.8, R * 0.62);
   const tire = new THREE.CylinderGeometry(R, R, wd, 26, 1, false); tire.rotateX(Math.PI / 2);
   const tread = new THREE.TorusGeometry(R - 0.2, 0.32, 4, 26); // rounded shoulders
   const tGeo = mergeGeometries([col(tire, "#121214"), col(tread.clone().translate(0, 0, wd / 2 - 0.2), "#121214"), col(tread.translate(0, 0, -wd / 2 + 0.2), "#121214")])!;
@@ -319,7 +325,7 @@ export function rigGeo(model: CarModel): RigGeo {
     RP.push(col(new THREE.CylinderGeometry(R * 0.48, R * 0.48, 0.25, 18).rotateX(Math.PI / 2).translate(0, 0, sd * (wd / 2 - 0.4)), "#6a6e76")); // brake disc
   }
   const rim = merge(RP);
-  const wz = hw - wd / 2 - 0.2;
+  const wz = s.track ?? hw - wd / 2 - 0.2;
   const wheels = [{ x: s.wf, z: wz, front: true }, { x: s.wf, z: -wz, front: true }, { x: s.wr, z: wz, front: false }, { x: s.wr, z: -wz, front: false }];
   if (s.L > 70) wheels.push({ x: s.wr + R * 2.3, z: wz, front: false }, { x: s.wr + R * 2.3, z: -wz, front: false });
   // ---- model specific painted / coloured parts
@@ -344,6 +350,29 @@ export function rigGeo(model: CarModel): RigGeo {
   if (model === "garbage") X.push(bx(2, 20, s.W * 0.9, -hl - 1, s.y0 + 12, 0, "#2a2d34"));
   if (model === "icecream") X.push(col(new THREE.ConeGeometry(2.6, 7, 12).rotateX(Math.PI).translate(-8, s.box!.h + 3.6, 0), "#e0a860"), col(new THREE.SphereGeometry(2.8, 12, 8).translate(-8, s.box!.h + 7.8, 0), "#ffb3c6"));
   if (model === "ambulance") for (const z of [-1, 1]) X.push(bx(s.box!.x1 - s.box!.x0 - 2, 2.2, 0.3, (s.box!.x0 + s.box!.x1) / 2, s.y0 + 7, z * (s.W * 0.49 + 0.15), "#c0392b"));
+  if (model === "hyper") {
+    // rear wing on two struts, side intakes
+    X.push(bx(3.4, 0.5, s.W * 0.9, -hl + 2.2, s.deck + 4.6, 0, "#ffffff"));
+    for (const z of [-1, 1]) { T.push(bx(1.6, 4, 0.5, -hl + 2.6, s.deck + 2.4, z * s.W * 0.25, "#15161b")); T.push(bx(8, 2.4, 0.4, -4, s.belt - 3, z * (hw + 0.05), "#0c0d10")); T.push(bx(3.6, 0.5, 0.5, -hl + 2.2, s.deck + 4.6, z * s.W * 0.45, "#15161b")); }
+  }
+  if (model === "lowrider") {
+    // chrome trims along the sides, white wall tyres look: chrome bumpers
+    for (const z of [-1, 1]) T.push(bx(s.L - 6, 0.5, 0.3, 0, s.y0 + 4.4, z * (hw + 0.1), "#e8ecf2"));
+    T.push(bx(1.2, 1.4, s.W * 0.95, hl + 0.4, s.y0 + 3, 0, "#e8ecf2"), bx(1.2, 1.4, s.W * 0.95, -hl - 0.4, s.y0 + 3, 0, "#e8ecf2"));
+  }
+  if (model === "monster") {
+    // frame, shocks and a roll bar; the body sits high above the huge wheels
+    T.push(bx(s.L * 0.8, 3, 6, 0, s.R + 1, 0, "#1b1c20"));
+    for (const x of [s.wf, s.wr]) { T.push(bx(2, 2, s.track! * 2, x, s.R, 0, "#2a2c31")); for (const z of [-1, 1]) T.push(cy(0.9, s.y0 - s.R + 2, x + 2.5, (s.y0 + s.R) / 2, z * (hw - 2), "#ffd23f")); }
+    T.push(bx(1.2, 6, s.W * 0.8, s.roofR - 1, s.roof + 2.5, 0, "#1b1c20"), bx(10, 1.2, 1.2, s.roofR + 3, s.roof + 5, s.W * 0.38, "#1b1c20"), bx(10, 1.2, 1.2, s.roofR + 3, s.roof + 5, -s.W * 0.38, "#1b1c20"));
+    for (let i = 0; i < 4; i++) T.push(cy(0.8, 2.4, s.roofR + 2 + i * 2.6, s.roof + 6.2, 0, "#ffd23f", "y", 8)); // roof lights
+  }
+  if (model === "formula") {
+    // front and rear wings with end plates, air intake above the driver, side pods
+    X.push(bx(4, 0.5, s.track! * 2 + 2, hl - 2, 1.8, 0, "#ffffff"), bx(3.6, 0.6, s.track! * 2 - 2, -hl + 2, 11.5, 0, "#ffffff"));
+    for (const z of [-1, 1]) { T.push(bx(5, 2.6, 0.4, hl - 2, 2.6, z * (s.track! + 1), "#15161b"), bx(5, 6, 0.4, -hl + 2, 9.4, z * (s.track! - 1), "#15161b")); X.push(bx(14, 3.4, 3, -6, 3.6, z * (hw + 1.2), "#ffffff")); }
+    T.push(bx(1.2, 4, 1.2, -hl + 3, 8, 0, "#15161b"), cy(1.4, 3, s.seatX - 3, 9.6, 0, "#15161b", "y", 10));
+  }
   // the doors of vans and trucks only have the cab part; the rest of the side is the box
   const res: RigGeo = {
     shape: s, body: col(lb.body, "#ffffff"), trim: merge(T), doors, glass: G, interior: merge(I),

@@ -3,9 +3,11 @@ import { noTune, type Tune } from "./garage";
 
 export type CarModel = "sport" | "super" | "muscle" | "suv" | "sedan" | "van" | "police" | "taxi" | "bike" | "truck" | "bus" | "swat" | "armor" | "boat" | "heli"
   | "roadster" | "pickup" | "compact" | "wagon" | "offroad" | "tow" | "garbage" | "ambulance" | "fire" | "icecream" | "policebike" | "unmarked"
-  | "scooter" | "bicycle" | "jetski" | "fishboat" | "policeboat" | "policeheli";
+  | "scooter" | "bicycle" | "jetski" | "fishboat" | "policeboat" | "policeheli"
+  | "hyper" | "formula" | "monster" | "lowrider";
 export const CAR_MODELS: CarModel[] = ["sport", "super", "muscle", "suv", "sedan", "van", "police", "taxi", "bike", "truck", "bus", "swat", "armor", "boat", "heli",
-  "roadster", "pickup", "compact", "wagon", "offroad", "tow", "garbage", "ambulance", "fire", "icecream", "policebike", "unmarked", "scooter", "bicycle", "jetski", "fishboat", "policeboat", "policeheli"];
+  "roadster", "pickup", "compact", "wagon", "offroad", "tow", "garbage", "ambulance", "fire", "icecream", "policebike", "unmarked", "scooter", "bicycle", "jetski", "fishboat", "policeboat", "policeheli",
+  "hyper", "formula", "monster", "lowrider"];
 export const isBoat = (m: CarModel) => m === "boat" || m === "jetski" || m === "fishboat" || m === "policeboat";
 export const isHeli = (m: CarModel) => m === "heli" || m === "policeheli";
 export const isTwoWheel = (m: CarModel) => m === "bike" || m === "policebike" || m === "scooter" || m === "bicycle";
@@ -18,6 +20,7 @@ export const MODEL_NAME: Record<CarModel, string> = {
   roadster: "Velocia", pickup: "Bravado-Pickup", compact: "Kompaktwagen", wagon: "Kombi", offroad: "Geländewagen", tow: "Abschleppwagen",
   garbage: "Müllwagen", ambulance: "Krankenwagen", fire: "Löschfahrzeug", icecream: "Eiswagen", policebike: "Polizeimotorrad", unmarked: "Zivilstreife",
   scooter: "Roller", bicycle: "Fahrrad", jetski: "Jetski", fishboat: "Fischerboot", policeboat: "Polizeiboot", policeheli: "Polizeihubschrauber",
+  hyper: "Vortex X", formula: "Formel-Rennwagen", monster: "Monstertruck", lowrider: "Cruzado",
 };
 
 export interface CarDef { id: string; name: string; model: CarModel; color: string; maxV: number; acc: number; grip: number; hp: number; mass: number; desc: string; }
@@ -66,6 +69,10 @@ export const MODEL_STATS: Record<CarModel, ModelStats> = {
   fishboat: { maxV: 330, acc: 300, grip: 2, hp: 200, mass: 2, price: 4000 },
   policeboat: { maxV: 540, acc: 540, grip: 2.6, hp: 180, mass: 1.4, price: 6000 },
   policeheli: { maxV: 500, acc: 400, grip: 2, hp: 260, mass: 1.6, price: 14000 },
+  hyper: { maxV: 760, acc: 860, grip: 11, hp: 90, mass: 1.2, price: 12000 },
+  formula: { maxV: 820, acc: 920, grip: 15, hp: 60, mass: 0.7, price: 15000 },
+  monster: { maxV: 470, acc: 600, grip: 9, hp: 320, mass: 3.2, price: 9000 },
+  lowrider: { maxV: 480, acc: 520, grip: 9, hp: 130, mass: 1.5, price: 3500 },
 };
 
 // half length / half width of each model (collision boxes match the drawn models)
@@ -80,6 +87,7 @@ export const MODEL_DIM: Record<CarModel, { hl: number; hw: number }> = {
   tow: { hl: 33, hw: 12 }, garbage: { hl: 37, hw: 12.3 }, ambulance: { hl: 28, hw: 10.3 }, fire: { hl: 41, hw: 12.5 }, icecream: { hl: 27, hw: 10.3 },
   policebike: { hl: 17, hw: 4.5 }, unmarked: { hl: 24, hw: 9.4 }, scooter: { hl: 12, hw: 4 }, bicycle: { hl: 11, hw: 3 },
   jetski: { hl: 14, hw: 6 }, fishboat: { hl: 34, hw: 13 }, policeboat: { hl: 30, hw: 12 }, policeheli: { hl: 30, hw: 12 },
+  hyper: { hl: 23.5, hw: 10.3 }, formula: { hl: 25, hw: 11.5 }, monster: { hl: 26, hw: 14 }, lowrider: { hl: 28, hw: 9.9 },
 };
 
 export type CarKind = "player" | "cop" | "civ";
