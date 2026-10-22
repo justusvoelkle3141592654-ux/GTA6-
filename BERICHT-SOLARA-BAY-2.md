@@ -98,3 +98,16 @@ Getestet wurde automatisiert in einem Headless-Chromium mit Software-Rendering (
 - Leistung: Die Stadt ist in Kacheln zusammengefasst, wird aber beim Start vollständig gebaut (kein Laden/Entladen zur Laufzeit); Gebäude haben keine Detailstufen. Draw Calls sind hoch (siehe Test 12).
 - Speicher: Nach den Korrekturen bleiben die Texturen konstant; die Geometrien wachsen langsam weiter, bis die (begrenzten) Caches für Automodelle, Fahrer und Körper gefüllt sind. Ein 30-Minuten-Lauf wurde nicht gemessen.
 - Gamepad nur im Code und mit simulierten Eingaben geprüft, nicht mit einem echten Controller.
+
+## Nachtrag: Wünsche nach dem ersten Spieltest
+
+- Figuren und Fahrzeuge sind 20 % größer (Darstellung und Kollision, auch Fahrer im Auto und Figuren in der Ferne).
+- Laufen: Gehen, Laufen und Sprinten werden je nach Tempo überblendet, die Schrittlänge passt zur Geschwindigkeit (kein Rutschen); beim Laufen neigt sich die Figur in Kurven.
+- Lebensleiste, Weste, Auto und Nitro stehen jetzt oben links unter Geld und Sternen.
+- Einstellungen (Pausenmenü und Handy): Tempo-Faktor für das eigene Fahrzeug (1–5x, auch Boot und Hubschrauber) und Verkehrsdichte (aus bis 300 %).
+- Neuer Reiter „Flug“ im Pausenmenü und App „Flug“ im Handy:
+  - Fliegen-Modus zu Fuß und mit jedem Auto (Leertaste/HOCH steigen, Shift/RUNTER sinken), Höhenanzeige im HUD, eigene Flug- und Schwebe-Pose.
+  - Hubschrauber oder Polizeihubschrauber holen.
+  - Schnellreise zu Läden, Stadtteilen und Orten (Klinik, Polizei, Stunt-Park, Bootssteg, Heliport, eigener Wegpunkt): „Fliegen“ als kurzer Flug durch die Luft, „Sofort“ als Teleport. Bei Läden landet man direkt im Laden.
+  - Schnellreise und Fahrzeug holen sind während Missionen und des Versteckspiels gesperrt.
+- Geprüft im Browser (Playwright, niedrige Grafikstufe): Teleport und Flug in Läden, Fliegen zu Fuß und im Auto, Landen ohne Schaden, Menü-Reiter. Nicht auf einem echten Handy getestet.
