@@ -51,6 +51,8 @@ export const SHAPES: Partial<Record<CarModel, Shape>> = {
   lowrider: S({ L: 56, W: 19.8, R: 3.2, y0: 1.6, nose: 7.2, cowl: 8.6, cowlX: 10, roofF: 1, roofR: -12, roof: 13.6, deckX: -16, deck: 8.6, tail: 8.4, belt: 8.6, doors: 2, open: true, seatX: -5, wf: 18, wr: -17 }),
   monster: S({ L: 50, W: 21, R: 9, y0: 14, nose: 20, cowl: 22.5, cowlX: 12, roofF: 6, roofR: -6, roof: 31, deckX: -8, deck: 22, tail: 22, belt: 22.5, doors: 2, taper: 0.9, seatX: 0, wf: 17, wr: -16, track: 13.5, wd: 8 }),
   formula: S({ L: 50, W: 9, R: 3.6, y0: 1.2, nose: 3, cowl: 5.4, cowlX: 6, roofF: 0, roofR: -6, roof: 9, deckX: -8, deck: 7.6, tail: 6.2, belt: 5.4, doors: 2, open: true, taper: 0.9, seatX: -3, wf: 17, wr: -15, track: 9.6, wd: 3.8 }),
+  interceptor: S({ L: 47, W: 20.4, R: 3.6, nose: 4.8, cowl: 7.8, cowlX: 11, roofF: 2, roofR: -6, roof: 11.6, deckX: -13, deck: 9.2, tail: 9.6, belt: 8, doors: 2, taper: 0.68, seatX: 0 }),
+  polsuv: S({ L: 49, W: 20.4, R: 3.9, y0: 3.4, nose: 9.5, cowl: 11.6, cowlX: 12, roofF: 6, roofR: -19, roof: 17.6, deckX: -22.5, deck: 15, tail: 12.5, belt: 11.6, taper: 0.86, seatX: -1 }),
   bus: S({ L: 100, W: 25, R: 4.8, y0: 3.4, nose: 14, cowl: 16, cowlX: 49, roofF: 47, roofR: -49, roof: 31, deckX: -49.5, deck: 31, tail: 30, belt: 14, taper: 0.98, doors: 2, seatX: 41, wf: 32, wr: -28 }),
 };
 export const hasRig = (m: CarModel) => !!SHAPES[m];
@@ -343,6 +345,8 @@ export function rigGeo(model: CarModel): RigGeo {
   }
   if (model === "pickup") for (const z of [-1, 1]) X.push(bx(-hl - s.deckX + 0, 4, 0.8, (s.deckX - hl) / 2, s.deck + 2, z * (hw - 0.4), "#ffffff"));
   if (model === "offroad") { X.push(bx(18, 0.8, s.W * 0.8, (s.roofF + s.roofR) / 2, s.roof + 1.4, 0, "#2a2c33"), bx(14, 2.4, s.W * 0.6, (s.roofF + s.roofR) / 2, s.roof + 2.8, 0, "#5a5040")); T.push(cy(s.R, 2.2, -hl - 1.4, s.y0 + 6, 0, "#121214", "x", 18)); }
+  if (model === "polsuv") { T.push(bx(2, 7, s.W * 0.86, hl + 1.4, yb + 3, 0, "#22252b")); for (const z of [-1, 1]) T.push(bx(2, 9, 1, hl + 1.4, yb + 4, z * s.W * 0.3, "#22252b")); }
+  if (model === "interceptor") { X.push(bx(3.2, 0.5, s.W * 0.86, -hl + 2.2, s.deck + 3.6, 0, "#15161b")); for (const z of [-1, 1]) T.push(bx(1.4, 3, 0.5, -hl + 2.6, s.deck + 1.9, z * s.W * 0.25, "#15161b")); }
   if (model === "police" || model === "unmarked") T.push(bx(1.2, 3, s.W * 0.9, hl + 0.8, yb + 1.5, 0, "#22252b"));
   if (model === "taxi") X.push(bx(3.5, 2.8, 8, (s.roofF + s.roofR) / 2, s.roof + 1.4, 0, "#fff5b0", 1.2));
   if (model === "fire") { X.push(bx(s.box!.x1 - s.box!.x0 - 4, 1.2, 6, (s.box!.x0 + s.box!.x1) / 2, s.box!.h + 1, 0, "#c9ced8")); for (let i = 0; i < 12; i++) X.push(bx(0.6, 1, 6, s.box!.x0 + 3 + i * 4.4, s.box!.h + 2, 0, "#c9ced8")); }

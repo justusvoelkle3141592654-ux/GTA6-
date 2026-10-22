@@ -1,4 +1,4 @@
-import { Car, CAR_MODELS, MODEL_NAME, MODEL_STATS, isBoat, isHeli, type CarModel } from "../vehicles/vehicles";
+import { Car, CAR_MODELS, MODEL_NAME, MODEL_STATS, isBoat, isAircraft, isJet, type CarModel } from "../vehicles/vehicles";
 import { WATER_Y, isWater, terrainH } from "../world/world";
 import { WEAPONS, WEAPON_DEFS } from "./weapons";
 import { STAR_HEAT } from "../ai/wanted";
@@ -12,6 +12,7 @@ const COLOR: Partial<Record<CarModel, string>> = {
   police: "#f4f6fa", swat: "#1b1d22", armor: "#4b5320", taxi: "#ffc21a", bus: "#2bb3ff", boat: "#f4f6fa", heli: "#ff3cac",
   ambulance: "#f4f4f6", fire: "#c0392b", garbage: "#3c6e47", tow: "#e1b12c", icecream: "#f2c7d8", policebike: "#f4f6fa", unmarked: "#2b2f3a",
   policeboat: "#1f3a6e", policeheli: "#1f3a6e", fishboat: "#2e6da4", jetski: "#ffd23f",
+  interceptor: "#15161b", polsuv: "#f4f6fa", jet: "#8e9aa8",
 };
 const PAINT = ["#ff2d95", "#2bf0ff", "#ffd23f", "#ff8a1f", "#3dff8b", "#9d4dff", "#f4f4f6", "#15161b"];
 const CASH_MAX = 1e8;
@@ -40,15 +41,15 @@ export class Spawner {
       if (!found) return "Ein Boot braucht Wasser – geh zur Bucht im Westen (Bootssteg B)";
     } else {
       // beside you, on a free spot
-      const a = g.fa;
-      const tries = [[Math.sin(a) * 40, -Math.cos(a) * 40], [-Math.sin(a) * 40, Math.cos(a) * 40], [Math.cos(a) * 60, Math.sin(a) * 60], [-Math.cos(a) * 60, -Math.sin(a) * 60]];
+      const a = g.fa, big = isJet(model) ? 2 : 1; // the jet needs room for its wings
+      const tries = [[Math.sin(a) * 40 * big, -Math.cos(a) * 40 * big], [-Math.sin(a) * 40 * big, Math.cos(a) * 40 * big], [Math.cos(a) * 60 * big, Math.sin(a) * 60 * big], [-Math.cos(a) * 60 * big, -Math.sin(a) * 60 * big]];
       let ok = false;
-      for (const [dx, dy] of tries) { if (!g.world.isSolid(fx + dx, fy + dy, 18) && !isWater(fx + dx, fy + dy)) { x = fx + dx; y = fy + dy; ok = true; break; } }
+      for (const [dx, dy] of tries) { if (!g.world.isSolid(fx + dx, fy + dy, 18 * big) && !isWater(fx + dx, fy + dy)) { x = fx + dx; y = fy + dy; ok = true; break; } }
       if (!ok) return "Hier ist kein Platz – geh auf die Straße";
     }
     const c = new Car("civ", model, COLOR[model] ?? PAINT[Math.floor(Math.random() * PAINT.length)]);
     const st = MODEL_STATS[model];
-    c.x = x; c.y = y; c.a = g.fa; c.z = isBoat(model) ? WATER_Y : isHeli(model) ? g.groundAt(x, y) : terrainH(x, y);
+    c.x = x; c.y = y; c.a = g.fa; c.z = isBoat(model) ? WATER_Y : isAircraft(model) ? g.groundAt(x, y) : terrainH(x, y);
     c.hp = c.maxHp = st.hp; c.mass = st.mass;
     c.parked = true; c.handbrake = true; c.owned = true;
     g.cars.push(c);

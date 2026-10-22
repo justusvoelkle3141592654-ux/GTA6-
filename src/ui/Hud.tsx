@@ -120,6 +120,7 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onZoo
               </button>
             ))}
             <button onClick={onWheel} className="flex h-12 w-10 items-center justify-center rounded-xl border border-white/15 bg-black/40 text-white/70 hover:border-white/40" aria-label="Waffenrad"><Icon name="wheel" size={20} /></button>
+            {hud.jet && <button onClick={onDetonate} className="ml-2 flex h-12 items-center gap-1 rounded-xl border border-orange-300 bg-orange-600/60 px-3 font-display text-sm tracking-wider shadow-[0_0_20px_rgba(255,140,40,0.7)]"><Icon name="boom" size={18} />RAKETE [G]</button>}
             {hud.bombsPlaced > 0 && <button onClick={onDetonate} className="ml-2 flex h-12 animate-pulse items-center gap-1 rounded-xl border border-red-400 bg-red-600/60 px-3 font-display text-sm tracking-wider shadow-[0_0_20px_rgba(255,40,60,0.8)]"><Icon name="boom" size={18} />ZÜNDEN [G]</button>}
           </div>
           <div className="mt-1 text-[11px] text-white/45">Klick / F Feuer · Q Wechsel · Tab Waffenrad · R Nachladen</div>

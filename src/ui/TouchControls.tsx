@@ -9,6 +9,7 @@ interface Props {
   relative?: boolean;
   onFoot: boolean;
   flying?: boolean; // helicopter: DRIFT = climb, NITRO = descend
+  jet?: boolean;    // fighter jet: a missile button
   weapon: Weapon;
   ammo: string;
   bombsPlaced: number;
@@ -20,7 +21,7 @@ interface Props {
 const RADIUS = 60;
 const LONG_PRESS = 420; // ms: holding the weapon button opens the wheel
 
-export default function TouchControls({ input, nitro01, relative = false, onFoot, flying = false, weapon, ammo, bombsPlaced, onCycleWeapon, onWheel, onDetonate }: Props) {
+export default function TouchControls({ input, nitro01, relative = false, onFoot, flying = false, jet = false, weapon, ammo, bombsPlaced, onCycleWeapon, onWheel, onDetonate }: Props) {
   const pressT = useRef<number | null>(null);
   const weaponDown = (e: React.PointerEvent) => {
     e.stopPropagation();
@@ -86,6 +87,9 @@ export default function TouchControls({ input, nitro01, relative = false, onFoot
 
       <div className="pointer-events-auto absolute bottom-6 right-4 flex items-end gap-3">
         <div className="flex flex-col items-center gap-3">
+          {jet && (
+            <button onPointerDown={(e) => { e.stopPropagation(); onDetonate(); }} className="flex h-16 w-16 flex-col items-center justify-center rounded-full border-2 border-orange-300 bg-orange-600/70 font-display text-[11px] tracking-wider shadow-[0_0_24px_rgba(255,140,40,0.8)] active:scale-90" aria-label="Rakete"><Icon name="boom" size={22} />RAKETE</button>
+          )}
           {bombsPlaced > 0 && (
             <button onPointerDown={(e) => { e.stopPropagation(); onDetonate(); }} className="flex h-16 w-16 animate-pulse items-center justify-center rounded-full border-2 border-red-400 bg-red-600/70 text-2xl shadow-[0_0_24px_rgba(255,40,60,0.9)] active:scale-90" aria-label="Zünden"><Icon name="boom" size={26} /></button>
           )}

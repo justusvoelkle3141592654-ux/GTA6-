@@ -303,6 +303,11 @@ export class Sfx {
     this.tone(1320, 0.12, "triangle", 0.1, 0.06);
   }
 
+  // jet engine roar (police jets nearby, the player's jet)
+  jet(level: number) {
+    if (level <= 0.01) return;
+    this.noise(0.12, 700 + level * 900, 0.22 * level, "bandpass", 300);
+  }
   // helicopter rotor: short low noise bursts, called a few times per second while one is near
   rotor(level: number) {
     if (level <= 0.01) return;

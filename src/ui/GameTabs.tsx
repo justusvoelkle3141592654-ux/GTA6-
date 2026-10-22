@@ -177,7 +177,7 @@ export function FlightTab({ game, onDone }: { game: Game; onDone: () => void }) 
   const [, redraw] = useState(0);
   const blocked = !game.rules.city ? "Nur in der Open World" : game.missions.active || game.hide.active ? "Nicht während einer Mission oder des Versteckspiels" : "";
   const go = (id: string, instant: boolean) => { const m = game.travelTo(id, instant); if (m) setMsg(m); else onDone(); };
-  const craft = (m: "heli" | "policeheli") => { const r = game.spawner.vehicle(m); if (/ist da$/.test(r)) onDone(); else setMsg(r); };
+  const craft = (m: "heli" | "policeheli" | "jet") => { const r = game.spawner.vehicle(m); if (/ist da$/.test(r)) onDone(); else setMsg(r); };
   const list = game.flightTargets().filter((t) => t.group === filter);
   return (
     <div className="space-y-2">
@@ -192,6 +192,7 @@ export function FlightTab({ game, onDone }: { game: Game; onDone: () => void }) 
         <div className="mt-1 grid grid-cols-2 gap-2">
           <button className={btn} disabled={!!blocked} onClick={() => craft("heli")}>{MODEL_NAME.heli}</button>
           <button className={btn} disabled={!!blocked} onClick={() => craft("policeheli")}>{MODEL_NAME.policeheli}</button>
+          <button className={btn + " col-span-2"} disabled={!!blocked} onClick={() => craft("jet")}>{MODEL_NAME.jet} (Kanone + Raketen)</button>
         </div>
       </div>
       <div className={card}>
