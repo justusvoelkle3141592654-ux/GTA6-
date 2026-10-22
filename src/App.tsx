@@ -2,22 +2,22 @@ import { useEffect, useRef, useState } from "react";
 import {
   Game, LEGACY_CAR_IDS,
   type CameraMode, type GameConfig, type GameOverData, type GameState, type HudData, type ModalInfo, type TouchInput,
-} from "./game/engine";
-import { sfx } from "./game/audio";
-import { MODE_RULES } from "./game/modes";
-import { loadSave, type SaveData } from "./game/save";
-import { DEFAULT_NAME, loadName, loadScores, saveName, saveScore, type ScoreEntry } from "./game/scores";
-import TouchControls from "./components/TouchControls";
-import Hud from "./components/Hud";
-import ShopMenu from "./components/ShopMenu";
-import DialogBox from "./components/DialogBox";
-import WeaponWheel from "./components/WeaponWheel";
-import StartScreen from "./components/StartScreen";
-import GameOver, { DIFF_LABEL } from "./components/GameOver";
-import PauseMenu, { type PauseTab } from "./components/PauseMenu";
-import Phone, { IncomingCall } from "./components/Phone";
-import { Overlay, ammoText } from "./components/ui";
-import { loadSettings, applySettings } from "./game/settings";
+} from "./core/engine";
+import { sfx } from "./audio/audio";
+import { MODE_RULES } from "./core/modes";
+import { loadSave, type SaveData } from "./core/save";
+import { DEFAULT_NAME, loadName, loadScores, saveName, saveScore, type ScoreEntry } from "./core/scores";
+import TouchControls from "./ui/TouchControls";
+import Hud from "./ui/Hud";
+import ShopMenu from "./ui/ShopMenu";
+import DialogBox from "./ui/DialogBox";
+import WeaponWheel from "./ui/WeaponWheel";
+import StartScreen from "./ui/StartScreen";
+import GameOver, { DIFF_LABEL } from "./ui/GameOver";
+import PauseMenu, { type PauseTab } from "./ui/PauseMenu";
+import Phone, { IncomingCall } from "./ui/Phone";
+import { Overlay, ammoText } from "./ui/ui";
+import { loadSettings, applySettings } from "./core/settings";
 
 const EMPTY_HUD: HudData = {
   score: 0, mult: 1, combo01: 0, stars: 1, searching: false, cash: 0, health01: 1, carHealth01: 1, nitro01: 1, kmh: 0, time: 0, drift: 0, bust01: 0, takedowns: 0,
