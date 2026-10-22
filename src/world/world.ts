@@ -3,6 +3,7 @@ import {
   mulberry32, terrainH, terrainGrad, isWater, inCity, cityDist, lineC, waterMask, edgeDist, EDGE_LAND,
 } from "./terrain";
 import { RoadNet } from "./roads";
+import { Props } from "./props";
 import { blockDistrict, type DistrictId } from "./districts";
 
 export * from "./terrain";
@@ -71,6 +72,7 @@ export class World {
   rand: () => number;
   roads = new RoadNet();
   ramps: Ramp[] = [];
+  props!: Props; // street furniture and lamps cars can knock over
   extras: Building[] = []; // solid things outside the block grid (containers, villas, rails, the lighthouse ...)
   extraTrees: Tree[] = []; // palms on the island and the promenade
   pools: { x: number; y: number; w: number; h: number; z: number }[] = []; // villa pools (drawn only)
@@ -81,6 +83,7 @@ export class World {
     this.generateExtras(seed + 99);
     this.indexExtras();
     this.generateRamps(seed + 7);
+    this.props = new Props(this);
   }
 
   // ---------------- spatial index for extras and ramps (cells one block wide)

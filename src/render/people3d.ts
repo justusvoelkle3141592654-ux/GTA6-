@@ -139,7 +139,7 @@ export class PlayerFigure {
 }
 
 // ---------------------------------------------------------------------------------------- people around
-interface Slot { rig: HumanRig; ped: number; look: number; acc: number; prev: string; getup: boolean; punchT: number; props: { phone: THREE.Mesh; cig: THREE.Mesh; gun: THREE.Mesh } }
+interface Slot { rig: HumanRig; ped: number; look: number; acc: number; prev: string; getup: boolean; punchT: number; tumble: number; props: { phone: THREE.Mesh; cig: THREE.Mesh; gun: THREE.Mesh } }
 const roleName = (c: Civilian) => (c.role === "cop" ? "cop" : c.role === "swat" ? "swat" : c.role === "army" ? "army" : c.role === "gang" ? "gang" : "civ");
 const phoneGeo = weaponGeo("phone")!, gunGeo = weaponGeo("pistol")!, cigGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.45, 5).translate(0.1, -0.7, 0.05);
 const cigMat = new THREE.MeshBasicMaterial({ color: 0xf2efe6 });
@@ -160,7 +160,7 @@ export class CrowdFigures {
     hand.add(phone, cig, gun);
     this.scene.add(rig.root);
     this.setup(rig.root);
-    return { rig, ped: c.id, look: c.look * 1000 + c.role.length, acc: 0, prev: "", getup: false, punchT: 0, props: { phone, cig, gun } };
+    return { rig, ped: c.id, look: c.look * 1000 + c.role.length, acc: 0, prev: "", getup: false, punchT: 0, tumble: 0, props: { phone, cig, gun } };
   }
 
   // camera position (x, y on the map), list of all peds; returns the peds drawn here (the instanced crowd skips them)
@@ -205,7 +205,12 @@ export class CrowdFigures {
     const scale = r.look.height * c.scale * PERSON_SCALE;
     root.scale.setScalar(scale);
     root.position.set(c.x, c.z, c.y);
-    root.rotation.set(0, -c.a, 0);
+    // ragdoll: the body tumbles while it flies, then settles flat on the ground
+    if (c.state === "down" && c.air) s.tumble += c.spin * dt;
+    else if (s.tumble) { const w = Math.atan2(Math.sin(s.tumble), Math.cos(s.tumble)); s.tumble = Math.abs(w) < 0.02 ? 0 : s.tumble - w * Math.min(1, dt * 9); }
+    root.rotation.order = "YXZ";
+    root.rotation.set(s.tumble, -c.a, s.tumble * 0.4);
+    if (s.tumble) root.position.y += 9 * Math.abs(Math.sin(s.tumble)) * scale / 1.2; // turn about the middle of the body, not the feet
     const sp = Math.hypot(c.vx, c.vy);
     let upper = "", prop = "";
     r.lookYaw *= 0.9; r.eyeYaw *= 0.9;

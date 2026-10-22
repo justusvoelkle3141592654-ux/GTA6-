@@ -8,6 +8,7 @@ import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { wrapA, clamp, canvasTex, radialTex, withColor, C, box, flat, cyl, sph } from "./meshutil";
 import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_SIZE, H_SCALE, EDGE_LAND, STUNT_PARK, terrainH, terrainGrad, cityDist, inCity, coast, edgeDist, mulberry32, type Building, tunnelAt, TUNNEL } from "../world/world";
+import { PropMeshes } from "./props3d";
 import { terrainMesh, backdropMesh, roadsMesh, rampsMesh, coastMesh, extrasMesh, furnitureMesh, LightsMesh } from "./worldmesh";
 import { TrafficLights } from "../ai/traffic";
 import { Atmosphere } from "./atmosphere";
@@ -396,7 +397,7 @@ interface CarObj {
   wheels: { pivot: THREE.Object3D; spin: THREE.Object3D; front: boolean; r: number; y: number }[];
   bar?: { reds: THREE.MeshBasicMaterial; blues: THREE.MeshBasicMaterial; white: THREE.MeshBasicMaterial };
   model: CarModel; color: string; wreck: boolean; pitch: number; roll: number; spinA: number; steerA: number;
-  rig?: CarRig; gangDriver?: boolean; dentN: number; glassV: number; bumpers: number; prevV: number; brakeT: number; wipe: number; bounce: number; bounceV: number;
+  rig?: CarRig; gangDriver?: boolean; dentN: number; glassV: number; bumpers: number; doorsOff: number; lonV: number; prevV: number; brakeT: number; wipe: number; bounce: number; bounceV: number;
 }
 // people at the wheel of traffic cars
 const DRIVERS: [string, string, string][] = [
@@ -1022,18 +1023,13 @@ export class Renderer3D {
   get fallCam() { return !!this.fallFix; }
   private fallFix: THREE.Vector3 | null = null;
 
+  // street lamps, benches, bins, hydrants and letter boxes: each one can be knocked over (world/props.ts)
+  private propMeshes: PropMeshes | null = null;
   private buildLamps() {
-    const pts: [number, number][] = [];
-    for (let j = 0; j <= GRID; j++) for (let i = 0; i <= GRID; i++) { const n = this.world.nodePos(i, j), o = ROAD / 2 + 6; pts.push([n.x - o, n.y - o], [n.x + o, n.y + o]); }
-    const n = pts.length;
-    const pole = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1.5, 52, 6).translate(0, 26, 0), new THREE.MeshStandardMaterial({ color: 0x3d3f45, roughness: 0.5, metalness: 0.6 }), n);
     this.lampHeadMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.4, 1.0), toneMapped: false });
-    const headM = new THREE.InstancedMesh(new THREE.BoxGeometry(7, 2.4, 7).translate(0, 52, 0), this.lampHeadMat, n);
-    const poolM = new THREE.InstancedMesh(new THREE.PlaneGeometry(240, 240).rotateX(-Math.PI / 2).translate(0, 0.45, 0), this.lampPoolMat = new THREE.MeshBasicMaterial({ map: radialTex("rgba(255,190,120,0.9)", "rgba(255,160,80,0)"), transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false }), n);
-    poolM.renderOrder = 1;
-    const m = new THREE.Matrix4();
-    pts.forEach(([x, z], i) => { m.makeTranslation(x, 0, z); pole.setMatrixAt(i, m); headM.setMatrixAt(i, m); poolM.setMatrixAt(i, m); });
-    this.scene.add(pole, headM, poolM);
+    this.lampPoolMat = new THREE.MeshBasicMaterial({ map: radialTex("rgba(255,190,120,0.9)", "rgba(255,160,80,0)"), transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.propMeshes = new PropMeshes(this.world.props, this.lampHeadMat, this.lampPoolMat);
+    this.scene.add(this.propMeshes.group);
   }
 
   private buildShared() {
@@ -1160,7 +1156,7 @@ export class Renderer3D {
     const dv = DRIVERS[Math.floor(r * 97) % DRIVERS.length];
     rig.setDriver(dv[0], c.kind === "cop" ? "#1f3a6e" : dv[1], dv[2]);
     const obj: CarObj = { group, tilt, body: rig.body, glass: rig.body, lights: rig.lights.head, pool, wheels, model: c.model, color: c.color, wreck: false, pitch: 0, roll: 0, spinA: 0, steerA: 0,
-      rig, dentN: 0, glassV: -1, bumpers: 0, prevV: c.vF, brakeT: 0, wipe: 0, bounce: 0, bounceV: 0 };
+      rig, dentN: 0, glassV: -1, bumpers: 0, doorsOff: 0, lonV: c.vF, prevV: c.vF, brakeT: 0, wipe: 0, bounce: 0, bounceV: 0 };
     if (c.kind === "player") { obj.glow = new THREE.Mesh(this.glowGeo, this.glowMat); obj.glow.renderOrder = 2; group.add(obj.glow); }
     if (c.model === "police" || c.model === "swat" || c.model === "ambulance" || c.model === "fire") {
       const reds = new THREE.MeshBasicMaterial({ color: this.copRed.clone(), toneMapped: false });
@@ -1217,7 +1213,7 @@ export class Renderer3D {
     const pool = new THREE.Mesh(this.poolGeo, c.kind === "player" ? this.poolMatP : this.poolMat);
     pool.renderOrder = 2;
     group.add(shadow, pool);
-    const obj: CarObj = { group, tilt, body, glass, lights, pool, wheels, model: c.model, color: c.color, wreck: false, pitch: 0, roll: 0, spinA: 0, steerA: 0, dentN: 0, glassV: 0, bumpers: 0, prevV: 0, brakeT: 0, wipe: 0, bounce: 0, bounceV: 0 };
+    const obj: CarObj = { group, tilt, body, glass, lights, pool, wheels, model: c.model, color: c.color, wreck: false, pitch: 0, roll: 0, spinA: 0, steerA: 0, dentN: 0, glassV: 0, bumpers: 0, doorsOff: 0, lonV: 0, prevV: 0, brakeT: 0, wipe: 0, bounce: 0, bounceV: 0 };
     if (c.kind === "player") { obj.glow = new THREE.Mesh(this.glowGeo, this.glowMat); obj.glow.renderOrder = 2; group.add(obj.glow); }
     if (isHeli(c.model)) { obj.rotor = new THREE.Mesh(this.rotorGeo, this.rotorMat); obj.rotor.position.y = 27; tilt.add(obj.rotor); shadow.visible = false; }
     if (isBoat(c.model)) { shadow.visible = false; pool.visible = false; }
@@ -1247,6 +1243,37 @@ export class Renderer3D {
     return obj;
   }
 
+  // ---- debris: torn off bumpers and doors (copies of the car part, they share its geometry and material)
+  private debris: { m: THREE.Object3D; vx: number; vy: number; vz: number; s: THREE.Vector3; t: number; rest: boolean }[] = [];
+  private spawnDebris(part: THREE.Object3D, c: { vx: number; vy: number }) {
+    if (!part.visible) return;
+    part.updateWorldMatrix(true, true);
+    const m = part.clone(true);
+    m.matrixWorld.decompose(m.position, m.quaternion, m.scale);
+    m.visible = true;
+    this.scene.add(m);
+    const r = () => Math.random() - 0.5;
+    this.debris.push({ m, vx: c.vx * 0.7 + r() * 160, vy: c.vy * 0.7 + r() * 160, vz: 120 + Math.random() * 120, s: new THREE.Vector3(r() * 9, r() * 9, r() * 9), t: 0, rest: false });
+    while (this.debris.length > 40) this.scene.remove(this.debris.shift()!.m);
+  }
+  private updateDebris(g: Game, dt: number) {
+    const e = new THREE.Euler();
+    for (let i = this.debris.length - 1; i >= 0; i--) {
+      const d = this.debris[i], p = d.m.position;
+      d.t += dt;
+      if (d.t > 25 || Math.hypot(p.x - g.fx, p.z - g.fy) > 1600) { this.scene.remove(d.m); this.debris.splice(i, 1); continue; }
+      if (d.rest) continue;
+      d.vz -= 620 * dt;
+      p.x += d.vx * dt; p.z += d.vy * dt; p.y += d.vz * dt;
+      d.m.quaternion.multiply(new THREE.Quaternion().setFromEuler(e.set(d.s.x * dt, d.s.y * dt, d.s.z * dt)));
+      const gh = g.groundH(p.x, p.z, p.y + 5) + 1;
+      if (p.y < gh) {
+        p.y = gh; d.vz = -d.vz * 0.3; d.vx *= 0.55; d.vy *= 0.55; d.s.multiplyScalar(0.5);
+        if (Math.abs(d.vz) < 40 && Math.hypot(d.vx, d.vy) < 30) d.rest = true;
+      }
+    }
+  }
+
   private disposeCar(o: CarObj) {
     this.scene.remove(o.group);
     o.rig?.dispose();
@@ -1260,7 +1287,7 @@ export class Renderer3D {
     for (const c of g.cars) {
       seen.add(c);
       let o = this.carObjs.get(c);
-      if (o && (o.model !== c.model || o.color !== c.color || (o.wreck && !c.dead) || c.dents.length < o.dentN * 3 || (o.bumpers & ~c.bumpers) !== 0)) { this.disposeCar(o); o = undefined; }
+      if (o && (o.model !== c.model || o.color !== c.color || (o.wreck && !c.dead) || c.dents.length < o.dentN * 3 || (o.bumpers & ~c.bumpers) !== 0 || (o.doorsOff & ~c.doorsOff) !== 0)) { this.disposeCar(o); o = undefined; }
       if (!o) { o = this.makeCar(c); this.carObjs.set(c, o); }
       o.group.position.set(c.x, c.z + (c === g.player && !g.onFoot ? this.rooms.liftY : 0), c.y);
       // terrain tilt
@@ -1273,8 +1300,22 @@ export class Renderer3D {
       }
       if (c.air) tp = Math.atan2(c.vz, Math.max(60, c.speed)) * 0.6;
       const k = Math.min(1, dt * (c.air ? 3 : 12));
+      // weight transfer: the body dives when braking, squats when accelerating and leans out of curves
+      if (!c.air && !isCraft(c.model) && dt > 0) {
+        const lon = (c.vF - o.lonV) / dt;
+        tp += clamp(lon / 16000, -0.045, 0.035);
+        tr += clamp(-c.av * c.vF / 9000, -0.07, 0.07);
+      }
+      o.lonV = c.vF;
       o.pitch += (tp - o.pitch) * k; o.roll += (tr - o.roll) * k;
-      o.group.rotation.set(o.roll, -c.a, o.pitch);
+      // barrel rolls, flips and cars lying on the side or the roof (rotation about the ground point, lifted so it stays above it)
+      const ra = o.roll + c.rollA, pa = o.pitch + c.pitchA;
+      o.group.rotation.set(ra, -c.a, pa);
+      if (c.rollA || c.pitchA) {
+        const H = 14 * VEH_SCALE, cr = Math.cos(ra), sr = Math.sin(ra), cp = Math.cos(pa), sp2 = Math.sin(pa);
+        const liftR = -Math.min(0, H * cr - c.hw * Math.abs(sr), -c.hw * Math.abs(sr)), liftP = -Math.min(0, H * cp - c.hl * Math.abs(sp2), -c.hl * Math.abs(sp2));
+        o.group.position.y += Math.max(liftR, liftP);
+      }
       if (isHeli(c.model)) {
         // nose down when flying forward, bank into turns, spinning rotor
         o.tilt.rotation.z = clamp(-c.vF / 1400, -0.3, 0.2);
@@ -1342,8 +1383,13 @@ export class Renderer3D {
     // dents where the car was hit (only new ones are added)
     while (o.dentN * 3 < c.dents.length) { const i = o.dentN * 3; rig.dent(c.dents[i] / VEH_SCALE, c.dents[i + 1] / VEH_SCALE, c.dents[i + 2]); o.dentN++; }
     if (o.glassV !== c.glassV) { o.glassV = c.glassV; rig.setGlass((id) => (c.glass[id] ?? 0) as 0 | 1 | 2); }
-    if (c.bumpers & 1 && !(o.bumpers & 1)) { rig.dropBumper(true); o.bumpers |= 1; }
-    if (c.bumpers & 2 && !(o.bumpers & 2)) { rig.dropBumper(false); o.bumpers |= 2; }
+    // torn off parts fly away as debris
+    if (c.bumpers & 1 && !(o.bumpers & 1)) { this.spawnDebris(rig.bumperF, c); rig.dropBumper(true); o.bumpers |= 1; }
+    if (c.bumpers & 2 && !(o.bumpers & 2)) { this.spawnDebris(rig.bumperR, c); rig.dropBumper(false); o.bumpers |= 2; }
+    for (let i = 0; i < rig.doors.length; i++) {
+      const bit = 1 << i;
+      if (c.doorsOff & bit && !(o.doorsOff & bit)) { this.spawnDebris(rig.doors[i].pivot, c); rig.doors[i].pivot.visible = false; o.doorsOff |= bit; }
+    }
     // who sits inside: traffic and police drivers, the player (not in first person)
     const isP = c === g.player;
     // the player sits there as the full figure (PlayerFigure); traffic and police drivers are simple figures
@@ -1836,6 +1882,8 @@ export class Renderer3D {
     this.rooms.update(g, dt, this.camPos);
     this.landmarks.update(g.clock, this.atm.state.night, g.t, dt);
     this.ped.update(g, dt, this.seatOf(g), this.camMode === "fp");
+    this.updateDebris(g, dt);
+    this.propMeshes?.update();
     if (this.padMat?.map) this.padMat.map.offset.y = (this.padMat.map.offset.y - dt * 1.6) % 1; // boost pads: chevrons run towards the ramp
     this.people.update(g.peds.list, g.state !== "menu", this.camPos.x, this.camPos.z, g.fx, g.fy, dt);
     this.crowd.update(g.peds.list, g.state !== "menu", g.fx, g.fy, this.people.drawn);

@@ -129,6 +129,9 @@ export class Car {
   dents: number[] = [];    // where the body was hit: local x, local z (right side +), depth
   glass: Record<string, number> = {}; glassV = 0; // window panes: 1 cracked, 2 broken (glassV counts changes)
   bumpers = 0;             // torn off: bit 1 front, bit 2 rear
+  doorsOff = 0;            // torn off doors: bit i = door i (same order as doors)
+  rollA = 0; rollV = 0; pitchA = 0; pitchV = 0; // body rotation in the air (barrel rolls, flips) and its speed
+  flipT = 0;               // lying on the side or the roof: seconds until it is put back on its wheels
   doors = [0, 0, 0, 0];    // how far each door is open (0..1): 0 right front, 1 left front, 2 right rear, 3 left rear
   locked = false;          // parked and locked: the player smashes the side window to get in
   alarmT = 0;              // car alarm sounding (seconds left)
@@ -151,6 +154,8 @@ export function hitCar(c: Car, wx: number, wy: number, impact: number) {
     if (now !== was) { c.glass[id] = now; c.glassV++; }
   }
   if (impact > 380 && Math.abs(lx) > hl * 0.75) c.bumpers |= lx > 0 ? 1 : 2;
+  // a hard hit on the side tears the door off
+  if (impact > 430 && Math.abs(lx) < hl * 0.45 && Math.abs(lz) > hw * 0.6) c.doorsOff |= 1 << ((lx > -hl * 0.05 ? 0 : 2) + (lz > 0 ? 0 : 1));
 }
-export function repairBody(c: Car) { c.dents = []; c.glass = {}; c.glassV++; c.bumpers = 0; }
-export function copyBody(to: Car, from: Car) { to.dents = [...from.dents]; to.glass = { ...from.glass }; to.glassV++; to.bumpers = from.bumpers; to.doors = [0, 0, 0, 0]; to.blink = 0; }
+export function repairBody(c: Car) { c.dents = []; c.glass = {}; c.glassV++; c.bumpers = 0; c.doorsOff = 0; }
+export function copyBody(to: Car, from: Car) { to.dents = [...from.dents]; to.glass = { ...from.glass }; to.glassV++; to.bumpers = from.bumpers; to.doorsOff = from.doorsOff; to.doors = [0, 0, 0, 0]; to.blink = 0; }

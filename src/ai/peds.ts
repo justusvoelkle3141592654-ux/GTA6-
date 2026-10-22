@@ -32,6 +32,7 @@ export interface Civilian {
   id: number;                     // index in the pool
   target: number;                 // ped it fights (-1: the player)
   getUp: number;                  // knocked down but not hurt: stands up after this many seconds (0: stays down)
+  air: boolean; spin: number;     // flying after a hit (ragdoll), how fast the body tumbles
 }
 
 // what the pedestrian system needs from the game
@@ -97,7 +98,7 @@ function newCiv(id: number): Civilian {
     bx: 0, by: 0, corner: 0, dir: 1, cross: false, offPath: false, tx: 0, ty: 0,
     speed: 30, walk: 0, look: 0, scale: 1, threatX: 0, threatY: 0,
     role: "civ", faction: null, hp: 30, maxHp: 30, armed: false, shootT: 0, shirt: "", pants: "", tag: "",
-    id, target: -1, getUp: 0,
+    id, target: -1, getUp: 0, air: false, spin: 0,
   };
 }
 
@@ -307,7 +308,9 @@ export class PedSystem {
   knockDown(c: Civilian, vx: number, vy: number, vz: number) {
     c.state = "down"; c.t = 0; c.cross = false;
     c.vx = vx; c.vy = vy; c.vz = vz;
-    if (Math.hypot(vx, vy) > 5) c.a = Math.atan2(-vy, -vx); // falls on the back, feet towards the hit
+    const sp = Math.hypot(vx, vy);
+    if (sp > 5) c.a = Math.atan2(-vy, -vx); // falls on the back, feet towards the hit
+    c.spin = Math.min(16, sp / 45 + vz / 60) * (Math.random() < 0.5 ? -1 : 1); // tumbles through the air
   }
 
   // explosion: knock down everybody inside the radius; returns how many
@@ -586,7 +589,7 @@ export class PedSystem {
       if (sp > 60 && !car.dead && (c.role !== "seeker" || (car.kind === "player" && !h.onFoot && sp > 150))) { // hide and seek: only running them over on purpose counts
         const s = sp * 0.7;
         const side = ly >= 0 ? 1 : -1;
-        this.knockDown(c, car.vx * 0.7 - sa * side * 40, car.vy * 0.7 + ca * side * 40, 60 + s * 0.35);
+        this.knockDown(c, car.vx * 0.85 - sa * side * 50, car.vy * 0.85 + ca * side * 50, 80 + s * 0.55);
         car.vx *= 0.94; car.vy *= 0.94;
         h.pedHit(c, car, sp);
         return;
@@ -612,6 +615,7 @@ export class PedSystem {
     if (!this.world.isSolid(nx, ny, 4)) { c.x = nx; c.y = ny; } else { c.vx = 0; c.vy = 0; }
     c.vz -= GRAV * dt; c.z += c.vz * dt;
     const gz = this.world.rampH(c.x, c.y);
-    if (c.z < gz) { c.z = gz; c.vz = c.vz < -150 ? -c.vz * 0.25 : 0; }
+    if (c.z < gz) { c.z = gz; c.vz = c.vz < -150 ? -c.vz * 0.25 : 0; c.spin *= 0.5; }
+    c.air = c.z > gz + 1.5;
   }
 }

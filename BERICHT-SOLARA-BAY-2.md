@@ -112,3 +112,16 @@ Getestet wurde automatisiert in einem Headless-Chromium mit Software-Rendering (
   - Schnellreise und Fahrzeug holen sind während Missionen und des Versteckspiels gesperrt.
 - Geprüft im Browser (Playwright, niedrige Grafikstufe): Teleport und Flug in Läden, Fliegen zu Fuß und im Auto, Landen ohne Schaden, Menü-Reiter. Nicht auf einem echten Handy getestet.
 - Kamera nah/weit: Neue Einstellung (Standard: nah), HUD-Knopf NAH/WEIT, Taste X, Gamepad Steuerkreuz links. Nah halbiert zu Fuß ungefähr den Kameraabstand (Figur etwa doppelt so groß im Bild), im Auto 60 % Abstand, Vogelperspektive 60 % Höhe. Geprüft per Screenshot in einem flachen Handy-Format (860 x 400), nicht auf einem echten Handy.
+
+## Nachtrag 2: Brücke, Rampen, Physik, neue Fahrzeuge
+
+- Brücken über die Bucht: Zu Fuß galt das Deck als Wasser (man fiel hinein und schwamm), Autos „versanken“ nach ein paar Sekunden auf dem Deck, und ein kurzer Hüpfer am Kartenrand löste den Absturz aus. Behoben; zu Fuß hält ein Geländer, Verkehr bremst auf Brücken nicht mehr, die Polizei schickt dort keine Boote. Geprüft: alle 7 Brücken zu Fuß und im Auto.
+- Sprungrampen: 21–28° statt 15–22°, 120–150 lang, gelb-schwarze Kanten. Vor jeder Sprungrampe ein Boostpad mit laufenden Pfeilen: Schub über das Höchsttempo, Nitro voll, weniger Schwerkraft im Flug. Jeder Absprung von einer Sprungrampe füllt Nitro um die Hälfte auf. Gemessen mit dem Corsaro: ohne Boost etwa 65 m, mit Boost etwa 195 m.
+- Physik:
+  - Überschläge: harte seitliche Treffer heben das leichtere Auto an, es rollt oder überschlägt sich (ein Monstertruck wirft Autos fast immer um). In der Luft steuert man die Drehung (Lenken rollt, Gas/Bremse kippt die Nase); Lenken am Rampenende startet eine Fassrolle. Landet ein Auto auf der Seite oder dem Dach, gehen Scheiben kaputt, es rutscht aus und wird nach knapp 2 s mit einem Hüpfer wieder auf die Räder gestellt.
+  - Abfallende Teile: Stoßstangen und (neu) Türen fliegen bei harten Treffern als Trümmer weg und bleiben eine Weile liegen.
+  - Straßenmöbel und Laternen: Bänke, Mülleimer, Hydranten, Briefkästen und alle Straßenlaternen lassen sich umfahren. Kleine Teile fliegen und überschlagen sich, Laternen kippen um und ihr Lichtkegel geht aus, Hydranten spritzen eine Wasserfontäne. Sie kommen nach einer Minute zurück, wenn man weit weg ist.
+  - Ragdoll: angefahrene Personen fliegen weiter und überschlagen sich in der Luft, bevor sie liegen bleiben.
+  - Fahrgefühl: die Karosserie taucht beim Bremsen ein, hebt beim Beschleunigen die Nase und neigt sich in Kurven; bei hohem Tempo bricht das Heck bei starkem Lenken leicht aus.
+- Neue Fahrzeuge (Spawn-Menü, Autohaus): Hypercar „Vortex X“ (mit Heckflügel), Formel-Rennwagen (freistehende Räder, Front- und Heckflügel), Monstertruck (riesige Räder, Rahmen, Überrollbügel), Lowrider „Cruzado“ (langes Cabrio, Chromleisten; Handbremse im Stand lässt ihn hüpfen).
+- Nicht umgesetzt: echte Gelenkphysik für Personen (weiterhin Animation plus Flugbahn und Drehung), Ampeln lassen sich nicht umfahren.

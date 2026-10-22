@@ -5,7 +5,7 @@ import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, CRIMES, type Crime } from "../ai/wanted";
 import { buildPlaces, onJetty, respawnCost, RESPAWN_RULES, type Place } from "../world/places";
 import { PedSystem, PED_LIMIT, isPolice, type Civilian, type Team } from "../ai/peds";
-import { Car, CARS, VEH_SCALE, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, hitCar, copyBody, repairBody, type CarDef, type FactionId } from "../vehicles/vehicles";
+import { Car, CARS, VEH_SCALE, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, isTwoWheel, hitCar, copyBody, repairBody, type CarDef, type FactionId } from "../vehicles/vehicles";
 import { Inventory, WEAPONS, WEAPON_DEFS, type Weapon } from "../gameplay/weapons";
 import { SHAPES, hasRig } from "../vehicles/carmodel";
 import { buildInteriors, interiorAt, interiorFloor, type Interior, type Seat } from "../world/interiors";
@@ -1874,6 +1874,14 @@ export class Game {
         this.collideWorld(c);
         continue;
       }
+      if (c.flipT > 0 && !c.dead) {
+        // on the side or the roof: it slides to a stop, then it is put back on its wheels with a little hop
+        c.flipT -= dt; c.throttle = 0;
+        this.wreckPhysics(c, dt);
+        if (c.flipT <= 0 && !c.air) { c.vz = 210; c.air = true; c.airT = 0; c.rollV = -wrap(c.rollA) / 0.62; c.pitchV = -wrap(c.pitchA) / 0.62; c.flipT = 0; }
+        this.collideWorld(c);
+        continue;
+      }
       if (c.kind === "player") {
         if (p.dead) this.wreckPhysics(c, dt);
         else if (playing) {
@@ -1901,10 +1909,17 @@ export class Game {
       } else if (c.hunt) this.drive(c, dt, 520, 480, 10, 3);
       else this.drive(c, dt, 300, c.cruise + 20, 12, 3);
       this.collideWorld(c);
+      if (c.speed > 15 && !c.air && !isCraft(c.model) && Math.abs(c.x - this.fx) < 1500 && Math.abs(c.y - this.fy) < 1500) this.hitProps(c);
       // cars that drive into the bay sink (going over the cliffs at the border is handled by checkBorder)
       if (this.rules.city && !(c === p && this.fall) && !this.onDeck(c.x, c.y, c.z) && this.craft.sink(c, dt)) this.onSunk(c);
     }
     this.collideCars();
+    this.world.props.update(dt, (x, y) => this.groundH(x, y, 10), this.fx, this.fy);
+    for (let i = this.fountains.length - 1; i >= 0; i--) {
+      const f = this.fountains[i]; f.t += dt;
+      if (f.t > 14) { this.fountains.splice(i, 1); continue; }
+      if (Math.hypot(f.x - this.fx, f.y - this.fy) < 900 && P60(0.5, dt)) this.emit(f.x + rnd(-2, 2), f.y + rnd(-2, 2), 4, rnd(-30, 30), rnd(-30, 30), rnd(260, 360), rnd(0.8, 1.3), rnd(4, 8), 18, "#e8f6ff", 0, 2.5);
+    }
     this.jobs.afterPhysics();
     if (this.onFoot && playing) this.updatePed(dt);
     if (playing && this.rules.city) this.checkBorder(dt);
@@ -2157,6 +2172,7 @@ export class Game {
         if (sp > AIR_MAX) { c.vx *= AIR_MAX / sp; c.vy *= AIR_MAX / sp; }
       }
       c.vz -= GRAV * dt * (boostAir ? 0.45 : 1) * (c.boostAir ? 0.7 : 1);
+      this.airSpin(c, dt);
       c.x += c.vx * dt; c.y += c.vy * dt; c.z += c.vz * dt;
       this.sweep(c, dt);
       c.av *= Math.exp(-1.5 * dt);
@@ -2181,7 +2197,9 @@ export class Game {
     if (vF > maxV) vF += (maxV - vF) * Math.min(1, 1.5 * dt);
     vF -= vF * 0.12 * dt;
     const drifting = c.handbrake;
-    vR *= Math.exp(-(drifting ? gripDrift : grip) * dt);
+    // weight: at high speed hard steering lets the rear step out a little, heavy cars slide more
+    const slip = clamp((Math.abs(vF) - 320) / 420, 0, 1) * Math.abs(c.steer) * (c.mass > 2 ? 1.2 : 1);
+    vR *= Math.exp(-(drifting ? gripDrift : grip * (1 - 0.35 * slip)) * dt);
     if (drifting) vF -= vF * 0.5 * dt;
     vF -= Math.sign(vF) * Math.abs(vR) * 0.25 * dt;
     const sp = Math.abs(vF);
@@ -2249,6 +2267,7 @@ export class Game {
           // launch ramps kick you up a bit more and fill up the nitro; after a boost pad you fly much further
           c.vz += 90;
           if (c.boostT > 0) c.boostAir = true;
+          c.rollV += c.steer * 2.4; // steering over the lip: barrel roll
           if (this.nitro < 1) { this.nitro = Math.min(1, this.nitro + 0.5); this.text(c.x, c.y - 40, "+NITRO", "#2bf0ff", 22); }
         }
       }
@@ -2277,8 +2296,18 @@ export class Game {
     const ca = Math.cos(c.a), sa = Math.sin(c.a);
     c.vF = c.vx * ca + c.vy * sa; c.vR = -c.vx * sa + c.vy * ca;
     const gh = this.carGround(c);
-    if (c.air || c.z - gh > 25) { c.air = true; c.vz -= GRAV * dt; c.z += c.vz * dt; if (c.z <= gh) { c.z = gh; c.air = false; c.vz = 0; } }
-    else c.z = gh;
+    if (c.air || c.z - gh > 25) {
+      c.air = true; c.vz -= GRAV * dt; c.z += c.vz * dt; this.airSpin(c, dt);
+      if (c.z <= gh) { if (c.flipT > 0) { c.z = gh; c.air = false; c.vz = 0; c.rollV = c.pitchV = 0; } else this.land(c, gh); }
+    } else c.z = gh;
+  }
+
+  // body rotation in the air; the player steers it (steering rolls, gas / brake tip the nose)
+  private airSpin(c: Car, dt: number) {
+    if (c.kind === "player" && !this.onFoot && !c.dead && !isCraft(c.model)) { c.rollV += c.steer * 3.2 * dt; c.pitchV -= c.throttle * 2.2 * dt; }
+    const f = Math.exp(-0.35 * dt);
+    c.rollV *= f; c.pitchV *= f;
+    c.rollA += c.rollV * dt; c.pitchA += c.pitchV * dt;
   }
 
   // ---------- collision boxes ----------
@@ -2399,6 +2428,21 @@ export class Game {
   }
 
   private hopCd = 0;
+  // a knocked over hydrant sprays water for a while
+  private fountains: { x: number; y: number; t: number }[] = [];
+  // a car drives through street furniture or a lamp: it flies away / tips over, the car loses some speed
+  private hitProps(c: Car) {
+    const pr = this.world.props, mine = c === this.player && !this.onFoot;
+    pr.touch(c.x, c.y, c.a, c.hl, c.hw, (p, i) => {
+      const keep = pr.knock(i, c.vx, c.vy);
+      c.vx *= keep; c.vy *= keep;
+      if (p.kind === "hydrant") this.fountains.push({ x: p.x, y: p.y, t: 0 });
+      const big = p.kind === "lamp" || p.kind === "bench";
+      if (big) { hitCar(c, p.x, p.y, c.speed * 0.8); this.sparks(p.x, p.y, c.z + 8, 8, c.vx * 0.01, c.vy * 0.01); }
+      if (mine) { sfx.crash(big ? 0.5 : 0.22); this.shake(big ? 0.22 : 0.08); if (p.kind === "lamp") this.damagePlayerCar(3); }
+      else if (p.kind === "lamp") this.damageCar(c, 6);
+    });
+  }
   // boost pad in front of a launch ramp (driving towards the ramp): a big push forward and a full nitro tank
   private boostPad(c: Car, top: number) {
     const w = this.world, ids = w.rampsAt(c.x, c.y);
@@ -2426,6 +2470,21 @@ export class Game {
   private land(c: Car, gh: number) {
     const impact = -c.vz;
     c.z = gh; c.air = false; c.boostAir = false;
+    const r = wrap(c.rollA), pt = wrap(c.pitchA);
+    c.rollV = 0; c.pitchV = 0;
+    if (Math.abs(r) < 0.75 && Math.abs(pt) < 0.75) { c.rollA = 0; c.pitchA = 0; }
+    else if (!isCraft(c.model)) {
+      // crash landing: it stays on the side or the roof for a moment, windows break, sparks fly
+      c.rollA = Math.abs(r) > 2.2 ? Math.PI : Math.abs(r) > 0.75 ? Math.sign(r) * Math.PI / 2 : 0;
+      c.pitchA = Math.abs(pt) > 2.2 && c.rollA === 0 ? Math.PI : 0;
+      c.flipT = 1.8; c.vz = 0; c.av *= 0.5;
+      for (const id of ["front", "rear"]) if ((c.glass[id] ?? 0) < 2) { c.glass[id] = 2; c.glassV++; }
+      this.sparks(c.x, c.y, gh + 4, 14, c.vx * 0.01, c.vy * 0.01);
+      if (c.kind === "player" && !this.onFoot) { sfx.crash(0.9); this.shake(0.5); this.damagePlayerCar(10 + Math.max(0, impact) * 0.02); this.setHint("Überschlag!", 1.5); }
+      else this.damageCar(c, 15);
+      c.airT = 0; this.jumpStart = c.kind === "player" ? null : this.jumpStart;
+      return;
+    }
     if (c.kind === "player" && !this.onFoot && this.rules.city && this.state === "playing") {
       const js = this.jumpStart;
       this.jumpStart = null;
@@ -2521,6 +2580,13 @@ export class Game {
 
   private onCarHit(a: Car, b: Car, impact: number, x: number, y: number, nx: number, ny: number) {
     if (impact < 40) return;
+    if (impact > 360) for (const [c, o, s] of [[a, b, -1], [b, a, 1]] as [Car, Car, number][]) {
+      // the lighter car is lifted and rolls over (a heavy truck or the monster truck tosses cars around)
+      if (c.air || c.flipT > 0 || isCraft(c.model) || isTwoWheel(c.model) || c.mass > o.mass * 1.3 || Math.random() > (o.mass > c.mass * 1.8 ? 0.9 : 0.4)) continue;
+      const side = -Math.sin(c.a) * nx * s + Math.cos(c.a) * ny * s; // push across the car: roll, along it: flip
+      c.air = true; c.airT = 0; c.vz = Math.min(320, impact * 0.45);
+      c.rollV += clamp(side * impact / 110, -7, 7); c.pitchV += (Math.cos(c.a) * nx + Math.sin(c.a) * ny) * s * impact / 260;
+    }
     hitCar(a, x, y, impact); hitCar(b, x, y, impact);
     const playing = this.state === "playing" && !this.ending;
     const p = a.kind === "player" ? a : b.kind === "player" ? b : null;
