@@ -395,9 +395,10 @@ interface CarObj {
   rig?: CarRig; gangDriver?: boolean; dentN: number; glassV: number; bumpers: number; prevV: number; brakeT: number; wipe: number; bounce: number; bounceV: number;
 }
 // people at the wheel of traffic cars
-const DRIVER_SKIN = ["#f1c7a5", "#d9a07c", "#b07850", "#7a4f32", "#5a3a26"];
-const DRIVER_SHIRT = ["#2b3242", "#c0392b", "#eef0f2", "#3d6e9a", "#5a7a3a", "#d4a017", "#6a4a8a", "#1d1d22"];
-const DRIVER_HAIR = ["#1b1410", "#3a2a1c", "#6a4a2a", "#b08850", "#8a8a8a", "#0d0d0d"];
+const DRIVERS: [string, string, string][] = [
+  ["#f1c7a5", "#2b3242", "#3a2a1c"], ["#d9a07c", "#c0392b", "#1b1410"], ["#b07850", "#eef0f2", "#0d0d0d"],
+  ["#7a4f32", "#3d6e9a", "#1b1410"], ["#5a3a26", "#5a7a3a", "#0d0d0d"], ["#f1c7a5", "#d4a017", "#b08850"], ["#d9a07c", "#6a4a8a", "#8a8a8a"],
+];
 // main menu camera flight: [camera x, camera y, height, look x, look y] (block coordinates of the landmarks)
 const B = (v: number) => v * BLOCK + ROAD + (BLOCK - ROAD) / 2;
 const MENU_PATH: [number, number, number, number, number][] = [
@@ -487,6 +488,8 @@ export class Renderer3D {
   private rotorGeo!: THREE.BufferGeometry; private rotorMat!: THREE.MeshStandardMaterial;
   private glowGeo!: THREE.PlaneGeometry; private glowMat!: THREE.MeshBasicMaterial;
   private barSeg = new THREE.BoxGeometry(3.2, 2, 2.6);
+  // shared unit shapes for parts made per car (scaled), so nothing new is allocated when cars come and go
+  private unitBox = new THREE.BoxGeometry(1, 1, 1); private unitPlane = new THREE.PlaneGeometry(1, 1);
   private decalGeo = new THREE.PlaneGeometry(20, 5.5);
   private decalMat!: THREE.MeshBasicMaterial; private decalMatB!: THREE.MeshBasicMaterial; private roofDecalMat!: THREE.MeshBasicMaterial;
   private pickGeo: Partial<Record<PickupType, THREE.BufferGeometry>> = {};
@@ -1147,7 +1150,9 @@ export class Renderer3D {
     pool.renderOrder = 2;
     group.add(shadow, pool);
     const r = Math.abs(Math.sin(c.siren * 7.31));
-    rig.setDriver(DRIVER_SKIN[Math.floor(r * 97) % DRIVER_SKIN.length], c.kind === "cop" ? "#1f3a6e" : DRIVER_SHIRT[Math.floor(r * 331) % DRIVER_SHIRT.length], DRIVER_HAIR[Math.floor(r * 53) % DRIVER_HAIR.length]);
+    // a few fixed driver looks (their geometry is cached per car model, so the cache stays small)
+    const dv = DRIVERS[Math.floor(r * 97) % DRIVERS.length];
+    rig.setDriver(dv[0], c.kind === "cop" ? "#1f3a6e" : dv[1], dv[2]);
     const obj: CarObj = { group, tilt, body: rig.body, glass: rig.body, lights: rig.lights.head, pool, wheels, model: c.model, color: c.color, wreck: false, pitch: 0, roll: 0, spinA: 0, steerA: 0,
       rig, dentN: 0, glassV: -1, bumpers: 0, prevV: c.vF, brakeT: 0, wipe: 0, bounce: 0, bounceV: 0 };
     if (c.kind === "player") { obj.glow = new THREE.Mesh(this.glowGeo, this.glowMat); obj.glow.renderOrder = 2; group.add(obj.glow); }
@@ -1156,7 +1161,7 @@ export class Renderer3D {
       const blues = new THREE.MeshBasicMaterial({ color: this.copBlue.clone(), toneMapped: false });
       const white = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1, 1), toneMapped: false });
       const bx = s.box ? Math.min(s.box.x1, s.roofF) - 3 : (s.roofF + s.roofR) / 2 + 2, top = s.box ? Math.max(s.roof, s.box.h) : s.roof;
-      const housing = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.6, s.W * 0.66), mats.trim); housing.position.set(bx, top + 0.35, 0); tilt.add(housing);
+      const housing = new THREE.Mesh(this.unitBox, mats.trim); housing.scale.set(3.6, 0.6, s.W * 0.66); housing.position.set(bx, top + 0.35, 0); tilt.add(housing);
       for (let i = 0; i < 6; i++) {
         const z = (-2.5 + i) * s.W * 0.11;
         const seg = new THREE.Mesh(this.barSeg, i < 2 ? reds : i > 3 ? blues : white);
@@ -1168,9 +1173,9 @@ export class Renderer3D {
         const sy = s.belt - 3.2, sz = s.W / 2 + 0.12;
         const d1 = new THREE.Mesh(this.decalGeo, this.decalMat); d1.scale.set(0.9, 0.7, 1); d1.position.set(-2, sy, sz); tilt.add(d1);
         const d2 = new THREE.Mesh(this.decalGeo, this.decalMatB); d2.scale.set(0.9, 0.7, 1); d2.position.set(-2, sy, -sz); d2.rotation.y = Math.PI; tilt.add(d2);
-        const d3 = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), this.roofDecalMat); d3.rotation.x = -Math.PI / 2; d3.rotation.z = -Math.PI / 2; d3.position.set(bx - 7, s.roof + 0.16, 0); tilt.add(d3);
+        const d3 = new THREE.Mesh(this.unitPlane, this.roofDecalMat); d3.scale.set(10, 5, 1); d3.rotation.x = -Math.PI / 2; d3.rotation.z = -Math.PI / 2; d3.position.set(bx - 7, s.roof + 0.16, 0); tilt.add(d3);
         const hx = (s.cowlX + s.L / 2) / 2;
-        const d4 = new THREE.Mesh(new THREE.PlaneGeometry(9, 4.5), this.roofDecalMat); d4.rotation.x = -Math.PI / 2; d4.rotation.z = -Math.PI / 2; d4.position.set(hx, topAt(s, hx) + 0.55, 0); tilt.add(d4);
+        const d4 = new THREE.Mesh(this.unitPlane, this.roofDecalMat); d4.scale.set(9, 4.5, 1); d4.rotation.x = -Math.PI / 2; d4.rotation.z = -Math.PI / 2; d4.position.set(hx, topAt(s, hx) + 0.55, 0); tilt.add(d4);
       }
       obj.bar = { reds, blues, white };
     }
@@ -1226,8 +1231,8 @@ export class Renderer3D {
       if (c.model === "police") {
         const d1 = new THREE.Mesh(this.decalGeo, this.decalMat); d1.position.set(-1, 8.2, 12.65); tilt.add(d1);
         const d2 = new THREE.Mesh(this.decalGeo, this.decalMatB); d2.position.set(-1, 8.2, -12.65); d2.rotation.y = Math.PI; tilt.add(d2);
-        const d3 = new THREE.Mesh(new THREE.PlaneGeometry(12, 6), this.roofDecalMat); d3.rotation.x = -Math.PI / 2; d3.rotation.z = -Math.PI / 2; d3.position.set(-3, geo.roofY + 0.05, 0); tilt.add(d3);
-        const d4 = new THREE.Mesh(new THREE.PlaneGeometry(12, 6), this.roofDecalMat); d4.rotation.x = -Math.PI / 2; d4.rotation.z = -Math.PI / 2; d4.position.set(14, 12.15, 0); tilt.add(d4);
+        const d3 = new THREE.Mesh(this.unitPlane, this.roofDecalMat); d3.scale.set(12, 6, 1); d3.rotation.x = -Math.PI / 2; d3.rotation.z = -Math.PI / 2; d3.position.set(-3, geo.roofY + 0.05, 0); tilt.add(d3);
+        const d4 = new THREE.Mesh(this.unitPlane, this.roofDecalMat); d4.scale.set(12, 6, 1); d4.rotation.x = -Math.PI / 2; d4.rotation.z = -Math.PI / 2; d4.position.set(14, 12.15, 0); tilt.add(d4);
       }
       obj.bar = { reds, blues, white };
     }

@@ -402,15 +402,23 @@ export function paintPerson(m: ReturnType<typeof personMaterial>, L: Look) {
   p[Z.arm].copy(skin);
 }
 
-// geometry cache: same body and clothes cut = same geometry (colours are in the material)
-const geoCache = new Map<string, THREE.BufferGeometry>();
-function bodyKey(L: Look, detail: number) { return [L.sex, L.build.toFixed(2), L.top, L.bottom, L.shoes, L.hair, L.stubble ? 1 : 0, L.beard ?? 0, detail].join(); }
+// geometry cache: same body and clothes cut = same geometry (colours are in the material);
+// counted references, unused bodies are freed once there are many (people come and go all the time)
+const geoCache = new Map<string, { g: THREE.BufferGeometry; refs: number }>();
+const KEEP = 60;
+function bodyKey(L: Look, detail: number) { return [L.sex, (Math.round(L.build * 10) / 10).toFixed(1), L.top, L.bottom, L.shoes, L.hair, L.stubble ? 1 : 0, L.beard ?? 0, detail].join(); }
 export function bodyGeo(L: Look, detail: 0 | 1) {
-  const L2 = { ...L, build: Math.round(L.build * 10) / 10 }; // a few builds only, so geometries are shared
-  const k = bodyKey(L2, detail);
-  let g = geoCache.get(k);
-  if (!g) { g = buildBody(L2, detail); geoCache.set(k, g); }
-  return g;
+  const k = bodyKey(L, detail);
+  let e = geoCache.get(k);
+  if (!e) { e = { g: buildBody({ ...L, build: Math.round(L.build * 10) / 10 }, detail), refs: 0 }; geoCache.set(k, e); }
+  e.refs++;
+  return e.g;
+}
+function releaseBody(k: string) {
+  const e = geoCache.get(k);
+  if (e) e.refs = Math.max(0, e.refs - 1);
+  if (geoCache.size <= KEEP) return;
+  for (const [key, v] of geoCache) if (v.refs === 0) { v.g.dispose(); geoCache.delete(key); if (geoCache.size <= KEEP) break; }
 }
 const vestCache = new Map<string, THREE.BufferGeometry>();
 function vestGeo(L: Look) { const k = L.sex + L.build.toFixed(1); let g = vestCache.get(k); if (!g) { g = buildBody(L, 1, true); vestCache.set(k, g); } return g; }
@@ -582,8 +590,8 @@ export class HumanRig {
   setLook(look: Look, detail: 0 | 1) {
     if (look.sex !== this.look.sex) return false;
     this.look = look;
-    const k = bodyKey({ ...look, build: Math.round(look.build * 10) / 10 }, detail);
-    if (k !== this.key) { this.key = k; this.mesh.geometry = bodyGeo(look, detail); }
+    const k = bodyKey(look, detail);
+    if (k !== this.key) { const old = this.key; this.key = k; this.mesh.geometry = bodyGeo(look, detail); releaseBody(old); }
     paintPerson(this.mat, look);
     this.root.scale.setScalar(look.height);
     if (this.vest) { this.vest.geometry = vestGeo(look); }
@@ -660,7 +668,7 @@ export class HumanRig {
     if (this.blinkT < 0) this.blinkT = 2 + Math.random() * 4;
     for (const S of ["eyeL", "eyeR"]) { const e = this.bone(S); e.scale.y = shut ? 0.12 : 1; e.rotation.set(0, this.eyeYaw, 0); }
   }
-  dispose() { this.mixer.stopAllAction(); this.mat.dispose(); }
+  dispose() { this.mixer.stopAllAction(); this.mixer.uncacheRoot(this.mesh); this.mat.dispose(); this.skeleton.dispose(); releaseBody(this.key); this.key = ""; }
 }
 const _q = new THREE.Quaternion(), _e = new THREE.Euler();
 
