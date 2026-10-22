@@ -17,7 +17,8 @@ import { Radio } from "./radio";
 import { GARAGE_SLOTS, tuneAcc, tuneDamage, tuneGrip, tuneSpeed, type OwnedCar, type TunePart } from "./garage";
 import { DEFAULT_STYLE, type ShopAction, type Style } from "./economy";
 import { PLACE_RADIUS, drawPlaceIcon } from "./places";
-import { Bindings } from "./input";
+import { Bindings, type Action } from "./input";
+import { Gamepads } from "./gamepad";
 import { Missions } from "./missions";
 import { Jobs, JOB_DEFS, JOB_KINDS, type JobKind } from "./jobs";
 import { currentSettings } from "./settings";
@@ -249,6 +250,8 @@ export class Game {
     window.addEventListener("mousedown", this.onMouseDown);
     window.addEventListener("mouseup", this.onMouseUp);
     window.addEventListener("wheel", this.onWheel, { passive: true });
+    window.addEventListener("mousemove", this.onMouseMove);
+    window.addEventListener("contextmenu", this.onContext);
     document.addEventListener("visibilitychange", this.onVis);
     this.onContact = (pl) => this.missions.talk(pl.id);
     this.setupMenu();
@@ -265,6 +268,8 @@ export class Game {
     window.removeEventListener("mousedown", this.onMouseDown);
     window.removeEventListener("mouseup", this.onMouseUp);
     window.removeEventListener("wheel", this.onWheel);
+    window.removeEventListener("mousemove", this.onMouseMove);
+    window.removeEventListener("contextmenu", this.onContext);
     document.removeEventListener("visibilitychange", this.onVis);
     this.r3d.dispose();
   }
@@ -334,6 +339,18 @@ export class Game {
   };
   bind = new Bindings();
   rebinding = false;
+  // controllers: a button acts like the first key bound to its action
+  private padKey = (a: Action) => ({ code: this.bind.keys[a][0], target: null, repeat: false, preventDefault() {}, stopPropagation() {} }) as unknown as KeyboardEvent;
+  pad = new Gamepads((a) => this.onKeyDown(this.padKey(a)), (a) => this.onKeyUp(this.padKey(a)));
+  // free camera: right mouse button dragged (or the right stick)
+  private onMouseMove = (e: MouseEvent) => {
+    if (!(e.buttons & 2) || this.state !== "playing") return;
+    const k = 0.005 * currentSettings.camSens;
+    this.r3d.lookYaw += e.movementX * k;
+    this.r3d.lookPitch = clamp(this.r3d.lookPitch + e.movementY * k * (currentSettings.invertY ? -1 : 1), -0.6, 0.9);
+    this.r3d.lookT = 2.5;
+  };
+  private onContext = (e: MouseEvent) => { if (this.state === "playing") e.preventDefault(); };
   private onBlur = () => { this.keys.clear(); this.fireHeld = false; if (this.state === "playing") this.pause(); };
   private onVis = () => { if (document.hidden && this.state === "playing") this.pause(); };
   private onMouseDown = (e: MouseEvent) => {
@@ -351,6 +368,8 @@ export class Game {
     this.overlay.width = Math.floor(this.cw * this.dpr); this.overlay.height = Math.floor(this.ch * this.dpr);
     this.overlay.style.width = this.cw + "px"; this.overlay.style.height = this.ch + "px";
     this.r3d.resize(this.cw, this.ch);
+    const cs = getComputedStyle(document.documentElement), px = (v: string) => parseFloat(cs.getPropertyValue(v)) || 0;
+    this.safe = { t: px("--sat"), r: px("--sar"), b: px("--sab"), l: px("--sal") };
   };
 
   // ---------- state ----------
@@ -378,6 +397,7 @@ export class Game {
     this.player.cruise = 260;
     for (let i = 0; i < 14; i++) this.traffic.spawnCiv(this, true);
     this.ending = null; this.timeScale = 1;
+    const now = new Date(); this.clock = now.getHours() + now.getMinutes() / 60; // the menu shows the city at the real time of day
     this.setState("menu");
   }
 
@@ -456,6 +476,7 @@ export class Game {
     this.radio.station = sv.radio;
     this.district = districtAt(this.fx, this.fy);
     this.progress = JSON.parse(JSON.stringify(sv.progress)) as Progress;
+    this.style = { ...sv.style }; this.clock = sv.clock; this.setWeather(sv.weather); this.weatherT = 99;
     this.r3d.resetCamera(this.onFoot ? pd.a : p.a);
   }
 
@@ -480,6 +501,7 @@ export class Game {
       cash: this.cash, bank: this.bank, carStored: this.playerCarStored, inventory: this.inv.save(), outfit: this.outfit,
       garage: this.garage.map((c) => ({ ...c, tune: { ...c.tune } })), radio: this.radio.station,
       stats: { ...this.stats }, progress: JSON.parse(JSON.stringify(this.progress)) as Progress,
+      style: { ...this.style, hair: (["short", "buzz", "curls", "long", "ponytail", "bald"] as const).find((h) => h === this.style.hair) ?? "short" }, clock: this.clock, weather: this.weather,
     };
     this.autosaveT = AUTOSAVE_EVERY;
     return writeSave(d);
@@ -721,7 +743,7 @@ export class Game {
     const loud = c === "shot" || c === "rocket" || c === "explosion";
     if (this.police.copSees(this.fx, this.fy, loud) || this.police.patrolSees(this.fx, this.fy)) { this.wanted.crime(c, mul); return; }
     if (this.peds.witness(this.fx, this.fy, loud ? 500 : 320)) {
-      if (this.pendingT <= 0) { this.pendingT = 3.5; this.setHint("📞 Ein Zeuge ruft die Polizei!", 2.2); }
+      if (this.pendingT <= 0) { this.pendingT = 3.5; this.setHint("Ein Zeuge ruft die Polizei!", 2.2); }
       this.pendingHeat += CRIMES[c] * mul;
     }
   }
@@ -883,7 +905,7 @@ export class Game {
     } else {
       this.addProj("bomb", "player", "player", -1, 0, ox, oy, oz, Math.cos(a) * speed + bvx * 0.9, Math.sin(a) * speed + bvy * 0.9, 170, a, d.range);
       sfx.throwIt();
-      this.setHint("G / 💥 zum Zünden", 2);
+      this.setHint("G zum Zünden", 2);
     }
   }
 
@@ -1151,7 +1173,7 @@ export class Game {
     if (this.onFoot) { this.setHint("Radio gibt's nur im Auto", 1.2); return; }
     const st = this.radio.cycle();
     sfx.beep();
-    this.setHint(st ? `📻 ${st.name} · ${st.genre}` : "📻 Radio aus", 2);
+    this.setHint(st ? `Radio: ${st.name} · ${st.genre}` : "Radio aus", 2);
   }
 
   // ---------- enter / exit ----------
@@ -1320,7 +1342,7 @@ export class Game {
       this.doorClose.push({ car: p, t: 1.5, near: true });
     }
     sfx.door();
-    this.setHint("E / 🚗 zum Einsteigen", 2);
+    this.setHint("E zum Einsteigen", 2);
   }
 
   // hide and seek "bring me there": fade, the player stands there on foot (a car stays where it was)
@@ -1393,6 +1415,13 @@ export class Game {
     if (dt > 0.05) dt = 0.05;
     if (dt <= 0) return;
     if (this.slowT > 0) { this.slowT -= dt; if (this.slowT <= 0 && !this.ending) this.timeScale = 1; }
+    this.pad.poll(dt, !this.onFoot, this.state !== "playing");
+    const ps = this.pad.state;
+    if (ps.active && (ps.rx || ps.ry) && this.state === "playing") {
+      this.r3d.lookYaw += ps.rx * dt * 2.6 * currentSettings.camSens;
+      this.r3d.lookPitch = clamp(this.r3d.lookPitch + ps.ry * dt * 1.6 * currentSettings.camSens * (currentSettings.invertY ? -1 : 1), -0.6, 0.9);
+      this.r3d.lookT = 2.5;
+    }
     if (this.state === "playing" || this.state === "menu") {
       if (this.hitStop > 0) this.hitStop -= dt;
       else {
@@ -1552,7 +1581,7 @@ export class Game {
   }
 
   hintMsg(h: string) { this.setHint(h, 2.4); }
-  tip(h: string) { this.setHint("💡 " + h, 5); }
+  tip(h: string) { this.setHint("Tipp: " + h, 5); }
   addCash(v: number) { this.cash += v; this.stats.earned += v; }
   saveSoon() { this.autosaveT = Math.min(this.autosaveT, 1); }
   // job key / button
@@ -1564,8 +1593,13 @@ export class Game {
     const kb = up || down || left || right;
     p.handbrake = b.held("handbrake", k) || this.touch.drift;
     const wantNitro = b.held("nitro", k) || this.touch.nitro;
+    const ps = this.pad.state;
     if (kb) { p.throttle = (up ? 1 : 0) - (down ? 1 : 0); p.steer = (right ? 1 : 0) - (left ? 1 : 0); }
-    else if (this.touch.active) {
+    else if (ps.active && (ps.lx || ps.ly || ps.rt > 0.05 || ps.lt > 0.05)) {
+      // controller: triggers for gas and brake (or the stick up/down), the stick steers
+      p.steer = ps.lx;
+      p.throttle = ps.rt > 0.05 || ps.lt > 0.05 ? ps.rt - ps.lt : -ps.ly;
+    } else if (this.touch.active) {
       const { jx, jy } = this.touch;
       const m = Math.min(1, Math.hypot(jx, jy));
       if (m < 0.15) { p.steer = 0; p.throttle = 0; }
@@ -1589,6 +1623,7 @@ export class Game {
     const up = b.held("up", k), down = b.held("down", k), left = b.held("left", k), right = b.held("right", k);
     let jx = 0, jy = 0;
     if (up || down || left || right) { jx = (right ? 1 : 0) - (left ? 1 : 0); jy = (down ? 1 : 0) - (up ? 1 : 0); }
+    else if (this.pad.state.active && (this.pad.state.lx || this.pad.state.ly)) { jx = this.pad.state.lx; jy = this.pad.state.ly; }
     else if (this.touch.active) { jx = this.touch.jx; jy = this.touch.jy; }
     pd.sprint = b.held("nitro", k) || this.touch.nitro;
     const m = Math.min(1, Math.hypot(jx, jy));
@@ -2553,8 +2588,9 @@ export class Game {
   }
 
   private drawMinimap(ctx: CanvasRenderingContext2D) {
-    const size = this.mobile ? 104 : 150, pad = this.mobile ? 10 : 18;
-    const x = this.cw - size - pad, y = this.mobile ? 64 : pad;
+    // size follows the HUD scale; the safe area keeps it away from a notch
+    const hs = currentSettings.hudScale, size = (this.mobile ? 104 : 150) * hs, pad = (this.mobile ? 10 : 18) * hs;
+    const x = this.cw - size - pad - this.safe.r, y = (this.mobile ? 64 * hs : pad) + this.safe.t;
     const cxm = x + size / 2, cym = y + size / 2;
     const range = inCity(this.fx, this.fy) ? 1500 : 2600;
     const MS = MAP_MAX - MAP_MIN;
@@ -2562,6 +2598,8 @@ export class Game {
     const fx = this.fx, fy = this.fy;
     ctx.save();
     ctx.beginPath(); ctx.arc(cxm, cym, size / 2, 0, TAU); ctx.fillStyle = "#06121f"; ctx.fill(); ctx.clip();
+    // turning map: your heading points up (everything below is drawn in the turned frame)
+    if (currentSettings.mapRotate) { ctx.translate(cxm, cym); ctx.rotate(-this.fa - Math.PI / 2); ctx.translate(-cxm, -cym); }
     const srcS = range * 2 * sc, W = this.minimap.width;
     const sx = (fx - range - MAP_MIN) * sc, sy = (fy - range - MAP_MIN) * sc;
     const sx0 = Math.max(0, sx), sy0 = Math.max(0, sy), sx1 = Math.min(W, sx + srcS), sy1 = Math.min(W, sy + srcS);
@@ -2636,7 +2674,7 @@ export class Game {
         let dx = (h.x - fx) * m, dy = (h.y - fy) * m;
         const d = Math.hypot(dx, dy);
         if (d > size / 2 - 6) { dx *= (size / 2 - 6) / d; dy *= (size / 2 - 6) / d; }
-        ctx.fillStyle = "#ffffff"; ctx.fillText("✚", cxm + dx, cym + dy);
+        ctx.fillStyle = "#ffffff"; ctx.fillRect(cxm + dx - 5, cym + dy - 1, 10, 2); ctx.fillRect(cxm + dx - 1, cym + dy - 5, 2, 10); // helicopter: rotor cross
       }
       if (this.waypoint) {
         let dx = (this.waypoint.x - fx) * m, dy = (this.waypoint.y - fy) * m;
@@ -2655,7 +2693,13 @@ export class Game {
     ctx.restore();
     ctx.strokeStyle = "rgba(255,60,172,0.8)"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(cxm, cym, size / 2, 0, TAU); ctx.stroke();
+    // north marker on the rim
+    const na = currentSettings.mapRotate ? -this.fa - Math.PI : -Math.PI / 2;
+    ctx.fillStyle = "#ffffff"; ctx.font = `bold ${Math.round(10 * hs)}px Inter, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("N", cxm + Math.cos(na) * (size / 2 - 7 * hs), cym + Math.sin(na) * (size / 2 - 7 * hs));
   }
+  // safe area of phones with a notch (CSS env values, read on resize)
+  safe = { t: 0, r: 0, b: 0, l: 0 };
 
   private drawBanners(ctx: CanvasRenderingContext2D) {
     const { cw, ch } = this;

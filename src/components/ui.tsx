@@ -1,3 +1,4 @@
+import Icon from "./icons";
 import type { ReactNode } from "react";
 import type { ScoreEntry } from "../game/scores";
 import type { Weapon } from "../game/weapons";
@@ -6,7 +7,9 @@ import { WEAPON_DEFS } from "../game/weapons";
 export const fmt = (n: number) => Math.round(n).toLocaleString("de-DE");
 export const fmtTime = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 export const fmtDate = (t: number) => new Date(t).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-export const wIcon = (w: Weapon) => WEAPON_DEFS[w].icon;
+export const wIcon = (w: Weapon) => WEAPON_DEFS[w].icon; // SVG symbol name
+export function WeaponIcon({ w, size = 22, className = "" }: { w: Weapon; size?: number; className?: string }) { return <Icon name={WEAPON_DEFS[w].icon} size={size} className={className} />; }
+const starPx = (cls: string) => (cls.includes("3xl") ? 28 : cls.includes("2xl") ? 22 : cls.includes("xl") ? 18 : 16);
 export const wName = (w: Weapon) => WEAPON_DEFS[w].name;
 // "12 / 36", "∞" or "" for melee
 export function ammoText(ammo: number, reserve: number) {
@@ -30,7 +33,7 @@ const STAR_SLOTS = [0, 1, 2, 3, 4, 5];
 export function Stars({ n, size = "text-2xl", max = 5 }: { n: number; size?: string; max?: number }) {
   return (
     <div className={`flex gap-0.5 ${size} leading-none`}>
-      {STAR_SLOTS.slice(0, max).map((i) => <span key={i} className={i < n ? "text-yellow-300" : "text-white/15"} style={i < n ? { textShadow: "0 0 10px rgba(255,210,63,0.9)" } : undefined}>★</span>)}
+      {STAR_SLOTS.slice(0, max).map((i) => <span key={i} className={i < n ? "text-yellow-300" : "text-white/15"} style={i < n ? { filter: "drop-shadow(0 0 6px rgba(255,210,63,0.9))" } : undefined}><Icon name="star" fill size={starPx(size)} /></span>)}
     </div>
   );
 }

@@ -8,10 +8,10 @@ interface Tip { id: TipId; when: (g: Game) => boolean; text: (g: Game, touch: bo
 const TIPS: Tip[] = [
   { id: "story", when: (g) => g.time > 3, text: (_g, t) => `Die Story beginnt bei Lou – das pinke L auf der ${t ? "Karte (Pause)" : "Karte (M)"}` },
   { id: "nitro", when: (g) => !g.onFoot && g.time > 12, text: (g, t) => `${t ? "NITRO" : g.bind.label("nitro")}: Nitro – der Tank leert sich und lädt langsam nach` },
-  { id: "enter", when: (g) => g.onFoot && !!g.nearestEnterable(), text: (g, t) => `${t ? "🚗" : g.bind.label("enter")}: Einsteigen – jedes Auto lässt sich klauen` },
+  { id: "enter", when: (g) => g.onFoot && !!g.nearestEnterable(), text: (g, t) => `${t ? "EINSTEIGEN" : g.bind.label("enter")}: Einsteigen – jedes Auto lässt sich klauen` },
   { id: "place", when: (g) => !!g.nearPlace && g.nearPlace.kind !== "contact", text: (g, t) => `${t ? "Grüner Knopf" : g.bind.label("enter")}: ${g.nearPlace?.name ?? "Laden"} betreten` },
   { id: "star", when: (g) => g.wanted.stars > 0, text: () => "Fahndung! Bleib außer Sicht der Cops, bis die Sterne nicht mehr blinken" },
-  { id: "radio", when: (g) => !g.onFoot && g.time > 40, text: (g, t) => `${t ? "📻" : g.bind.label("radio")}: Radiosender wechseln` },
+  { id: "radio", when: (g) => !g.onFoot && g.time > 40, text: (g, t) => `${t ? "Radioknopf" : g.bind.label("radio")}: Radiosender wechseln` },
   { id: "job", when: (g) => g.time > 60, text: () => "Jobs starten an festen Punkten: X Taxistand · P Lieferdepot · S Streife – dort wartet das Fahrzeug" },
   { id: "spawn", when: (g) => g.time > 200, text: () => "Im Pausenmenü unter „Spawnen“ rufst du jedes Fahrzeug, Waffen, Geld und Leute herbei" },
   { id: "weapon", when: (g) => g.inv.owned.length > 2, text: (g, t) => t ? "Waffe gedrückt halten: Waffenrad" : `${g.bind.label("wheel")} halten: Waffenrad · ${g.bind.label("reload")}: Nachladen` },

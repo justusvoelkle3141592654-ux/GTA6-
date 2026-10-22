@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import type { TouchInput, Weapon } from "../game/engine";
-import { wIcon } from "./ui";
+import { WeaponIcon } from "./ui";
+import Icon from "./icons";
 
 interface Props {
   input: TouchInput;
@@ -86,10 +87,10 @@ export default function TouchControls({ input, nitro01, relative = false, onFoot
       <div className="pointer-events-auto absolute bottom-6 right-4 flex items-end gap-3">
         <div className="flex flex-col items-center gap-3">
           {bombsPlaced > 0 && (
-            <button onPointerDown={(e) => { e.stopPropagation(); onDetonate(); }} className="flex h-16 w-16 animate-pulse items-center justify-center rounded-full border-2 border-red-400 bg-red-600/70 text-2xl shadow-[0_0_24px_rgba(255,40,60,0.9)] active:scale-90">💥</button>
+            <button onPointerDown={(e) => { e.stopPropagation(); onDetonate(); }} className="flex h-16 w-16 animate-pulse items-center justify-center rounded-full border-2 border-red-400 bg-red-600/70 text-2xl shadow-[0_0_24px_rgba(255,40,60,0.9)] active:scale-90" aria-label="Zünden"><Icon name="boom" size={26} /></button>
           )}
           <button onPointerDown={weaponDown} onPointerUp={weaponUp} onPointerCancel={weaponUp} className="flex h-16 w-16 flex-col items-center justify-center rounded-2xl border-2 border-white/30 bg-black/50 active:scale-90">
-            <span className="text-2xl leading-none">{wIcon(weapon)}</span>
+            <WeaponIcon w={weapon} size={26} />
             <span className="mt-0.5 font-display text-xs tracking-wider text-white/80">{ammo}</span>
           </button>
           {!onFoot && btn(flying ? "HOCH" : "DRIFT", drift, setDrift, "drift", "#ff3cac", "h-16 w-16")}

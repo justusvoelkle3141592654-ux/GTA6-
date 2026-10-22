@@ -6,6 +6,7 @@ import { storageAvailable } from "../game/save";
 import type { ScoreEntry } from "../game/scores";
 import Help from "./Help";
 import { Choice, ScoreTable, Section, StatBar, fmt, fmtDate, fmtTime } from "./ui";
+import Icon from "./icons";
 
 interface Props {
   name: string; setName: (n: string) => void; scores: ScoreEntry[]; config: GameConfig; update: (p: Partial<GameConfig>) => void;
@@ -74,7 +75,7 @@ export default function StartScreen({ name, setName, scores, config, update, onS
                 </div>
                 <div className="mt-1 flex gap-3 text-[10px] text-white/45"><span><b className="text-cyan-300">■</b> Tempo</span><span><b className="text-yellow-300">■</b> Beschl.</span><span><b className="text-pink-400">■</b> Panzerung</span><span><b className="text-green-400">■</b> Drift</span></div>
               </Section>
-              <Section title="Kamera (im Spiel mit C / 🎥 wechselbar)">
+              <Section title="Kamera (im Spiel mit C oder dem Kameraknopf wechselbar)">
                 <Choice<CameraMode> value={config.camera} onChange={(v) => update({ camera: v })} options={[{ v: "chase", label: "3D Verfolger" }, { v: "fp", label: "Ego-Sicht", sub: "Im Auto sitzen" }, { v: "top", label: "Vogelperspektive" }]} />
               </Section>
               <Section title="Grafik">
@@ -86,7 +87,7 @@ export default function StartScreen({ name, setName, scores, config, update, onS
                     <input value={name} maxLength={12} onChange={(e) => setName(e.target.value.toUpperCase())} onKeyDown={(e) => { if (e.key === "Enter") onStart(); }} className="w-full rounded-xl border border-white/20 bg-black/40 px-4 py-2.5 font-display text-2xl tracking-widest text-white outline-none focus:border-pink-400 focus:shadow-[0_0_18px_rgba(255,60,172,0.5)]" />
                   </Section>
                 </div>
-                <button onClick={toggleMute} className="rounded-xl border border-white/15 bg-black/30 px-4 py-3 text-sm text-white/70 hover:text-white">{muted ? "🔇 Ton aus" : "🔊 Ton an"}</button>
+                <button onClick={toggleMute} className="rounded-xl border border-white/15 bg-black/30 px-4 py-3 text-sm text-white/70 hover:text-white"><span className="inline-flex items-center gap-2"><Icon name={muted ? "mute" : "sound"} size={18} />{muted ? "Ton aus" : "Ton an"}</span></button>
               </div>
               <button onClick={onStart} className="pulseglow w-full rounded-xl bg-gradient-to-r from-pink-500 via-fuchsia-500 to-orange-400 px-8 py-4 font-display text-4xl tracking-[0.2em] text-white transition-transform active:scale-95 lg:hidden">{startLabel}</button>
             </div>

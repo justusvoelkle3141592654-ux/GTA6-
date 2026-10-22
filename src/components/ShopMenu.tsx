@@ -5,6 +5,8 @@ import { FOOD, OUTFITS, ARMOR_PRICE, PAINT_PRICE, MARKET, HAIR_STYLES, BEARDS, T
 import { WEAPON_DEFS } from "../game/weapons";
 import { MAX_TUNE, PAINTS, TUNE_DEFS, TUNE_PARTS } from "../game/garage";
 import { fmt } from "./ui";
+import { WeaponIcon } from "./ui";
+import Icon from "./icons";
 
 const TITLE: Record<Place["kind"], string> = {
   hospital: "Klinik", police: "Wache", gunshop: "Waffenladen", workshop: "Werkstatt & Lackiererei", clothes: "Kleidung",
@@ -34,7 +36,7 @@ export default function ShopMenu({ game, place, onClose }: { game: Game; place: 
   const robBtn = place.robbable && (
     <div className="mt-3 border-t border-white/10 pt-3">
       <button onClick={() => act({ t: "rob" })} disabled={view.robWait > 0} className="w-full rounded-xl border border-red-400/60 bg-red-600/25 py-2 font-display text-lg tracking-widest text-red-100 active:scale-95 disabled:opacity-40">
-        {view.robWait > 0 ? `Kasse leer – in ${view.robWait} s wieder voll` : "🔫 Überfallen (2 Sterne)"}
+        {view.robWait > 0 ? `Kasse leer – in ${view.robWait} s wieder voll` : "Überfallen (2 Sterne)"}
       </button>
     </div>
   );
@@ -59,7 +61,7 @@ export default function ShopMenu({ game, place, onClose }: { game: Game; place: 
               const d = WEAPON_DEFS[w];
               return (
                 <Row key={w}>
-                  <div><span className="mr-2 text-xl">{d.icon}</span><b>{d.name}</b>{owned && d.maxAmmo > 0 && <span className="ml-2 text-white/50">{total}/{d.maxAmmo}</span>}</div>
+                  <div className="flex items-center gap-2"><WeaponIcon w={w} size={20} /><b>{d.name}</b>{owned && d.maxAmmo > 0 && <span className="ml-2 text-white/50">{total}/{d.maxAmmo}</span>}</div>
                   {!owned ? <Buy label="Kaufen" price={d.price} onClick={() => act({ t: "weapon", w })} disabled={view.cash < d.price} />
                     : canAmmo ? <Buy label={`+${d.ammoPack}`} price={d.ammoPrice} onClick={() => act({ t: "ammo", w })} disabled={view.cash < d.ammoPrice || total >= d.maxAmmo} />
                     : <span className="text-xs text-white/40">im Besitz</span>}
@@ -67,7 +69,7 @@ export default function ShopMenu({ game, place, onClose }: { game: Game; place: 
               );
             })}
             <Row>
-              <div><span className="mr-2 text-xl">🦺</span><b>Schutzweste</b> <span className="ml-2 text-white/50">{Math.round(view.armor)}/100</span></div>
+              <div className="flex items-center gap-2"><Icon name="vest" size={20} /><b>Schutzweste</b> <span className="ml-2 text-white/50">{Math.round(view.armor)}/100</span></div>
               <Buy label="Anziehen" price={Math.ceil(((100 - view.armor) / 100) * ARMOR_PRICE)} onClick={() => act({ t: "armor" })} disabled={view.armor >= 100} />
             </Row>
           </>}

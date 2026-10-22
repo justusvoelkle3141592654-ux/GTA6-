@@ -12,11 +12,12 @@ import { CHANNEL_LABEL, applySettings, loadSettings, saveSettings, type Settings
 import BigMap from "./BigMap";
 import Help from "./Help";
 import { Btn, fmt, fmtTime } from "./ui";
+import Icon from "./icons";
 
 export type PauseTab = "menu" | "map" | "jobs" | "hide" | "contacts" | "progress" | "garage" | "spawn" | "settings" | "help";
 const CAM_LABEL: Record<CameraMode, string> = { chase: "3D Verfolger", fp: "Ego (im Auto)", top: "Vogelperspektive" };
 const SAVE_MSG: Record<SaveResult, string> = {
-  saved: "Gespeichert ✓", memory: "Nur vorübergehend gespeichert – der Browser blockiert den lokalen Speicher",
+  saved: "Gespeichert", memory: "Nur vorübergehend gespeichert – der Browser blockiert den lokalen Speicher",
   wanted: "Speichern geht nur ohne Fahndung (keine Sterne)", busy: "Gerade nicht möglich", mode: "",
 };
 
@@ -84,19 +85,19 @@ function Progress({ game }: { game: Game }) {
           {MISSIONS.map((m) => {
             const avail = !done.has(m.id) && m.requires.every((r) => done.has(r));
             const giver = game.places.find((p) => p.id === m.giver);
-            return <li key={m.id} className={done.has(m.id) ? "text-green-300" : avail ? "text-white" : "text-white/35"}>{done.has(m.id) ? "✓" : avail ? "▸" : "·"} {m.title} {avail && <span className="text-xs text-pink-300">({giver?.name})</span>}</li>;
+            return <li key={m.id} className={done.has(m.id) ? "text-green-300" : avail ? "text-white" : "text-white/35"}><span className="mr-1 inline-block w-4 align-middle">{done.has(m.id) ? <Icon name="check" size={14} /> : avail ? "›" : "·"}</span>{m.title} {avail && <span className="text-xs text-pink-300">({giver?.name})</span>}</li>;
           })}
         </ul>
       </div>
       <div className="space-y-3">
         <div className="rounded-2xl border border-white/10 bg-black/50 p-4 text-sm">
           <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Nebenbei</h3>
-          <div>🐚 Muscheln: <b>{pr.shells.length}/{game.jobs.shells.length}</b></div>
-          <div>🛹 Stuntsprünge: <b>{pr.jumps.length}/{game.jobs.jumps.length}</b></div>
+          <div className="flex items-center gap-1.5"><Icon name="shell" size={16} />Muscheln: <b>{pr.shells.length}/{game.jobs.shells.length}</b></div>
+          <div className="flex items-center gap-1.5"><Icon name="skate" size={16} />Stuntsprünge: <b>{pr.jumps.length}/{game.jobs.jumps.length}</b></div>
           {JOB_KINDS.map((k) => <div key={k}>{JOB_DEFS[k].name}: <b>Stufe {jobLevel(pr.jobs[k] ?? 0)}</b> · {pr.jobs[k] ?? 0} erledigt</div>)}
-          {RACES.map((r) => <div key={r.id}>🏁 {r.name}: <b>{pr.records[r.id] ? `${pr.records[r.id].toFixed(1)} s` : "–"}</b> <span className="text-xs text-white/45">(Ziel {r.par} s)</span></div>)}
+          {RACES.map((r) => <div key={r.id} className="flex items-center gap-1.5"><Icon name="flag" size={16} />{r.name}: <b>{pr.records[r.id] ? `${pr.records[r.id].toFixed(1)} s` : "–"}</b> <span className="text-xs text-white/45">(Ziel {r.par} s)</span></div>)}
           <div>Versteckspiel: <b>{Object.entries(pr.records).filter(([k]) => k.startsWith("hide_")).reduce((a, [, v]) => a + v, 0)}</b> gewonnene Runden</div>
-          <div>🏦 Bankkonto: <b>${fmt(game.bank)}</b></div>
+          <div className="flex items-center gap-1.5"><Icon name="bank" size={16} />Bankkonto: <b>${fmt(game.bank)}</b></div>
         </div>
         <div className="rounded-2xl border border-white/10 bg-black/50 p-4 text-sm">
           <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Statistik</h3>
@@ -107,7 +108,7 @@ function Progress({ game }: { game: Game }) {
             <span>Leute umgehauen</span><b>{st.pedsHit}</b>
             <span>Krankenhaus</span><b>{st.deaths}</b>
             <span>Verhaftet</span><b>{st.arrests}</b>
-            <span>Max. Fahndung</span><b>{"★".repeat(Math.max(st.maxStars, game.wanted.maxStars))}</b>
+            <span>Max. Fahndung</span><b>{Math.max(st.maxStars, game.wanted.maxStars)} Sterne</b>
             <span>Halcones</span><b>{rep(pr.rep.halcones)}</b>
             <span>Neon Kings</span><b>{rep(pr.rep.kings)}</b>
           </div>
@@ -152,11 +153,21 @@ function SpawnTab({ game, onResume }: { game: Game; onResume: () => void }) {
       <div className={card + " sm:col-span-2"}>
         <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Fahndung</h3>
         <div className="grid grid-cols-7 gap-2">
-          {[0, 1, 2, 3, 4, 5, 6].map((n) => <button key={n} className={b} onClick={() => run(sp.wanted(n))}>{n === 0 ? "0" : n + "★"}</button>)}
+          {[0, 1, 2, 3, 4, 5, 6].map((n) => <button key={n} className={b} onClick={() => run(sp.wanted(n))}>{n === 0 ? "0 Sterne" : n === 1 ? "1 Stern" : n + " Sterne"}</button>)}
         </div>
       </div>
       {msg && <div className="popin rounded-lg bg-white/10 px-3 py-2 text-center text-sm text-yellow-100 sm:col-span-2">{msg}</div>}
     </div>
+  );
+}
+
+function Slider({ label, value, min, max, step, fmt, onChange }: { label: string; value: number; min: number; max: number; step: number; fmt: (v: number) => string; onChange: (v: number) => void }) {
+  return (
+    <label className="mb-2 flex items-center gap-3">
+      <span className="w-28 text-white/70">{label}</span>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="flex-1 accent-pink-500" />
+      <span className="w-12 text-right text-white/60">{fmt(value)}</span>
+    </label>
   );
 }
 
@@ -194,6 +205,28 @@ function SettingsTab({ game, isTouch }: { game: Game; isTouch: boolean }) {
         <label className="mb-1 flex items-center gap-2"><input type="checkbox" checked={s.tips} onChange={(e) => update({ ...s, tips: e.target.checked })} className="accent-pink-500" /> Tutorial-Hinweise</label>
         <label className="mb-1 flex items-center gap-2"><input type="checkbox" checked={s.shake} onChange={(e) => update({ ...s, shake: e.target.checked })} className="accent-pink-500" /> Kamerawackeln</label>
         <button onClick={() => game.tips.reset()} className="mt-2 rounded-lg border border-white/20 px-3 py-1 text-xs text-white/70">Hinweise erneut zeigen</button>
+      </div>
+      <div className="rounded-2xl border border-white/10 bg-black/50 p-4 text-sm">
+        <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Grafik & Welt</h3>
+        <div className="mb-2 grid grid-cols-4 gap-1.5">
+          {([["low", "Schnell"], ["medium", "Mittel"], ["high", "Hoch"], ["ultra", "Ultra"]] as const).map(([q, l]) => (
+            <button key={q} onClick={() => { game.configure({ ...game.config, quality: q }); redraw((n) => n + 1); }} className={"rounded-lg border px-2 py-1.5 text-xs font-bold " + (game.config.quality === q ? "border-pink-400 bg-pink-500/30" : "border-white/15 bg-white/5")}>{l}</button>
+          ))}
+        </div>
+        <Slider label="Sichtweite" value={s.viewDist} min={0.6} max={1.4} step={0.05} fmt={(v) => `${Math.round(v * 100)} %`} onChange={(v) => update({ ...s, viewDist: v })} />
+        <label className="mb-1 flex items-center gap-2"><input type="checkbox" checked={s.shadows} onChange={(e) => update({ ...s, shadows: e.target.checked })} className="accent-pink-500" /> Schatten</label>
+        <label className="mb-1 flex items-center gap-2"><input type="checkbox" checked={s.weather} onChange={(e) => update({ ...s, weather: e.target.checked })} className="accent-pink-500" /> Wetterwechsel</label>
+        <div className="mb-2 mt-1 flex items-center gap-2"><span className="w-28 text-white/70">Tag-Nacht-Dauer</span>
+          {([12, 24, 48] as const).map((m) => <button key={m} onClick={() => update({ ...s, dayMinutes: m })} className={"rounded-lg border px-2 py-1 text-xs font-bold " + (s.dayMinutes === m ? "border-pink-400 bg-pink-500/30" : "border-white/15 bg-white/5")}>{m} min</button>)}
+        </div>
+        <h3 className="mb-2 mt-3 font-display text-2xl tracking-widest text-pink-300">Anzeige & Steuerung</h3>
+        <Slider label="HUD-Größe" value={s.hudScale} min={0.8} max={1.3} step={0.05} fmt={(v) => `${Math.round(v * 100)} %`} onChange={(v) => update({ ...s, hudScale: v })} />
+        <Slider label="Untertitel" value={s.subtitle} min={0.8} max={1.4} step={0.05} fmt={(v) => `${Math.round(v * 100)} %`} onChange={(v) => update({ ...s, subtitle: v })} />
+        <Slider label="Kamera-Tempo" value={s.camSens} min={0.5} max={2} step={0.1} fmt={(v) => `${v.toFixed(1).replace(".", ",")}x`} onChange={(v) => update({ ...s, camSens: v })} />
+        <label className="mb-1 flex items-center gap-2"><input type="checkbox" checked={s.invertY} onChange={(e) => update({ ...s, invertY: e.target.checked })} className="accent-pink-500" /> Y-Achse umkehren</label>
+        <label className="mb-1 flex items-center gap-2"><input type="checkbox" checked={s.mapRotate} onChange={(e) => update({ ...s, mapRotate: e.target.checked })} className="accent-pink-500" /> Minikarte dreht mit</label>
+        <label className="mb-1 flex items-center gap-2"><input type="checkbox" checked={s.seekerCones} onChange={(e) => update({ ...s, seekerCones: e.target.checked })} className="accent-pink-500" /> Sichtkegel der Sucher (Versteckspiel)</label>
+        <div className="mt-2 text-xs text-white/50">{game.pad.state.active ? `Gamepad verbunden: ${game.pad.state.name.slice(0, 40)}` : "Gamepad: anschließen und eine Taste drücken – die Belegung steht unter Hilfe."}</div>
       </div>
       {!isTouch && (
         <div className="rounded-2xl border border-white/10 bg-black/50 p-4 text-sm">

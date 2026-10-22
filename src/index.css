@@ -5,6 +5,15 @@
   --font-sans: "Inter", system-ui, sans-serif;
 }
 
+:root {
+  /* safe area of phones with a notch (read by the game and the HUD) */
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --hud: 1;
+}
+
 html,
 body,
 #root {

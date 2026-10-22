@@ -6,9 +6,11 @@ import { STATIONS } from "./radio";
 export type SaveDifficulty = "easy" | "normal" | "hard";
 const DIFFICULTIES: SaveDifficulty[] = ["easy", "normal", "hard"];
 
-export const SAVE_KEY = "solarabay.save.v3";
-const LEGACY_KEYS = ["solarabay.save.v2", "solarabay.save.v1"]; // older versions: read and converted
-export const SAVE_VERSION = 3;
+export const SAVE_KEY = "solarabay.save.v4";
+const LEGACY_KEYS = ["solarabay.save.v3", "solarabay.save.v2", "solarabay.save.v1"]; // older versions: read and converted
+export const SAVE_VERSION = 4;
+const HAIRS = ["short", "buzz", "curls", "long", "ponytail", "bald"] as const;
+const WEATHERS = ["sun", "clouds", "rain", "fog"] as const;
 export const AUTOSAVE_EVERY = 60; // seconds
 
 export interface SaveCar { model: CarModel; color: string; hp: number; maxHp: number; mass: number; x: number; y: number; a: number; tune: Tune; }
@@ -40,6 +42,10 @@ export interface SaveData {
   radio: number;
   stats: SaveStats;
   progress: Progress;
+  // since version 4
+  style: { hair: (typeof HAIRS)[number]; beard: number; tattoo: number }; // barber
+  clock: number;       // time of day (hours)
+  weather: (typeof WEATHERS)[number];
 }
 export type SaveResult = "saved" | "memory" | "wanted" | "busy" | "mode";
 
@@ -134,7 +140,7 @@ function inventoryOf(d: Obj): InventorySave {
 }
 
 function validate(d: unknown): SaveData | null {
-  if (!isObj(d) || (d.v !== SAVE_VERSION && d.v !== 2 && d.v !== 1)) return null;
+  if (!isObj(d) || (d.v !== SAVE_VERSION && d.v !== 3 && d.v !== 2 && d.v !== 1)) return null;
   const p = d.ped, st = d.stats, pr = d.progress;
   if (!isObj(p) || !num(p.x) || !num(p.y) || !num(p.a) || !num(p.hp)) return null;
   if (!num(d.savedAt) || !num(d.cash) || typeof d.onFoot !== "boolean" || !oneOf(d.difficulty, DIFFICULTIES)) return null;
@@ -153,13 +159,16 @@ function validate(d: unknown): SaveData | null {
   const garage: OwnedCar[] = [];
   if (Array.isArray(d.garage)) for (const c of d.garage) { const o = carOf(c, false); if (o) garage.push({ model: o.model, color: o.color, hp: o.hp, maxHp: o.maxHp, mass: o.mass, tune: o.tune }); }
   return {
-    v: SAVE_VERSION, legacy: d.v !== SAVE_VERSION || d.map !== 2, savedAt: d.savedAt, difficulty: d.difficulty, onFoot: d.onFoot,
+    // versions 1–3: the map or the streets were different, positions go to the nearest safe street
+    v: SAVE_VERSION, legacy: d.v !== SAVE_VERSION, savedAt: d.savedAt, difficulty: d.difficulty, onFoot: d.onFoot,
     ped: { x: p.x, y: p.y, a: p.a, hp: p.hp, armor: clampN(p.armor, 0, 100, 0) }, car,
     // before version 3 "no car + cars in the garage" meant: parked in the garage
     carStored: !car && (typeof d.carStored === "boolean" ? d.carStored : garage.length > 0),
     cash: Math.max(0, d.cash), bank: clampN(d.bank, 0, 1e9, 0), inventory: inventoryOf(d),
-    outfit: Math.round(clampN(d.outfit, 0, 99, 0)), garage: garage.slice(0, 8),
+    outfit: Math.round(clampN(d.outfit, 0, 99, 0)), garage: garage.slice(0, 12),
     radio: Math.round(clampN(d.radio, -1, STATIONS.length - 1, -1)),
     stats, progress,
+    style: isObj(d.style) ? { hair: oneOf(d.style.hair, HAIRS) ? d.style.hair : "short", beard: Math.round(clampN(d.style.beard, 0, 2, 1)), tattoo: Math.round(clampN(d.style.tattoo, 0, 3, 0)) } : { hair: "short", beard: 1, tattoo: 0 },
+    clock: clampN(d.clock, 0, 23.99, 10), weather: oneOf(d.weather, WEATHERS) ? d.weather : "sun",
   };
 }

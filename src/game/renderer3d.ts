@@ -398,6 +398,18 @@ interface CarObj {
 const DRIVER_SKIN = ["#f1c7a5", "#d9a07c", "#b07850", "#7a4f32", "#5a3a26"];
 const DRIVER_SHIRT = ["#2b3242", "#c0392b", "#eef0f2", "#3d6e9a", "#5a7a3a", "#d4a017", "#6a4a8a", "#1d1d22"];
 const DRIVER_HAIR = ["#1b1410", "#3a2a1c", "#6a4a2a", "#b08850", "#8a8a8a", "#0d0d0d"];
+// main menu camera flight: [camera x, camera y, height, look x, look y] (block coordinates of the landmarks)
+const B = (v: number) => v * BLOCK + ROAD + (BLOCK - ROAD) / 2;
+const MENU_PATH: [number, number, number, number, number][] = [
+  [B(5), B(9), 260, B(7), B(7)],          // town hall and clock tower
+  [B(4), B(5), 420, B(6), B(6)],          // Vale Tower
+  [B(1), B(3), 180, -130, 3.4 * BLOCK],   // ferris wheel on the promenade
+  [B(3), B(8), 220, B(5), B(9)],          // old town
+  [B(8), B(10), 200, B(9), B(9)],         // mall and the roundabout
+  [B(11), B(13), 300, B(12.5), B(14.5)],  // stadium
+  [B(13), B(10), 260, B(15), B(9)],       // harbour
+  [B(9), B(5), 340, B(7), B(7)],
+];
 // how many people near the camera are full animated figures, per quality level
 const CROWD_RIGS: Record<string, number> = { low: 16, medium: 24, high: 32, ultra: 40 };
 let plateNo = 1000 + Math.floor(Math.random() * 7000);
@@ -532,7 +544,7 @@ export class Renderer3D {
     for (const f of this.forest) f.castShadow = hi;
     this.crowd.setShadows(q !== "low");
     this.people?.setMax(CROWD_RIGS[q]);
-    this.camera.far = q === "ultra" ? 12000 : hi ? 9000 : 7000;
+    this.camera.far = (q === "ultra" ? 12000 : hi ? 9000 : 7000) * currentSettings.viewDist;
     this.camera.updateProjectionMatrix();
     if (changed && this.atm) {
       this.atm.setQuality(q); this.atm.setupMaterials(this.scene);
@@ -1689,6 +1701,9 @@ export class Renderer3D {
 
   // a camera placed from outside (camera flight in the main menu, test shots)
   flyCam: { pos: THREE.Vector3; look: THREE.Vector3 } | null = null;
+  // the player turns the camera (right stick / right mouse button); it swings back after lookT seconds
+  lookYaw = 0; lookPitch = 0; lookT = 0;
+  private viewDist = 1;
   private updateCamera(g: Game, dt: number) {
     const p = g.player;
     const fx = g.fx, fy = g.fy, fz = g.fz, sp = g.fspeed;
@@ -1706,10 +1721,14 @@ export class Renderer3D {
       tgt.set(cin.x + cx * dist, cin.z + 42, cin.y + cy * dist);
       lx = cin.x; ly = cin.z + 20; lz = cin.y; fov = 50; kp = 2.5;
     } else if (g.state === "menu") {
-      this.orbit += dt * 0.12;
-      const d = 210;
-      tgt.set(p.x + Math.cos(this.orbit) * d, 80, p.y + Math.sin(this.orbit) * d);
-      lx = p.x; ly = 16; lz = p.y; fov = 55; kp = 3;
+      // main menu: a slow flight over the city past the landmarks (at the current time of day)
+      this.orbit += dt * 0.018;
+      const P = MENU_PATH, n = P.length, u = (this.orbit % 1) * n, i = Math.floor(u), f = u - i;
+      const a = P[i % n], b = P[(i + 1) % n], c0 = P[(i + n - 1) % n], c3 = P[(i + 2) % n];
+      const cr = (q0: number, q1: number, q2: number, q3: number) => 0.5 * (2 * q1 + (-q0 + q2) * f + (2 * q0 - 5 * q1 + 4 * q2 - q3) * f * f + (-q0 + 3 * q1 - 3 * q2 + q3) * f * f * f);
+      const px = cr(c0[0], a[0], b[0], c3[0]), py = cr(c0[1], a[1], b[1], c3[1]), ph = cr(c0[2], a[2], b[2], c3[2]);
+      const lxx = cr(c0[3], a[3], b[3], c3[3]), lyy = cr(c0[4], a[4], b[4], c3[4]);
+      tgt.set(px, ph, py); lx = lxx; ly = 30; lz = lyy; fov = 55; kp = 1.2;
       this.camYaw = p.a;
     } else if (this.camMode === "fp") {
       if (g.onFoot) {
@@ -1731,15 +1750,17 @@ export class Renderer3D {
       fov = 78 + clamp(sp / 700, 0, 1) * 10 + (p.nitro && !g.onFoot ? 6 : 0);
       kp = 40; instant = true;
     } else if (this.camMode === "chase") {
+      this.lookT -= dt;
+      if (this.lookT <= 0) { const k = 1 - Math.exp(-dt * 2); this.lookYaw -= wrapA(this.lookYaw) * k; this.lookPitch -= this.lookPitch * k; }
       if (g.onFoot) {
         const pd = g.ped;
         if (Math.hypot(pd.vx, pd.vy) > 30) this.camYaw += wrapA(Math.atan2(pd.vy, pd.vx) - this.camYaw) * (1 - Math.exp(-dt * 2.5));
-        const cx = Math.cos(this.camYaw), cy = Math.sin(this.camYaw);
+        const cx = Math.cos(this.camYaw + this.lookYaw), cy = Math.sin(this.camYaw + this.lookYaw);
         // inside a shop: closer, the walls on the camera side become see-through (interiors3d)
         const it = g.inside, far = it ? 50 : 95;
         let dist = far;
         if (!it) for (let s = 0.15; s <= 1.0001; s += 0.1) if (this.world.isSolid(fx - cx * 95 * s, fy - cy * 95 * s, 6)) { dist = Math.max(28, 95 * s - 10); break; }
-        tgt.set(fx - cx * dist, fz + (it ? 58 : 48), fy - cy * dist);
+        tgt.set(fx - cx * dist * Math.cos(this.lookPitch * 0.6), fz + (it ? 58 : 48) + this.lookPitch * 60, fy - cy * dist * Math.cos(this.lookPitch * 0.6));
         // the camera stays inside the room (from above, the roof is hidden)
         if (it) { tgt.x = clamp(tgt.x, it.x0 + 6, it.x1 - 6); tgt.z = clamp(tgt.z, it.y0 + 6, it.y1 - 6); }
         lx = fx + cx * 30; ly = fz + 16; lz = fy + cy * 30; fov = 60; kp = 9;
@@ -1750,10 +1771,10 @@ export class Renderer3D {
         const fly = isHeli(p.model);
         const full = 112 + sp * 0.07 + (fly ? 70 : 0);
         let dist = full;
-        const cx = Math.cos(this.camYaw), cy = Math.sin(this.camYaw);
+        const cx = Math.cos(this.camYaw + this.lookYaw), cy = Math.sin(this.camYaw + this.lookYaw);
         for (let s = 0.12; s <= 1.0001; s += 0.08) if (this.world.isSolid(p.x - cx * full * s, p.y - cy * full * s, 6)) { dist = Math.max(36, full * s - 12); break; }
         const behindH = terrainH(p.x - cx * dist, p.y - cy * dist);
-        let h = (46 + sp * 0.025 + (fly ? 45 : 0)) * (0.55 + 0.45 * (dist / full)) + (g.ending ? 40 : 0);
+        let h = (46 + sp * 0.025 + (fly ? 45 : 0)) * (0.55 + 0.45 * (dist / full)) + (g.ending ? 40 : 0) + this.lookPitch * 70;
         // in the tunnel the camera stays under the ceiling, close behind the car
         const tf = tunnelAt(p.x, p.y), tb = tunnelAt(p.x - cx * dist, p.y - cy * dist);
         const inTunnel = (!isNaN(tf) && p.z < tf + TUNNEL.clear) || (!isNaN(tb) && p.z < tb + TUNNEL.clear);
@@ -1807,6 +1828,10 @@ export class Renderer3D {
     this.syncProps(g);
     this.lightsMesh?.update(g.traffic.lights);
     this.atm.update(g.clock, g.weather, g.weatherT, dt, g.fx, g.fy, g.fz, currentSettings.weather);
+    // settings that can change while playing
+    const cs = currentSettings;
+    if (this.renderer.shadowMap.enabled !== cs.shadows) this.renderer.shadowMap.enabled = cs.shadows;
+    if (this.viewDist !== cs.viewDist) { this.viewDist = cs.viewDist; this.setQuality(this.quality); }
     this.water.update(g.t, this.atm);
     this.applyTime(g);
     this.updateCamera(g, dt);

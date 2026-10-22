@@ -6,7 +6,7 @@ export const WEAPONS: Weapon[] = ["fist", "bat", "pistol", "smg", "shotgun", "gr
 
 export type WeaponKind = "melee" | "gun" | "rocket" | "throw" | "sticky";
 export interface WeaponDef {
-  id: Weapon; name: string; icon: string; kind: WeaponKind;
+  id: Weapon; name: string; icon: string; kind: WeaponKind; // icon: name of the SVG symbol (components/icons.tsx)
   dmg: number;       // per hit / pellet
   cd: number;        // seconds between shots
   clip: number;      // shots per magazine (0: no magazine)
@@ -21,14 +21,14 @@ export interface WeaponDef {
 }
 
 export const WEAPON_DEFS: Record<Weapon, WeaponDef> = {
-  fist: { id: "fist", name: "Fäuste", icon: "👊", kind: "melee", dmg: 14, cd: 0.45, clip: 0, reload: 0, speed: 0, pellets: 1, spread: 0, range: 24, price: 0, ammoPack: 0, ammoPrice: 0, maxAmmo: 0, crime: null, noise: 0 },
-  bat: { id: "bat", name: "Baseballschläger", icon: "🏏", kind: "melee", dmg: 45, cd: 0.6, clip: 0, reload: 0, speed: 0, pellets: 1, spread: 0, range: 30, price: 150, ammoPack: 0, ammoPrice: 0, maxAmmo: 0, crime: null, noise: 0 },
-  pistol: { id: "pistol", name: "Pistole", icon: "🔫", kind: "gun", dmg: 34, cd: 0.17, clip: 12, reload: 1.1, speed: 1500, pellets: 1, spread: 0.025, range: 0.6, price: 400, ammoPack: 36, ammoPrice: 60, maxAmmo: 240, crime: "shot", noise: 520 },
-  smg: { id: "smg", name: "Maschinenpistole", icon: "🔥", kind: "gun", dmg: 16, cd: 0.075, clip: 30, reload: 1.6, speed: 1600, pellets: 1, spread: 0.07, range: 0.55, price: 1500, ammoPack: 90, ammoPrice: 150, maxAmmo: 450, crime: "shot", noise: 560 },
-  shotgun: { id: "shotgun", name: "Schrotflinte", icon: "💥", kind: "gun", dmg: 14, cd: 0.8, clip: 6, reload: 2.2, speed: 1300, pellets: 7, spread: 0.16, range: 0.32, price: 1200, ammoPack: 18, ammoPrice: 120, maxAmmo: 90, crime: "shot", noise: 600 },
-  grenade: { id: "grenade", name: "Granate", icon: "🍍", kind: "throw", dmg: 0, cd: 0.7, clip: 0, reload: 0, speed: 330, pellets: 1, spread: 0, range: 0, price: 800, ammoPack: 5, ammoPrice: 300, maxAmmo: 25, crime: null, noise: 0 },
-  rocket: { id: "rocket", name: "Raketenwerfer", icon: "🚀", kind: "rocket", dmg: 0, cd: 0.85, clip: 0, reload: 0, speed: 720, pellets: 1, spread: 0, range: 3, price: 5000, ammoPack: 5, ammoPrice: 600, maxAmmo: 30, crime: "rocket", noise: 600 },
-  bomb: { id: "bomb", name: "Haftbombe", icon: "💣", kind: "sticky", dmg: 0, cd: 0.45, clip: 0, reload: 0, speed: 280, pellets: 1, spread: 0, range: 4, price: 2500, ammoPack: 5, ammoPrice: 400, maxAmmo: 30, crime: null, noise: 0 },
+  fist: { id: "fist", name: "Fäuste", icon: "fist", kind: "melee", dmg: 14, cd: 0.45, clip: 0, reload: 0, speed: 0, pellets: 1, spread: 0, range: 24, price: 0, ammoPack: 0, ammoPrice: 0, maxAmmo: 0, crime: null, noise: 0 },
+  bat: { id: "bat", name: "Baseballschläger", icon: "bat", kind: "melee", dmg: 45, cd: 0.6, clip: 0, reload: 0, speed: 0, pellets: 1, spread: 0, range: 30, price: 150, ammoPack: 0, ammoPrice: 0, maxAmmo: 0, crime: null, noise: 0 },
+  pistol: { id: "pistol", name: "Pistole", icon: "pistol", kind: "gun", dmg: 34, cd: 0.17, clip: 12, reload: 1.1, speed: 1500, pellets: 1, spread: 0.025, range: 0.6, price: 400, ammoPack: 36, ammoPrice: 60, maxAmmo: 240, crime: "shot", noise: 520 },
+  smg: { id: "smg", name: "Maschinenpistole", icon: "smg", kind: "gun", dmg: 16, cd: 0.075, clip: 30, reload: 1.6, speed: 1600, pellets: 1, spread: 0.07, range: 0.55, price: 1500, ammoPack: 90, ammoPrice: 150, maxAmmo: 450, crime: "shot", noise: 560 },
+  shotgun: { id: "shotgun", name: "Schrotflinte", icon: "shotgun", kind: "gun", dmg: 14, cd: 0.8, clip: 6, reload: 2.2, speed: 1300, pellets: 7, spread: 0.16, range: 0.32, price: 1200, ammoPack: 18, ammoPrice: 120, maxAmmo: 90, crime: "shot", noise: 600 },
+  grenade: { id: "grenade", name: "Granate", icon: "grenade", kind: "throw", dmg: 0, cd: 0.7, clip: 0, reload: 0, speed: 330, pellets: 1, spread: 0, range: 0, price: 800, ammoPack: 5, ammoPrice: 300, maxAmmo: 25, crime: null, noise: 0 },
+  rocket: { id: "rocket", name: "Raketenwerfer", icon: "rocket", kind: "rocket", dmg: 0, cd: 0.85, clip: 0, reload: 0, speed: 720, pellets: 1, spread: 0, range: 3, price: 5000, ammoPack: 5, ammoPrice: 600, maxAmmo: 30, crime: "rocket", noise: 600 },
+  bomb: { id: "bomb", name: "Haftbombe", icon: "bomb", kind: "sticky", dmg: 0, cd: 0.45, clip: 0, reload: 0, speed: 280, pellets: 1, spread: 0, range: 4, price: 2500, ammoPack: 5, ammoPrice: 400, maxAmmo: 30, crime: null, noise: 0 },
 };
 
 export interface InventorySave { owned: Weapon[]; ammo: Partial<Record<Weapon, number>>; clip: Partial<Record<Weapon, number>>; current: Weapon; }

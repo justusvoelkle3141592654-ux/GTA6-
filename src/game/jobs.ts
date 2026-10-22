@@ -697,7 +697,7 @@ export class Jobs {
       if (Math.hypot(a.dest.x - p.x, a.dest.y - p.y) < 75 && p.speed < 70) {
         const tip = a.pref === "fast" ? Math.round(a.timer * 3) : Math.max(0, 120 - a.crashes * 50);
         const stars = Math.max(1, 5 - a.crashes - (a.pref === "fast" && a.timer < 10 ? 1 : 0));
-        this.pay(60 + tip, `${"★".repeat(stars)}${"☆".repeat(5 - stars)} · Trinkgeld $${tip}`);
+        this.pay(60 + tip, `Bewertung ${stars}/5 · Trinkgeld $${tip}`);
         this.nextTask();
       }
     }
@@ -894,7 +894,7 @@ export class Jobs {
       this.markers.push({ x: pad.cx, y: pad.cy, color: "#ffd23f", kind: "goal", label: "F" });
       if (Math.hypot(pad.cx - p.x, pad.cy - p.y) < 160 && p.z <= g.groundAt(p.x, p.y) + 2) {
         const stars = Math.max(1, 5 - Math.floor(a.rough));
-        this.pay((420 + Math.round(a.timer)) * (0.6 + stars * 0.1), `Flugstil ${"★".repeat(stars)}${"☆".repeat(5 - stars)}`);
+        this.pay((420 + Math.round(a.timer)) * (0.6 + stars * 0.1), `Flugstil ${stars}/5`);
         this.nextTask();
       }
     }

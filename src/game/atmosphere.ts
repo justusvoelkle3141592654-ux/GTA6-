@@ -1,5 +1,6 @@
 // sky, sun and moon, day/night light, fog, weather (rain), cascaded shadows
 import * as THREE from "three";
+import { currentSettings } from "./settings";
 import { CSM } from "three/examples/jsm/csm/CSM.js";
 import { WATER_Y } from "./world";
 
@@ -195,7 +196,7 @@ export class Atmosphere {
     const fog = this.scene.fog as THREE.Fog;
     fog.color.copy(hor);
     const far = (this.quality === "ultra" ? 6200 : this.quality === "high" ? 5000 : this.quality === "medium" ? 4000 : 3000);
-    fog.far = far * (1 - s.fog * 0.75) * (1 - s.rain * 0.35);
+    fog.far = far * currentSettings.viewDist * (1 - s.fog * 0.75) * (1 - s.rain * 0.35);
     fog.near = 300 * (1 - s.fog * 0.8);
     (this.scene.background as THREE.Color | null)?.copy(hor);
     // rain streaks

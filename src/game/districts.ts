@@ -1,4 +1,4 @@
-import { BLOCK, ROAD, GRID, WORLD, ISLAND, VILLA_HILL, inCity, cityDist } from "./terrain";
+import { BLOCK, ROAD, GRID, WORLD, ISLAND, VILLA_HILL, TUNNEL, lineC, inCity, cityDist } from "./terrain";
 
 export type DistrictId = "downtown" | "oldtown" | "harbor" | "beach" | "industry" | "residential" | "villas" | "island" | "hills";
 
@@ -59,3 +59,15 @@ export function districtLabels(): { id: DistrictId; x: number; y: number }[] {
 
 // story data was written for the old 11 x 11 city: map an old crossing index to the new grid
 export const oldNode = (i: number) => Math.round((i * GRID) / 11);
+
+// names of the main streets (the highway lines through the city) and other big roads, for the big map
+export const STREETS: { name: string; x0: number; y0: number; x1: number; y1: number }[] = [
+  { name: "Strandallee", x0: lineC(3), y0: 0, x1: lineC(3), y1: WORLD },
+  { name: "Sonnenboulevard", x0: lineC(8), y0: 0, x1: lineC(8), y1: WORLD },
+  { name: "Kaistraße", x0: lineC(13), y0: 0, x1: lineC(13), y1: WORLD },
+  { name: "Hügelweg", x0: 0, y0: lineC(3), x1: WORLD, y1: lineC(3) },
+  { name: "Marktstraße", x0: 0, y0: lineC(8), x1: WORLD, y1: lineC(8) },
+  { name: "Palmenring", x0: 0, y0: lineC(13), x1: WORLD, y1: lineC(13) },
+  { name: "Inselbrücke", x0: ISLAND.x, y0: WORLD + 300, x1: ISLAND.x, y1: ISLAND.y - ISLAND.r },
+  { name: "Bergtunnel", x0: TUNNEL.x, y0: TUNNEL.yA, x1: TUNNEL.x, y1: TUNNEL.yB },
+];
