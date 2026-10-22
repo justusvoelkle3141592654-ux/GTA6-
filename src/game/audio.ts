@@ -292,6 +292,10 @@ export class Sfx {
   }
 
   // helicopter rotor: short low noise bursts, called a few times per second while one is near
+  jet(level: number) {
+    if (level <= 0.01) return;
+    this.noise(0.12, 700 + level * 900, 0.22 * level, "bandpass", 300);
+  }
   rotor(level: number) {
     if (level <= 0.01) return;
     this.noise(0.07, 260, 0.35 * level, "lowpass", 90);

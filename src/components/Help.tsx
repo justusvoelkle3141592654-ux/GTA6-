@@ -15,6 +15,8 @@ export default function Help({ isTouch, bind }: { isTouch: boolean; bind: Bindin
           <li><b>Grüner Knopf</b> – Laden / Ort betreten, Missionen und Versteckspiel starten</li>
           <li><b>Hubschrauber:</b> <b className="text-pink-300">HOCH</b> steigen · <b className="text-cyan-300">RUNTER</b> sinken · Stick fliegt und dreht · aussteigen nur gelandet</li>
           <li><b>Speedboot:</b> fährt wie ein Auto, nur auf dem Wasser · zu Fuß im Wasser schwimmst du (ohne Waffen)</li>
+          <li><b>Kampfjet:</b> Stick vor = Gas · ab 120 km/h <b className="text-pink-300">HOCH</b> zum Abheben · <b className="text-orange-300">FEUER</b> Bordkanone · <b>🚀</b> Rakete (zielt selbst) · landen langsam und flach</li>
+          <li><b>Gebäude:</b> am grünen Knopf reingehen · drinnen an den leuchtenden Ringen den grünen Knopf drücken · raus unten durch die Tür oder <b>🚪 RAUS</b></li>
           <li><b>⏸</b> Pause – Karte (Wegpunkt setzen), Fortschritt, Spawnen, Speichern, Einstellungen</li>
         </ul>
       ) : (
@@ -36,7 +38,11 @@ export default function Help({ isTouch, bind }: { isTouch: boolean; bind: Bindin
         Ab 3 Sternen gibt es Straßensperren, ab 4 einen Hubschrauber, bei 5 das SEK, bei 6 das Militär.<br />
         Erledigt → <b className="text-red-300">Krankenhaus</b>, verhaftet → <b className="text-blue-300">Polizeiwache</b>, jeweils mit Geldverlust.<br />
         🏪 Läden: <b>W</b> Waffen · <b>T</b> Lack & Tuning · <b>K</b> Kleidung · <b>I</b> Imbiss · <b>H</b> Safehouse & Garage. Pinke Buchstaben auf der Karte sind Auftraggeber.<br />
-        🚁 <b>Fahrzeuge:</b> Speedboot am Bootssteg (<b>B</b>), Hubschrauber am Heliport (<b>F</b>). Autos, die ins Wasser fahren, versinken.<br />
+        🚁 <b>Fahrzeuge:</b> Speedboot am Bootssteg (<b>B</b>), Hubschrauber am Heliport (<b>F</b>), Kampfjet am Flugplatz (<b>J</b>) östlich vom Hafen. Autos, die ins Wasser fahren, versinken.<br />
+        ✈️ <b>Kampfjet:</b> Gas geben, ab 120 km/h steigen (Handbremse-Taste), sinken mit der Nitro-Taste. Feuer = Bordkanone, Bomben-zünden-Taste = Rakete mit Zielsuche. Landen nur langsam (unter 170 km/h) auf flachem Boden – sonst Absturz.<br />
+        🏠 <b>Gebäude:</b> 20 Räume zum Reingehen – alle Läden, Klinik, Wache, die Auftraggeber, der Wohnturm Bayview (<b>Z</b>) mit sechs eingerichteten Wohnungen und die Strandvilla (<b>Q</b>). Wohnungen kannst du kaufen: im eigenen Bett schläfst du dich gesund und speicherst, der Kühlschrank heilt.<br />
+        🚇 <b>Tunnel:</b> Die Autobahnen nach Westen und Süden führen durch Bergtunnel – dort sieht dich kein Hubschrauber und kein Kampfjet.<br />
+        🚓 <b>Polizei:</b> ab 2 Sternen schnelle Interceptoren, ab 3 schwere Geländewagen, ab 5 Kampfjets (wenn du fliegst schon ab 3). Jets schießen auch auf bewaffnete Gangs.<br />
         💼 <b>Jobs</b> starten an festen Punkten: <b>X</b> Taxistand, <b>P</b> Lieferdepot, <b>S</b> Streife. Dort wartet das Fahrzeug – einsteigen, langsam in den Ring fahren. Beenden mit dem Job-Knopf.<br />
         🚓 <b>Streife:</b> Fluchtwagen stoppen und Flüchtige zu Fuß festnehmen (berühren oder niederschlagen).<br />
         🧰 <b>Spawnen</b> (Pausenmenü): jedes Fahrzeug, alle Waffen, Geld, Leute und die Fahndungsstufe auf Knopfdruck.<br />

@@ -451,7 +451,21 @@ export class PedSystem {
       if (c.state === "walk" || c.state === "wait" || c.state === "idle") this.watchTraffic(c, h);
       this.hitByCars(c, h);
       if (h.onFoot) this.pushFrom(c, h.ped.x, h.ped.y, 10);
+      // a car or the player pushed it into a wall: back out to the closest free spot
+      const out = this.world.pushOut(c.x, c.y, 3);
+      if (out) { c.x = out.x; c.y = out.y; }
     }
+  }
+
+  // an armed gang member near (x, y) (police jets attack them too); -1: none
+  armedGangNear(x: number, y: number, r: number): number {
+    let best = -1, bd = r;
+    for (const c of this.list) {
+      if (!c.active || c.role !== "gang" || !c.armed || c.state === "down") continue;
+      const d = Math.hypot(c.x - x, c.y - y);
+      if (d < bd) { bd = d; best = c.id; }
+    }
+    return best;
   }
 
   // police and gang members: close in on the player and shoot when they have a clear line

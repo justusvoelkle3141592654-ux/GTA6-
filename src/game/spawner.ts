@@ -7,9 +7,9 @@ import type { FactionId } from "./vehicles";
 
 // sandbox menu (pause menu, open world): vehicles, weapons, money, people and the wanted level on demand
 export type SpawnPeople = "civ" | "cop" | FactionId;
-export const SPAWN_MODELS: CarModel[] = ["sport", "super", "muscle", "suv", "sedan", "van", "taxi", "bike", "truck", "bus", "police", "swat", "armor", "boat", "heli"];
+export const SPAWN_MODELS: CarModel[] = ["sport", "super", "muscle", "suv", "sedan", "van", "taxi", "bike", "truck", "bus", "police", "interceptor", "polsuv", "swat", "armor", "boat", "heli", "jet"];
 const COLOR: Partial<Record<CarModel, string>> = {
-  police: "#f4f6fa", swat: "#1b1d22", armor: "#4b5320", taxi: "#ffc21a", bus: "#2bb3ff", boat: "#f4f6fa", heli: "#ff3cac",
+  police: "#f4f6fa", interceptor: "#15161b", polsuv: "#f4f6fa", swat: "#1b1d22", armor: "#4b5320", taxi: "#ffc21a", bus: "#2bb3ff", boat: "#f4f6fa", heli: "#ff3cac", jet: "#8e9aa8",
 };
 const PAINT = ["#ff2d95", "#2bf0ff", "#ffd23f", "#ff8a1f", "#3dff8b", "#9d4dff", "#f4f4f6", "#15161b"];
 const CASH_MAX = 1e8;
@@ -26,6 +26,7 @@ export class Spawner {
     const g = this.g;
     if (!this.allowed) return "Nur in der Open World";
     if (g.missions.active || g.hide.active) return "Nicht während einer Mission oder des Versteckspiels";
+    if (g.inside) return "Erst aus dem Gebäude gehen";
     const fx = g.fx, fy = g.fy;
     let x = fx, y = fy;
     if (model === "boat") {
@@ -39,14 +40,15 @@ export class Spawner {
     } else {
       // beside you, on a free spot
       const a = g.fa;
-      const tries = [[Math.sin(a) * 40, -Math.cos(a) * 40], [-Math.sin(a) * 40, Math.cos(a) * 40], [Math.cos(a) * 60, Math.sin(a) * 60], [-Math.cos(a) * 60, -Math.sin(a) * 60]];
+      const big = model === "jet" ? 2 : 1; // the jet needs room for its wings
+      const tries = [[Math.sin(a) * 40 * big, -Math.cos(a) * 40 * big], [-Math.sin(a) * 40 * big, Math.cos(a) * 40 * big], [Math.cos(a) * 60 * big, Math.sin(a) * 60 * big], [-Math.cos(a) * 60 * big, -Math.sin(a) * 60 * big]];
       let ok = false;
-      for (const [dx, dy] of tries) { if (!g.world.isSolid(fx + dx, fy + dy, 18) && !isWater(fx + dx, fy + dy)) { x = fx + dx; y = fy + dy; ok = true; break; } }
+      for (const [dx, dy] of tries) { if (!g.world.isSolid(fx + dx, fy + dy, 18 * big) && !isWater(fx + dx, fy + dy)) { x = fx + dx; y = fy + dy; ok = true; break; } }
       if (!ok) return "Hier ist kein Platz – geh auf die Straße";
     }
     const c = new Car("civ", model, COLOR[model] ?? PAINT[Math.floor(Math.random() * PAINT.length)]);
     const st = MODEL_STATS[model];
-    c.x = x; c.y = y; c.a = g.fa; c.z = model === "boat" ? WATER_Y : model === "heli" ? g.groundAt(x, y) : terrainH(x, y);
+    c.x = x; c.y = y; c.a = g.fa; c.z = model === "boat" ? WATER_Y : model === "heli" ? g.groundAt(x, y) : model === "jet" ? g.craft.jetGround(x, y) : terrainH(x, y);
     c.hp = c.maxHp = st.hp; c.mass = st.mass;
     c.parked = true; c.handbrake = true; c.owned = true;
     g.cars.push(c);

@@ -1,11 +1,11 @@
 import { sfx } from "./audio";
-import { World, MAP_MIN, MAP_MAX, WATER_Y, inCity, isWater, terrainH, terrainGrad, roofOf, type Building } from "./world";
+import { World, MAP_MIN, MAP_MAX, WATER_Y, inCity, isWater, terrainH, terrainGrad, roofOf, tunnelLid, inRock, type Building } from "./world";
 import { Renderer3D } from "./renderer3d";
 import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, CRIMES, type Crime } from "./wanted";
 import { buildPlaces, onJetty, respawnCost, RESPAWN_RULES, type Place } from "./places";
 import { PedSystem, PED_LIMIT, isPolice, type Civilian, type Team } from "./peds";
-import { Car, CARS, MODEL_STATS, isCraft, type CarDef, type FactionId } from "./vehicles";
+import { Car, CARS, MODEL_STATS, isCraft, isAircraft, type CarDef, type FactionId } from "./vehicles";
 import { Inventory, WEAPONS, type Weapon } from "./weapons";
 import { AUTOSAVE_EVERY, SAVE_VERSION, emptyProgress, emptyStats, writeSave, type Progress, type SaveData, type SaveResult, type SaveStats } from "./save";
 import { Traffic, PARKED_LIMIT } from "./traffic";
@@ -20,12 +20,13 @@ import { Jobs } from "./jobs";
 import { currentSettings } from "./settings";
 import { findRoute, MAX_ROUTE } from "./route";
 import { Tips } from "./tips";
-import { Police } from "./police";
+import { Police, COP_SPEED, type PoliceJet } from "./police";
 import { Shops } from "./shops";
 import { Gangs } from "./gangs";
 import { Craft } from "./craft";
 import { HideSeek, HIDE_RADIUS } from "./hide";
 import { Spawner } from "./spawner";
+import { ROOMS, PLACE_ROOM, ROOM_ORIGIN, roomBlocked, roomEntry, spotAt, type RoomDef, type Spot } from "./interiors";
 
 export type GameState = "menu" | "playing" | "paused" | "over" | "modal";
 // overlays that stop the game while open (shops, dialogs, weapon wheel)
@@ -75,6 +76,8 @@ export interface HudData {
   job: string;            // "starten" / "beenden" when the job key does something
   alt: number;            // flying: metres above the ground (-1 = not in the helicopter)
   swim: boolean;          // swimming in the bay
+  jet: boolean;           // flying the jet: the missile button is shown
+  room: string;           // name of the room you are in ("" = outside)
 }
 export type EndReason = "dead" | "arrested";
 export const END_LABEL: Record<EndReason, string> = { dead: "ERLEDIGT", arrested: "VERHAFTET" };
@@ -97,7 +100,11 @@ export interface Ped { x: number; y: number; z: number; a: number; vx: number; v
 export const MAX_ARMOR = 100;
 export const newPed = (x: number, y: number, a = 0): Ped => ({ x, y, z: terrainH(x, y), a, vx: 0, vy: 0, hp: 100, maxHp: 100, armor: 0, walk: 0, moving: false, sprint: false, shootT: 0, hitFlash: 0, dead: false, swim: false });
 // team: who fired (enemy bullets of the police and the gangs also hit each other); src: ped that fired (-1: none)
-export interface Proj { kind: "bullet" | "rocket" | "bomb" | "grenade"; from: "player" | "enemy"; team: Team; src: number; dmg: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; a: number; life: number; px: number; py: number; }
+// tgt: homing missiles steer towards it (anything with a live position: a car, the player, a ped, a jet)
+export interface HomingTarget { x: number; y: number; z: number; dead?: boolean; active?: boolean; }
+export interface Proj { kind: "bullet" | "rocket" | "bomb" | "grenade"; from: "player" | "enemy"; team: Team; src: number; dmg: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; a: number; life: number; px: number; py: number; tgt: HomingTarget | null; }
+// inside a building: the room, the door you came through (the city sees you standing there) and the spot in front of you
+export interface Inside { room: RoomDef; place: Place; ox: number; oy: number; oz: number; oa: number; spot: Spot | null; mission: boolean; }
 export interface Bomb { car: Car | null; ox: number; oy: number; x: number; y: number; z: number; t: number; }
 export interface Particle { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; size: number; grow: number; color: string; type: number; drag: number; }
 export type PickupType = "cash" | "repair" | "nitro" | "rocket" | "bomb";
@@ -114,6 +121,14 @@ export const wrap = (a: number) => { while (a > Math.PI) a -= TAU; while (a < -M
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 
+const TV_LINES = [
+  "Nachrichten: Verfolgungsjagd im Südtunnel – die Polizei setzt Kampfjets ein",
+  "Werbung: Burger Bucht – jetzt mit doppeltem Patty",
+  "Wetter: Sonne über Solara Bay, 31 Grad",
+  "Sport: Die Bay Sharks gewinnen das Derby",
+  "Kochshow: Tacos wie bei Taco Loco",
+  "Immobilien: Penthouse im Wohnturm Bayview noch frei",
+];
 const DIGITS = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8"];
 const MAX_PARTICLES = 560;
 const PAIR_R = 13; // half width of a car for the side-by-side test
@@ -162,6 +177,10 @@ export class Game {
   modal: ModalInfo | null = null;
   radio = new Radio();
   private placeLatch = ""; // car places open once per visit
+  inside: Inside | null = null;
+  fadeT = 0; // black fade after going through a door / sleeping (seconds left)
+  private fadeMax = 0.5;
+  private fridgeT = 0; private missileCd = 0;
   get weapon(): Weapon { return this.inv.current; }
 
   keys = new Set<string>();
@@ -214,11 +233,11 @@ export class Game {
   get rules(): ModeRules { return MODE_RULES[this.config.mode]; }
   get stars() { return this.wanted.stars; }
   get parkedLimit() { return this.config.quality === "low" ? PARKED_LIMIT.low : PARKED_LIMIT.high; }
-  // currently controlled entity
-  get fx() { return this.onFoot ? this.ped.x : this.player.x; }
-  get fy() { return this.onFoot ? this.ped.y : this.player.y; }
-  get fz() { return this.onFoot ? this.ped.z : this.player.z; }
-  get fa() { return this.onFoot ? this.ped.a : this.player.a; }
+  // currently controlled entity (inside a building: the door you came through, that is where the city sees you)
+  get fx() { return this.inside ? this.inside.ox : this.onFoot ? this.ped.x : this.player.x; }
+  get fy() { return this.inside ? this.inside.oy : this.onFoot ? this.ped.y : this.player.y; }
+  get fz() { return this.inside ? this.inside.oz : this.onFoot ? this.ped.z : this.player.z; }
+  get fa() { return this.inside ? this.inside.oa : this.onFoot ? this.ped.a : this.player.a; }
   get fvx() { return this.onFoot ? this.ped.vx : this.player.vx; }
   get fvy() { return this.onFoot ? this.ped.vy : this.player.vy; }
   get fspeed() { return Math.hypot(this.fvx, this.fvy); }
@@ -309,7 +328,7 @@ export class Game {
     this.cars.push(p);
     this.onFoot = false;
     this.ped = newPed(p.x, p.y);
-    this.modal = null; this.playerCarStored = false;
+    this.modal = null; this.playerCarStored = false; this.inside = null;
   }
 
   setupMenu() {
@@ -412,7 +431,7 @@ export class Game {
     this.stats.maxStars = Math.max(this.stats.maxStars, this.wanted.maxStars);
     const d: SaveData = {
       v: SAVE_VERSION, savedAt: Date.now(), difficulty: this.config.difficulty,
-      onFoot: this.onFoot, ped: { x: pd.x, y: pd.y, a: pd.a, hp: pd.hp, armor: pd.armor },
+      onFoot: this.onFoot, ped: this.inside ? { x: this.inside.ox, y: this.inside.oy, a: this.inside.oa, hp: pd.hp, armor: pd.armor } : { x: pd.x, y: pd.y, a: pd.a, hp: pd.hp, armor: pd.armor },
       car: p.dead || this.playerCarStored ? null : { model: p.model, color: p.color, hp: p.hp, maxHp: p.maxHp, mass: p.mass, x: p.x, y: p.y, a: p.a, tune: { ...p.tune } },
       cash: this.cash, bank: this.bank, carStored: this.playerCarStored, inventory: this.inv.save(), outfit: this.outfit,
       garage: this.garage.map((c) => ({ ...c, tune: { ...c.tune } })), radio: this.radio.station,
@@ -482,8 +501,9 @@ export class Game {
   }
 
   // byPlayer: the player caused it (crime, knocked-down people count against you)
-  private explode(x: number, y: number, big = 1, power = 1, byPlayer = true) {
-    const z = terrainH(x, y);
+  // zAt: explodes up in the air (missiles, jets); otherwise on the ground
+  private explode(x: number, y: number, big = 1, power = 1, byPlayer = true, zAt?: number) {
+    const ground = terrainH(x, y), z = zAt ?? ground;
     sfx.explosion();
     this.shake(0.5 * big);
     this.hitStop = 0.06;
@@ -494,11 +514,11 @@ export class Game {
     this.sparks(x, y, z + 10, 22, 0, 0, 1.3);
     this.emit(x, y, z + 1, 0, 0, 0, 0.45, 20, 520, "#ffc88c", 4, 0);
     const R = 160 * Math.sqrt(big);
-    const knocked = this.peds.blast(x, y, R);
+    const knocked = z - ground < R * 0.7 ? this.peds.blast(x, y, R) : 0;
     if (knocked && byPlayer && this.state === "playing" && !this.ending) { this.crime("pedHit", knocked); this.stats.pedsHit += knocked; }
     this.peds.alarm(x, y, 900, "blast");
     for (const c of this.cars) {
-      const d = Math.hypot(c.x - x, c.y - y);
+      const d = Math.hypot(c.x - x, c.y - y, zAt === undefined ? 0 : c.z + 8 - z);
       if (d < R && d > 1) {
         const f = 1 - d / R;
         c.vx += ((c.x - x) / d) * 380 * f; c.vy += ((c.y - y) / d) * 380 * f; c.av += rnd(-6, 6) * f;
@@ -507,8 +527,8 @@ export class Game {
         else if (!c.dead) this.damageCar(c, 50 * f * power, false, byPlayer);
       }
     }
-    if (this.onFoot) {
-      const d = Math.hypot(this.ped.x - x, this.ped.y - y);
+    if (this.onFoot && !this.inside) {
+      const d = Math.hypot(this.ped.x - x, this.ped.y - y, zAt === undefined ? 0 : this.ped.z + 12 - z);
       if (d < R) { const f = 1 - d / R; this.damagePed(45 * f * big); this.ped.vx += ((this.ped.x - x) / Math.max(d, 1)) * 300 * f; this.ped.vy += ((this.ped.y - y) / Math.max(d, 1)) * 300 * f; }
     }
     if (byPlayer) this.crime("explosion", power);
@@ -532,7 +552,7 @@ export class Game {
   }
 
   private damagePed(amt: number) {
-    if (this.state !== "playing" || this.ending || amt <= 0 || !this.onFoot) return;
+    if (this.state !== "playing" || this.ending || amt <= 0 || !this.onFoot || this.inside) return;
     const pd = this.ped;
     pd.hitFlash = 0.3;
     if (!this.rules.damage) return;
@@ -615,6 +635,44 @@ export class Game {
     sfx.rocket(); this.shake(0.12);
   }
 
+  // police jet guns: a fast bullet from (x, y, z) straight at a point (in 3D)
+  enemyShot3D(x: number, y: number, z: number, tx: number, ty: number, tz: number, sp: number, dmg: number, team: Team) {
+    const dx = tx - x, dy = ty - y, dz = tz - z, d = Math.max(1, Math.hypot(dx, dy, dz));
+    this.addProj("bullet", "enemy", team, -1, dmg, x, y, z, (dx / d) * sp, (dy / d) * sp, (dz / d) * sp, Math.atan2(dy, dx), Math.min(1.6, d / sp + 0.3));
+    this.flashes.push({ x, y, z, life: 0.05, max: 0.05, size: 90 });
+    if (Math.hypot(x - this.fx, y - this.fy) < 1400) sfx.shot();
+  }
+  // police jet missile: homes in on you (or on the gang member it attacks)
+  enemyMissile(x: number, y: number, z: number, foe: Civilian | null) {
+    const tgt: HomingTarget = foe ?? (this.onFoot ? this.ped : this.player);
+    const dx = tgt.x - x, dy = tgt.y - y, dz = tgt.z + 10 - z, d = Math.max(1, Math.hypot(dx, dy, dz)), sp = 620;
+    this.addProj("rocket", "enemy", "cop", -1, 0, x, y, z, (dx / d) * sp, (dy / d) * sp, (dz / d) * sp, Math.atan2(dy, dx), 4, tgt);
+    this.flashes.push({ x, y, z, life: 0.15, max: 0.15, size: 220 });
+    sfx.rocket();
+    if (!foe) this.setHint("⚠ Rakete im Anflug – ausweichen!", 1.6);
+  }
+  smokeAt(x: number, y: number, z: number) {
+    this.emit(x, y, z, rnd(-20, 20), rnd(-20, 20), rnd(10, 40), rnd(1, 1.8), rnd(10, 16), 30, "#2a2430", 0, 1);
+    if (Math.random() < 0.5) this.emit(x, y, z, rnd(-20, 20), rnd(-20, 20), rnd(10, 30), rnd(0.3, 0.5), rnd(8, 12), -6, "#ff7a1a", 2, 2);
+  }
+  // a police jet was shot down: fireball up in the air, points
+  jetDown(x: number, y: number, z: number) {
+    this.explode(x, y, 1.4, 2, false, z);
+    this.takedowns++;
+    this.addScore(2500, x, y, "JET ABGESCHOSSEN", "#ff3cac", 32);
+    this.addCombo();
+  }
+  // a jet hit the ground, a wall or the water too hard
+  jetCrash(c: Car) {
+    c.vx *= 0.2; c.vy *= 0.2; c.vz = 0;
+    if (c === this.player && !this.rules.damage) { this.banner("BRUCHLANDUNG", "Zum Glück ohne Schaden", "#ffd23f", 1.6); sfx.crash(1); this.shake(0.5); return; }
+    if (c === this.player) {
+      if (!this.onFoot) this.banner("ABGESTÜRZT", "Der Jet ist zerschellt", "#ff2a3a", 2.2);
+      this.damagePlayerCar(9999);
+      if (!c.dead) { c.dead = true; c.wrecked = true; c.hp = 0; this.explode(c.x, c.y, 1.6, 2, true, c.z); if (!this.onFoot) this.endRun("dead"); }
+    } else if (!c.dead) { c.dead = true; c.wrecked = true; c.hp = 0; this.explode(c.x, c.y, 1.4, 2, false, c.z); }
+  }
+
   // spike strip: tyres flat until the workshop fixes them
   burstTyres() {
     const p = this.player;
@@ -627,10 +685,10 @@ export class Game {
 
   // projectiles come from a pool as well; removed ones go back to it
   private projFree: Proj[] = [];
-  private addProj(kind: Proj["kind"], from: Proj["from"], team: Team, src: number, dmg: number, x: number, y: number, z: number, vx: number, vy: number, vz: number, a: number, life: number) {
+  private addProj(kind: Proj["kind"], from: Proj["from"], team: Team, src: number, dmg: number, x: number, y: number, z: number, vx: number, vy: number, vz: number, a: number, life: number, tgt: HomingTarget | null = null) {
     const q = this.projFree.pop();
-    if (!q) { this.projs.push({ kind, from, team, src, dmg, x, y, z, vx, vy, vz, a, life, px: x, py: y }); return; }
-    q.kind = kind; q.from = from; q.team = team; q.src = src; q.dmg = dmg; q.x = x; q.y = y; q.z = z; q.vx = vx; q.vy = vy; q.vz = vz; q.a = a; q.life = life; q.px = x; q.py = y;
+    if (!q) { this.projs.push({ kind, from, team, src, dmg, x, y, z, vx, vy, vz, a, life, px: x, py: y, tgt }); return; }
+    q.kind = kind; q.from = from; q.team = team; q.src = src; q.dmg = dmg; q.x = x; q.y = y; q.z = z; q.vx = vx; q.vy = vy; q.vz = vz; q.a = a; q.life = life; q.px = x; q.py = y; q.tgt = tgt;
     this.projs.push(q);
   }
   // swap-remove (the update walks the list backwards, so the moved one was already handled)
@@ -666,6 +724,7 @@ export class Game {
   // open world: no game over, wake up at the hospital or get released at the police station
   private respawn(reason: EndReason) {
     const rule = RESPAWN_RULES[reason];
+    this.inside = null;
     if (reason === "dead") this.stats.deaths++; else this.stats.arrests++;
     this.missions.fail(reason === "dead" ? "Du wurdest erledigt" : "Du wurdest verhaftet");
     this.hide.stop(reason === "dead" ? "Erledigt" : "Verhaftet");
@@ -717,8 +776,10 @@ export class Game {
 
   private fire() {
     if (this.fireCd > 0 || this.ending || this.state !== "playing") return;
+    if (this.inside) { this.fireCd = 0.6; this.setHint("Hier drin wird nicht geschossen", 1.2); return; }
     const onFoot = this.onFoot;
     const p = this.player;
+    if (!onFoot && p.model === "jet") { this.jetGuns(); return; }
     const d = this.inv.def, w = d.id;
     if (onFoot && this.ped.swim) { this.fireCd = 0.5; this.setHint("Beim Schwimmen kannst du nicht kämpfen", 1.2); return; }
     if (!onFoot && p.model === "heli" && d.kind !== "gun") { this.fireCd = 0.5; this.setHint("Aus dem Hubschrauber nur mit Schusswaffen", 1.2); return; }
@@ -743,7 +804,9 @@ export class Game {
     const speed = d.speed;
     const target = this.findTarget(ox, oy, facing, onFoot ? Math.PI : 1.75);
     let a = facing;
-    const heli = target ? null : this.police.heliTarget(ox, oy, facing, onFoot ? Math.PI : 1.75);
+    // rockets lock on to police jets and the helicopter above you
+    const air = !target && d.kind === "rocket" ? this.police.airTarget(ox, oy, facing, 0.9, 1600) : null;
+    const heli = target || air ? null : this.police.heliTarget(ox, oy, facing, onFoot ? Math.PI : 1.75);
     if (target) {
       const dist = Math.hypot(target.x - ox, target.y - oy);
       const lead = dist / speed;
@@ -762,6 +825,12 @@ export class Game {
       this.flashes.push({ x: ox + Math.cos(a) * 18, y: oy + Math.sin(a) * 18, z: oz, life: 0.06, max: 0.06, size: w === "shotgun" ? 140 : 90 });
       this.emit(ox + Math.cos(a) * 20, oy + Math.sin(a) * 20, oz, bvx * 0.5, bvy * 0.5, 0, 0.06, 7, 60, "#ffd36b", 2, 1);
     } else if (d.kind === "rocket") {
+      if (air) {
+        a = Math.atan2(air.y - oy, air.x - ox);
+        const dist = Math.max(1, Math.hypot(air.x - ox, air.y - oy, air.z - oz));
+        this.addProj("rocket", "player", "player", -1, 500, ox, oy, oz, ((air.x - ox) / dist) * speed, ((air.y - oy) / dist) * speed, ((air.z - oz) / dist) * speed, a, 3.5, air as HomingTarget);
+        this.setHint("🎯 Rakete erfasst das Ziel", 1);
+      } else
       this.addProj("rocket", "player", "player", -1, 500, ox, oy, oz, Math.cos(a) * speed + bvx * 0.5, Math.sin(a) * speed + bvy * 0.5, 0, a, d.range);
       sfx.rocket();
       this.shake(0.25);
@@ -774,6 +843,61 @@ export class Game {
       sfx.throwIt();
       this.setHint("G / 💥 zum Zünden", 2);
     }
+  }
+
+  // ---------- fighter jet weapons ----------
+  // what the jet's guns / missiles aim at: police jets and the helicopter first, then cars on the ground
+  private jetTarget(cone: number, range: number): HomingTarget | null {
+    const p = this.player;
+    const air = this.police.airTarget(p.x, p.y, p.a, cone, range);
+    if (air) return air as HomingTarget;
+    let best: Car | null = null, bd = range;
+    for (const c of this.cars) {
+      if (c === p || c.dead || (c.kind === "civ" && c.parked)) continue;
+      if (c.kind !== "cop" && !c.hunt) continue;
+      const d = Math.hypot(c.x - p.x, c.y - p.y);
+      if (d >= bd || Math.abs(wrap(Math.atan2(c.y - p.y, c.x - p.x) - p.a)) > cone) continue;
+      best = c; bd = d;
+    }
+    return best;
+  }
+  // twin guns (no ammo needed): straight ahead along the flight path, or at a target in front of the nose
+  private jetGuns() {
+    const p = this.player;
+    this.fireCd = 0.075;
+    const t = this.jetTarget(0.3, 1500), sp = 2300;
+    const ca = Math.cos(p.a), sa = Math.sin(p.a), side = Math.random() < 0.5 ? -8 : 8;
+    const ox = p.x + ca * 30 - sa * side, oy = p.y + sa * 30 + ca * side, oz = p.z + 6;
+    let vx: number, vy: number, vz: number;
+    if (t) {
+      const dist = Math.hypot(t.x - ox, t.y - oy), lead = dist / sp;
+      const tv = t as { vx?: number; vy?: number };
+      const tx = t.x + (tv.vx ?? 0) * lead, ty = t.y + (tv.vy ?? 0) * lead, tz = t.z + 8, d = Math.max(1, Math.hypot(tx - ox, ty - oy, tz - oz));
+      vx = ((tx - ox) / d) * sp; vy = ((ty - oy) / d) * sp; vz = ((tz - oz) / d) * sp;
+    } else {
+      // no target: along the nose, a little down when you fly low so you can hit the street
+      const pitch = p.air ? Math.max(-0.35, Math.min(0.25, Math.atan2(p.vz, Math.max(200, p.vF)))) - 0.04 : 0;
+      vx = ca * Math.cos(pitch) * sp; vy = sa * Math.cos(pitch) * sp; vz = Math.sin(pitch) * sp;
+    }
+    this.addProj("bullet", "player", "player", -1, 16, ox, oy, oz, vx + p.vx * 0.5, vy + p.vy * 0.5, vz, Math.atan2(vy, vx), 0.85);
+    this.flashes.push({ x: ox + ca * 6, y: oy + sa * 6, z: oz, life: 0.04, max: 0.04, size: 90 });
+    sfx.shot(); this.shake(0.03);
+    if (Math.random() < 0.2) this.crime("shot");
+  }
+  // missile (G / RAKETE): locks on to the closest target in front of you, otherwise flies straight
+  jetMissile() {
+    const p = this.player;
+    if (this.missileCd > 0) return;
+    this.missileCd = 1.1;
+    const t = this.jetTarget(0.7, 2200), sp = 950;
+    const ca = Math.cos(p.a), sa = Math.sin(p.a), side = Math.random() < 0.5 ? -12 : 12;
+    const ox = p.x - sa * side, oy = p.y + ca * side, oz = p.z - 2;
+    const pitch = p.air ? Math.atan2(p.vz, Math.max(200, p.vF)) - 0.08 : 0;
+    this.addProj("rocket", "player", "player", -1, 500, ox, oy, oz, ca * Math.cos(pitch) * sp + p.vx * 0.6, sa * Math.cos(pitch) * sp + p.vy * 0.6, Math.sin(pitch) * sp, p.a, 4, t);
+    this.flashes.push({ x: ox, y: oy, z: oz, life: 0.12, max: 0.12, size: 200 });
+    sfx.rocket(); this.shake(0.12);
+    if (t) this.setHint("🎯 Ziel erfasst", 0.8);
+    this.crime("rocket");
   }
 
   // punch / bat: hits the pedestrian in front, a little damage to cars
@@ -812,6 +936,7 @@ export class Game {
   onCarTaken: ((c: Car) => void) | null = null;
 
   detonate() {
+    if (this.state === "playing" && !this.ending && !this.onFoot && this.player.model === "jet") { this.jetMissile(); return; }
     if (!this.bombs.length) return;
     const list = this.bombs;
     this.bombs = [];
@@ -839,10 +964,21 @@ export class Game {
       q.life -= dt;
       q.px = q.x; q.py = q.y;
       if (q.kind === "bomb" || q.kind === "grenade") { q.vz -= GRAV * dt; q.vx *= Math.exp(-0.5 * dt); q.vy *= Math.exp(-0.5 * dt); }
+      // homing missiles turn towards their target (limited turn rate, so you can dodge them)
+      if (q.tgt) {
+        const t = q.tgt;
+        if (t.dead || t.active === false) q.tgt = null;
+        else {
+          const sp = Math.hypot(q.vx, q.vy, q.vz), dx = t.x - q.x, dy = t.y - q.y, dz = t.z + 8 - q.z, d = Math.max(1, Math.hypot(dx, dy, dz));
+          const k = Math.min(1, dt * (q.from === "enemy" ? 1.6 : 3.2));
+          q.vx += ((dx / d) * sp - q.vx) * k; q.vy += ((dy / d) * sp - q.vy) * k; q.vz += ((dz / d) * sp - q.vz) * k;
+          const n = sp / Math.max(1, Math.hypot(q.vx, q.vy, q.vz)); q.vx *= n; q.vy *= n; q.vz *= n;
+        }
+      }
       q.x += q.vx * dt; q.y += q.vy * dt; q.z += q.vz * dt;
       const gh = terrainH(q.x, q.y);
       if (q.kind === "rocket") {
-        q.z = Math.max(q.z, gh + 8);
+        if (q.vz === 0 && !q.tgt) q.z = Math.max(q.z, gh + 8); // fired along the ground: skims over it
         this.emit(q.x, q.y, q.z, rnd(-10, 10), rnd(-10, 10), rnd(5, 20), rnd(0.5, 0.9), 5, 26, "#9a93a9", 0, 1);
         this.emit(q.x, q.y, q.z, -q.vx * 0.2, -q.vy * 0.2, 0, 0.12, 6, -10, "#ff9a2a", 2, 1);
       }
@@ -856,9 +992,13 @@ export class Game {
       }
       // shells of the armoured car: explode at the first thing they touch
       if (q.from === "enemy" && q.kind === "rocket") {
-        let boom = q.life <= 0 || this.world.isSolid(q.x, q.y, 2) || q.z < gh + 2 || Math.hypot(q.x - this.fx, q.y - this.fy) < (this.onFoot ? 14 : 28);
-        if (!boom) for (const c of this.cars) if (c.kind !== "cop" && !c.dead && Math.hypot(c.x - q.x, c.y - q.y) < 26) { boom = true; break; }
-        if (boom) { this.explode(q.x, q.y, 1.2, 3, false); this.dropProj(i); }
+        const wall = (this.world.isSolid(q.x, q.y, 2) && q.z < this.world.roofAt(q.x, q.y)) || inRock(q.x, q.y, q.z);
+        const nearMe = !this.inside && Math.hypot(q.x - this.fx, q.y - this.fy, q.z - this.fz - 10) < (this.onFoot ? 16 : 30);
+        if (nearMe && !this.onFoot) this.damagePlayerCar(isAircraft(this.player.model) ? 70 : 25); // a direct hit
+        let boom = q.life <= 0 || wall || q.z < gh + 2 || nearMe;
+        if (!boom) for (const c of this.cars) if (c.kind !== "cop" && !c.dead && Math.hypot(c.x - q.x, c.y - q.y, c.z + 8 - q.z) < 28) { boom = true; break; }
+        if (!boom && q.tgt && "role" in q.tgt && Math.hypot(q.tgt.x - q.x, q.tgt.y - q.y, q.tgt.z + 10 - q.z) < 18) boom = true;
+        if (boom) { this.explode(q.x, q.y, 1.2, 3, false, Math.max(q.z, gh)); this.dropProj(i); }
         continue;
       }
       // enemy bullets hit the player (on foot or in the car) and pedestrians of the other side (police vs gangs)
@@ -868,13 +1008,26 @@ export class Game {
           const cv = this.peds.hitTest(q.x, q.y, q.z, 7);
           if (cv && cv.id !== q.src && PedSystem.hostile(q.team, cv)) { this.peds.damage(cv, q.dmg, q.px, q.py, 90, q.src); hit = true; }
         }
-        if (hit) { /* already hit somebody */ }
+        if (hit || this.inside) { /* already hit somebody / you are indoors */ }
         else if (this.onFoot) { const pd = this.ped; if (Math.hypot(q.x - pd.x, q.y - pd.y) < 9 && Math.abs(q.z - pd.z - 12) < 16) { this.damagePed(q.dmg); hit = true; } }
         else { const p = this.player; if (Math.hypot(q.x - p.x, q.y - p.y) < 24 && Math.abs(q.z - p.z) < 30) { this.damagePlayerCar(q.dmg * 0.35); this.sparks(q.x, q.y, q.z, 4, -q.vx, -q.vy, 0.5); hit = true; } }
-        if (hit || q.life <= 0 || this.world.isSolid(q.x, q.y, 2) || q.z < gh) this.dropProj(i);
+        // strafing from the air: the bullets kick up dust where they hit the ground
+        if (!hit && q.z < gh && q.vz < 0 && Math.hypot(q.x - this.fx, q.y - this.fy) < 900) { this.emit(q.x, q.y, gh + 1, rnd(-20, 20), rnd(-20, 20), rnd(30, 70), rnd(0.3, 0.6), rnd(5, 8), 20, "#8a7a62", 0, 2); this.sparks(q.x, q.y, gh + 1, 2, 0, 0, 0.4); }
+        if (hit || q.life <= 0 || (this.world.isSolid(q.x, q.y, 2) && q.z < this.world.roofAt(q.x, q.y)) || q.z < gh || inRock(q.x, q.y, q.z)) this.dropProj(i);
         continue;
       }
       let remove = false;
+      // police jets: real 3D hit test (only aimed shots and missiles get up there)
+      if ((q.kind === "bullet" || q.kind === "rocket") && q.z > gh + 40) {
+        const j = this.police.hitJet(q.x, q.y, q.z, q.kind === "rocket" ? 400 : q.dmg, q.kind === "rocket" ? 56 : 42);
+        if (j) {
+          this.sparks(q.x, q.y, q.z, 6, -q.vx, -q.vy, 0.6);
+          if (q.kind === "rocket") { this.flashes.push({ x: j.x, y: j.y, z: j.z, life: 0.5, max: 0.5, size: 420 }); sfx.explosion(); this.shake(0.15); }
+          else this.text(j.x, j.y, "HIT", "#ffd36b", 16);
+          this.dropProj(i);
+          continue;
+        }
+      }
       // police helicopter (shots aimed at it count by ground position)
       if ((q.kind === "bullet" || q.kind === "rocket") && this.police.hitHeli(q.x, q.y, q.kind === "rocket" ? 400 : q.dmg)) {
         const h = this.police.heli;
@@ -923,13 +1076,13 @@ export class Game {
         }
       }
       if (!remove) {
-        if (this.world.isSolid(q.x, q.y, 2) || q.z < gh) {
-          if (q.kind === "rocket") this.explode(q.x, q.y, 1.1, 4);
+        if ((this.world.isSolid(q.x, q.y, 2) && q.z < this.world.roofAt(q.x, q.y)) || q.z < gh) {
+          if (q.kind === "rocket") this.explode(q.x, q.y, 1.1, 4, true, Math.max(gh, Math.min(q.z, this.world.roofAt(q.x, q.y))));
           else if (q.kind === "bomb") { this.bombs.push({ car: null, ox: 0, oy: 0, x: q.px, y: q.py, z: gh + 3, t: 0 }); sfx.beep(); }
           else this.sparks(q.px, q.py, q.z, 5, -q.vx, -q.vy, 0.5);
           remove = true;
         } else if (q.life <= 0) {
-          if (q.kind === "rocket") this.explode(q.x, q.y, 1.1, 4);
+          if (q.kind === "rocket") this.explode(q.x, q.y, 1.1, 4, true, q.z > gh + 30 ? q.z : undefined);
           else if (q.kind === "bomb") this.bombs.push({ car: null, ox: 0, oy: 0, x: q.x, y: q.y, z: gh + 3, t: 0 });
           remove = true;
         }
@@ -1001,10 +1154,12 @@ export class Game {
     if (!latch) this.placeLatch = "";
   }
 
-  // E on foot: enter the shop / talk to the contact in front of you
+  // E on foot: go into the building / talk to the contact in front of you
   interact(): boolean {
+    if (this.inside) { if (this.inside.spot) this.useSpot(this.inside.spot); return true; }
     const pl = this.nearPlace;
     if (!pl || !this.onFoot) return false;
+    if (PLACE_ROOM[pl.id]) { this.enterRoom(PLACE_ROOM[pl.id], pl); return true; }
     if (pl.kind === "contact") return this.onContact?.(pl) ?? false;
     if (pl.kind === "park") { this.hide.start(pl); return true; }
     if (pl.kind === "job") { this.jobs.startAt(pl); return true; }
@@ -1012,6 +1167,140 @@ export class Game {
     return true;
   }
   onContact: ((pl: Place) => boolean) | null = null; // missions decide what a contact says
+
+  // ---------- interiors ----------
+  ownsRoom(room: RoomDef) { return !!room.home || this.progress.homes.includes(room.id); }
+
+  // go through the door of a place (or from the tower hallway into an apartment)
+  enterRoom(id: string, place: Place) {
+    const room = ROOMS[id];
+    if (!room || this.state !== "playing" || this.ending) return;
+    if (this.wanted.stars > 0) { this.setHint("Mit der Polizei im Nacken kommst du nicht rein – häng sie erst ab", 2.4); return; }
+    if (this.hide.active) { this.setHint("Nicht während des Versteckspiels", 1.6); return; }
+    const pd = this.ped;
+    if (!this.inside) this.inside = { room, place, ox: pd.x, oy: pd.y, oz: pd.z, oa: place.a, spot: null, mission: !!this.missions.active };
+    else this.inside.room = room;
+    const e = roomEntry(room);
+    pd.x = ROOM_ORIGIN.x + e.x; pd.y = ROOM_ORIGIN.y + e.y; pd.z = 0; pd.a = e.a; pd.vx = 0; pd.vy = 0; pd.swim = false;
+    this.fade(0.45);
+    sfx.door();
+    this.setHint(room.price && !this.ownsRoom(room) ? `${room.name} · zu verkaufen: $${room.price.toLocaleString("de-DE")}` : room.name, 2);
+  }
+
+  // leave the room: apartments lead back into the tower hallway, everything else onto the street
+  leaveRoom() {
+    const ins = this.inside;
+    if (!ins) return;
+    const pd = this.ped;
+    const parent = ins.room.parent ? ROOMS[ins.room.parent] : null;
+    if (parent) {
+      const door = parent.spots.find((sp) => sp.to === ins.room.id);
+      ins.room = parent;
+      const x = door ? door.x : parent.door, y = door ? door.y + 10 : parent.h - 16;
+      pd.x = ROOM_ORIGIN.x + x; pd.y = ROOM_ORIGIN.y + y; pd.a = Math.atan2(parent.h / 2 - y, parent.w / 2 - x); pd.vx = 0; pd.vy = 0;
+      this.fade(0.4); sfx.door();
+      return;
+    }
+    this.inside = null;
+    const a = ins.place.a; // facing the street
+    pd.x = ins.ox + Math.cos(a) * 14; pd.y = ins.oy + Math.sin(a) * 14; pd.z = ins.oz; pd.a = a; pd.vx = 0; pd.vy = 0;
+    if (this.pedBlocked(pd.x, pd.y)) { pd.x = ins.ox; pd.y = ins.oy; }
+    this.r3d.resetCamera(a);
+    this.fade(0.45); sfx.door();
+  }
+
+  private updateInterior(dt: number) {
+    const ins = this.inside!, room = ins.room, pd = this.ped;
+    // police after you / a mission just started: out on the street
+    if (this.wanted.stars > 0) { this.leaveAll(); this.banner("POLIZEI!", "Raus hier – sie kommen rein", "#4da3ff", 1.8); return; }
+    if (this.missions.active && !ins.mission) { this.leaveAll(); return; }
+    ins.mission = !!this.missions.active;
+    // walk with the room's walls and furniture (each axis on its own, so you slide along them)
+    const lx = pd.x - ROOM_ORIGIN.x, ly = pd.y - ROOM_ORIGIN.y;
+    const sp = Math.hypot(pd.vx, pd.vy) * dt, n = Math.max(1, Math.ceil(sp / 3));
+    let x = lx, y = ly;
+    for (let i = 0; i < n; i++) {
+      const nx = x + (pd.vx * dt) / n, ny = y + (pd.vy * dt) / n;
+      if (!roomBlocked(room, nx, y)) x = nx; else pd.vx = 0;
+      if (!roomBlocked(room, x, ny)) y = ny; else pd.vy = 0;
+    }
+    if (roomBlocked(room, x, y)) { const e = roomEntry(room); x = e.x; y = e.y; } // never stuck in furniture
+    pd.x = ROOM_ORIGIN.x + x; pd.y = ROOM_ORIGIN.y + y; pd.z = 0;
+    pd.walk += dt * Math.hypot(pd.vx, pd.vy) * 0.05;
+    pd.shootT = Math.max(0, pd.shootT - dt); pd.hitFlash = Math.max(0, pd.hitFlash - dt);
+    if (y > room.h + 6) { this.leaveRoom(); return; } // out through the door
+    ins.spot = spotAt(room, x, y);
+    this.fridgeT = Math.max(0, this.fridgeT - dt);
+  }
+  private leaveAll() { while (this.inside) this.leaveRoom(); }
+
+  spotLabel(sp: Spot | null): string {
+    const ins = this.inside;
+    if (!sp || !ins) return "";
+    if (sp.k === "talk") return this.contactLabel(ins.place);
+    if (sp.k === "buy") return this.ownsRoom(ins.room) ? "Gehört dir" : `${sp.label} · $${(ins.room.price ?? 0).toLocaleString("de-DE")}`;
+    if (sp.k === "door" && sp.to) { const r = ROOMS[sp.to]; return `${sp.label}${r && this.ownsRoom(r) ? " (deine)" : r?.price ? ` · $${r.price.toLocaleString("de-DE")}` : ""}`; }
+    return sp.label;
+  }
+
+  // E / button at a spot in a room
+  useSpot(sp: Spot) {
+    const ins = this.inside;
+    if (!ins || this.state !== "playing") return;
+    const room = ins.room, own = this.ownsRoom(room), pd = this.ped;
+    const notYours = () => this.setHint(room.price ? `Gehört dir nicht – kauf die Wohnung ($${room.price.toLocaleString("de-DE")})` : "Gehört dir nicht", 2);
+    switch (sp.k) {
+      case "exit": this.leaveRoom(); break;
+      case "shop": this.openModal({ kind: "shop", place: ins.place }); break;
+      case "pc": { const safe = this.places.find((p) => p.kind === "safehouse"); if (safe) this.openModal({ kind: "shop", place: safe }); break; }
+      case "talk": this.onContact?.(ins.place); break;
+      case "door": if (sp.to) this.enterRoom(sp.to, ins.place); break;
+      case "buy": {
+        const price = room.price ?? 0;
+        if (own) { this.setHint("Die Wohnung gehört schon dir", 1.6); break; }
+        if (this.cash < price) { sfx.empty(); this.setHint(`Zu wenig Geld – du brauchst $${price.toLocaleString("de-DE")}`, 2); break; }
+        this.cash -= price; this.progress.homes.push(room.id); sfx.cashier(); sfx.success();
+        this.banner("GEKAUFT", `${room.name} gehört jetzt dir – im Bett speicherst du`, "#3dff8b", 2.6);
+        this.saveSoon();
+        break;
+      }
+      case "bed": {
+        if (!own) { notYours(); break; }
+        pd.hp = pd.maxHp; this.fade(1.4);
+        const res = this.saveGame();
+        this.banner("AUSGESCHLAFEN", res === "saved" || res === "memory" ? "Gesundheit voll · Spiel gespeichert" : "Gesundheit voll", "#2bf0ff", 2.2);
+        break;
+      }
+      case "fridge": {
+        if (!own) { notYours(); break; }
+        if (this.fridgeT > 0) { this.setHint("Du bist satt – später wieder", 1.4); break; }
+        this.fridgeT = 30; pd.hp = Math.min(pd.maxHp, pd.hp + 35); sfx.powerup(); this.setHint("Snack aus dem Kühlschrank (+35)", 1.8);
+        break;
+      }
+      case "shower": {
+        if (!own) { notYours(); break; }
+        pd.hp = Math.min(pd.maxHp, pd.hp + 20); this.fade(0.6); this.setHint("Herrlich erfrischt (+20)", 1.8);
+        break;
+      }
+      case "tv": { const l = TV_LINES[Math.floor(Math.random() * TV_LINES.length)]; sfx.beep(); this.setHint("📺 " + l, 3); break; }
+      case "music": sfx.success(); this.setHint("🎵 " + (room.id === "aptD" || room.id === "villa" ? "Du spielst ein paar Takte am Klavier" : "Die Jukebox spielt deinen Lieblingssong"), 2.4); break;
+      case "game": {
+        if (room.id === "aptC") { sfx.punch(); this.setHint(Math.random() < 0.5 ? "🎱 Alle Kugeln versenkt!" : "🎱 Knapp daneben", 1.8); break; }
+        if (this.cash < 5) { sfx.empty(); this.setHint("Kein Kleingeld ($5)", 1.4); break; }
+        this.cash -= 5; sfx.beep();
+        if (Math.random() < 0.3) { this.addCash(20); sfx.pickup(1); this.setHint("🕹️ Highscore! Du gewinnst $20", 2); } else this.setHint("🕹️ Game over – nochmal?", 1.6);
+        break;
+      }
+      case "heal": {
+        if (pd.hp >= pd.maxHp) { this.setHint("Dir fehlt nichts", 1.4); break; }
+        if (this.cash < 150) { sfx.empty(); this.setHint("Zu wenig Geld ($150)", 1.6); break; }
+        this.cash -= 150; pd.hp = pd.maxHp; sfx.powerup(); this.fade(0.8); this.setHint("Verarztet – Gesundheit voll", 2);
+        break;
+      }
+      case "info": this.setHint("Streife fahren: zum Revier S, dort wartet ein Streifenwagen. Ab 2 Sternen kommen Interceptoren, ab 5 Kampfjets.", 5); break;
+    }
+  }
+  fade(t: number) { this.fadeT = t; this.fadeMax = t; }
 
   // the player's own car was put into the garage (it is not in the car list until you drive another one)
   playerCarStored = false;
@@ -1030,9 +1319,10 @@ export class Game {
   // ---------- enter / exit ----------
   toggleCar() {
     if (this.state !== "playing" || this.ending) return;
+    if (this.inside) { this.leaveRoom(); return; } // HUD button: out of the room
     if (!this.onFoot) {
       const p = this.player;
-      if (p.model === "heli" && p.z > this.groundAt(p.x, p.y) + 6) { this.setHint("Erst landen – dann aussteigen", 1.4); return; }
+      if (isAircraft(p.model) && (p.air || p.z > this.groundAt(p.x, p.y) + 6)) { this.setHint("Erst landen – dann aussteigen", 1.4); return; }
       if (p.speed > 220) { this.setHint("Zu schnell zum Aussteigen – erst bremsen!", 1.2); return; }
       this.exitCar();
     } else {
@@ -1055,10 +1345,14 @@ export class Game {
   private exitCar() {
     const p = this.player;
     const ca = Math.cos(p.a), sa = Math.sin(p.a);
-    let x = p.x + sa * 30, y = p.y - ca * 30;
-    if (this.world.isSolid(x, y, 8)) { x = p.x - sa * 30; y = p.y + ca * 30; }
+    // left door, right door, behind, in front: the first free spot (never into a wall)
     const pd = this.ped;
-    pd.x = x; pd.y = y; pd.z = Math.max(terrainH(x, y), p.model === "heli" ? p.z : -Infinity); pd.a = p.a; pd.vx = p.vx * 0.3; pd.vy = p.vy * 0.3; pd.dead = false;
+    const tries: [number, number][] = [[sa * 30, -ca * 30], [-sa * 30, ca * 30], [-ca * 40, -sa * 40], [ca * 40, sa * 40], [sa * 22, -ca * 22], [-sa * 22, ca * 22]];
+    let x = p.x + tries[0][0], y = p.y + tries[0][1], found = false;
+    pd.z = p.z;
+    for (const [dx, dy] of tries) { if (!this.pedBlocked(p.x + dx, p.y + dy)) { x = p.x + dx; y = p.y + dy; found = true; break; } }
+    if (!found) { const o = this.world.pushOut(x, y, 8); if (o) { x = o.x; y = o.y; } }
+    pd.x = x; pd.y = y; pd.z = Math.max(terrainH(x, y), p.z); pd.a = p.a; pd.vx = p.vx * 0.3; pd.vy = p.vy * 0.3; pd.dead = false;
     this.onFoot = true;
     p.throttle = 0; p.steer = 0; p.handbrake = true; p.nitro = false;
     sfx.door();
@@ -1067,7 +1361,8 @@ export class Game {
 
   // sandbox menu: get into a vehicle that was just put next to you (from the car you sit in, or on foot)
   takeVehicle(c: Car) {
-    if (!this.onFoot) { const p = this.player; p.vx = 0; p.vy = 0; if (p.model !== "heli" || p.z <= this.groundAt(p.x, p.y) + 6) this.exitCar(); else return; }
+    if (this.inside) return;
+    if (!this.onFoot) { const p = this.player; p.vx = 0; p.vy = 0; if (!isAircraft(p.model) || (!p.air && p.z <= this.groundAt(p.x, p.y) + 6)) this.exitCar(); else return; }
     this.ped.x = c.x; this.ped.y = c.y;
     this.enterCar(c);
   }
@@ -1116,6 +1411,7 @@ export class Game {
     const b = this.bind;
     if (p.model === "heli") this.setHint(this.mobile ? "Hubschrauber: HOCH steigen · RUNTER sinken" : `Hubschrauber: ${b.label("handbrake")} steigen · ${b.label("nitro")} sinken · ${b.label("up")}/${b.label("down")} vor/zurück · ${b.label("left")}/${b.label("right")} drehen`, 5);
     else if (p.model === "boat") this.setHint("Speedboot: fährt nur auf dem Wasser – Nitro geht auch hier", 3);
+    else if (p.model === "jet") this.setHint(this.mobile ? "Kampfjet: Gas geben, ab 120 km/h HOCH zum Abheben · FEUER Kanone · RAKETE" : `Kampfjet: ${b.label("up")} Gas · ab 120 km/h ${b.label("handbrake")} abheben/steigen · ${b.label("nitro")} sinken · Feuer = Kanone · ${b.label("detonate")} = Rakete`, 6);
   }
 
   // ---------- loop ----------
@@ -1130,7 +1426,10 @@ export class Game {
       if (this.hitStop > 0) this.hitStop -= dt;
       else {
         const sdt = dt * this.timeScale;
-        const steps = sdt > 1 / 70 ? 2 : 1;
+        // fast vehicles move at most ~9 units per physics step, so nothing slips into a wall
+        let vmax = 0;
+        for (const c of this.cars) { const v = c.speed; if (v > vmax) vmax = v; }
+        const steps = Math.min(5, Math.max(sdt > 1 / 70 ? 2 : 1, Math.ceil((vmax * sdt) / 9)));
         for (let i = 0; i < steps; i++) this.update(sdt / steps);
       }
       this.updateFx(dt);
@@ -1161,15 +1460,17 @@ export class Game {
       kmh: Math.round(this.fspeed * 0.36), time: this.time, drift: Math.round(this.driftPts), bust01: this.bust, takedowns: this.takedowns,
       weapon: inv.current, ammo: inv.loaded(), reserve: inv.reserve(), reloading: inv.reloadT > 0, owned: inv.owned,
       bombsPlaced: this.bombs.length, onFoot: this.onFoot,
-      canEnter: this.onFoot && !!this.nearestEnterable(), hint: this.hintT > 0 ? this.hint : "", air: !this.onFoot && p.air && p.airT > 0.25 && !isCraft(p.model),
+      canEnter: this.onFoot && !this.inside && !!this.nearestEnterable(), hint: this.hintT > 0 ? this.hint : "", air: !this.onFoot && p.air && p.airT > 0.25 && !isCraft(p.model),
       armor01: this.ped.armor / MAX_ARMOR,
       district: this.rules.city ? dist.name : "", districtColor: this.districtT > 0 ? dist.color : "",
-      place: this.nearPlace && this.nearPlace.kind !== "contact" ? this.nearPlace.name : this.nearPlace ? this.contactLabel(this.nearPlace) : "",
+      place: this.inside ? this.spotLabel(this.inside.spot) : this.nearPlace && this.nearPlace.kind !== "contact" ? this.nearPlace.name : this.nearPlace ? this.contactLabel(this.nearPlace) : "",
       radio: !this.onFoot && st ? st.name : "",
       objective: this.objective, objTimer: this.objTimer,
       job: this.jobs.active ? "beenden" : "",
-      alt: !this.onFoot && p.model === "heli" && !p.dead ? Math.max(0, Math.round((p.z - this.groundAt(p.x, p.y)) * 0.1)) : -1,
-      swim: this.onFoot && this.ped.swim,
+      alt: !this.onFoot && isAircraft(p.model) && !p.dead ? Math.max(0, Math.round((p.z - this.groundAt(p.x, p.y)) * 0.1)) : -1,
+      swim: this.onFoot && this.ped.swim && !this.inside,
+      jet: !this.onFoot && p.model === "jet" && !p.dead,
+      room: this.inside ? this.inside.room.name : "",
     };
   }
   // mission system sets these
@@ -1222,8 +1523,8 @@ export class Game {
       else if (this.config.camera !== "top") { p.steer = clamp(jx * 1.5, -1, 1); p.throttle = jy < -0.25 ? 1 : jy > 0.55 ? -1 : 0.85; }
       else { const diff = wrap(Math.atan2(jy, jx) - p.a); p.steer = clamp(diff * 2.6, -1, 1); p.throttle = m * (Math.abs(diff) > 1.9 ? 0.55 : 1); }
     } else { p.throttle = 0; p.steer = 0; }
-    if (p.model === "heli") {
-      // helicopter: Space / DRIFT climbs, Shift / NITRO descends (no nitro, no handbrake)
+    if (isAircraft(p.model)) {
+      // helicopter / jet: Space / DRIFT climbs, Shift / NITRO descends (no nitro, no handbrake)
       this.lift = (p.handbrake ? 1 : 0) - (wantNitro ? 1 : 0);
       p.handbrake = false; p.nitro = false; this.nitroWasOn = false;
       return;
@@ -1243,7 +1544,7 @@ export class Game {
     pd.sprint = b.held("nitro", k) || this.touch.nitro;
     const m = Math.min(1, Math.hypot(jx, jy));
     let dx = 0, dy = 0;
-    const cam = this.config.camera;
+    const cam = this.inside ? "top" : this.config.camera; // indoors the camera looks from the south: up on the stick = north
     if (m > 0.15) {
       if (cam === "top") { dx = jx; dy = jy; }
       else if (cam === "fp") {
@@ -1275,6 +1576,7 @@ export class Game {
   private updatePed(dt: number) {
     const pd = this.ped;
     const w = this.world;
+    if (this.inside) { this.updateInterior(dt); return; }
     const nx = pd.x + pd.vx * dt, ny = pd.y + pd.vy * dt;
     if (!this.pedBlocked(nx, pd.y)) pd.x = nx; else pd.vx = 0;
     if (!this.pedBlocked(pd.x, ny)) pd.y = ny; else pd.vy = 0;
@@ -1283,7 +1585,8 @@ export class Game {
     pd.swim = !jetty && isWater(pd.x, pd.y);
     // swimming: head above the water; on a roof (after landing the helicopter there) you stay up until you walk off
     const roof = pd.z > 30 ? w.roofAt(pd.x, pd.y) : -Infinity;
-    const z = pd.swim ? WATER_Y - 13 : jetty ? 2.5 : Math.max(terrainH(pd.x, pd.y), roof);
+    const lid = tunnelLid(pd.x, pd.y, pd.z) ?? -Infinity; // on top of a tunnel
+    const z = pd.swim ? WATER_Y - 13 : jetty ? 2.5 : Math.max(terrainH(pd.x, pd.y), roof, lid);
     if (pd.z - z > 80) this.damagePed((pd.z - z - 80) * 0.25); // jumped off a roof
     pd.z = z;
     pd.walk += dt * Math.hypot(pd.vx, pd.vy) * 0.05;
@@ -1313,6 +1616,8 @@ export class Game {
         if (c.kind === "cop" && !c.calm && this.rules.cops) this.bust = Math.min(1, this.bust + 0.15);
       } else if (vrel > 0) { pd.vx += wnx * vrel; pd.vy += wny * vrel; }
     }
+    // pushed into a wall by a car (or spawned badly): step out to the closest free spot
+    if (this.pedBlocked(pd.x, pd.y)) { const o = w.pushOut(pd.x, pd.y, 7.5); if (o) { pd.x = o.x; pd.y = o.y; } }
   }
 
   private update(dt: number) {
@@ -1335,13 +1640,13 @@ export class Game {
     } else { this.traffic.civAI(this, p, dt); p.nitro = false; }
 
     // nitro burns while boosting and refills slowly (pickups refill faster)
-    if (p.nitro && !this.onFoot && p.model !== "heli") { this.nitro = Math.max(0, this.nitro - dt * NITRO_DRAIN); if (this.nitro <= 0) p.nitro = false; }
+    if (p.nitro && !this.onFoot && !isAircraft(p.model)) { this.nitro = Math.max(0, this.nitro - dt * NITRO_DRAIN); if (this.nitro <= 0) p.nitro = false; }
     else this.nitro = Math.min(1, this.nitro + dt * NITRO_REGEN);
 
     for (const c of this.cars) {
       if (c === p) continue;
       if (c.dead || c.parked || (c.kind === "civ" && c.wrecked)) { c.throttle = 0; c.steer = 0; c.handbrake = true; continue; }
-      if (c.model === "boat" || c.model === "heli") { if (c.kind === "cop") { c.calm = this.wanted.stars === 0; if (c.calm) { c.throttle = 0; c.steer = 0; } else this.craft.boatAI(c); } else if (c.model === "boat" && c.flee && c.driver) this.craft.fleeBoat(c); else { c.throttle = 0; c.steer = 0; } }
+      if (isCraft(c.model)) { if (c.kind === "cop") { c.calm = this.wanted.stars === 0; if (c.calm) { c.throttle = 0; c.steer = 0; } else this.craft.boatAI(c); } else if (c.model === "boat" && c.flee && c.driver) this.craft.fleeBoat(c); else { c.throttle = 0; c.steer = 0; } }
       else if (c.kind === "cop") {
         c.calm = this.wanted.stars === 0;
         if (c.calm) this.traffic.patrol(this, c, dt); else this.police.copAI(c, dt);
@@ -1350,7 +1655,9 @@ export class Game {
 
     const def = this.carDef;
     for (const c of this.cars) {
+      c.px = c.x; c.py = c.y;
       const grass = this.onGrass(c.x, c.y);
+      if (c.model === "jet" && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.jet(c, dt, mine ? this.lift : -1, mine); if (!c.air) this.collideWorld(c); continue; }
       if (c.model === "heli" && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.fly(c, dt, mine ? this.lift : -1, mine); this.collideWorld(c); continue; }
       if (c.model === "boat" && !c.dead) {
         const st = MODEL_STATS.boat, mine = c === p && playing;
@@ -1371,7 +1678,7 @@ export class Game {
         } else this.drive(c, dt, 300, c.cruise + 20, 12, 3);
       } else if (c.dead || (c.kind === "civ" && c.wrecked && !c.parked)) this.wreckPhysics(c, dt);
       else if (c.kind === "cop") {
-        const maxV = D.copV + this.stars * D.copVStar;
+        const maxV = (D.copV + this.stars * D.copVStar) * (COP_SPEED[c.model] ?? 1);
         this.drive(c, dt, 560, grass ? maxV * 0.85 : maxV, 9, 2);
       } else if (c.hunt) this.drive(c, dt, 520, 480, 10, 3);
       else this.drive(c, dt, 300, c.cruise + 20, 12, 3);
@@ -1480,7 +1787,7 @@ export class Game {
       if (rules.cops && this.wanted.stars > 0) {
         let close = this.onFoot ? this.peds.copsNear(fx, fy, 30) : 0; // police on foot grabs you
         for (const c of this.cars) if (c.kind === "cop" && !c.calm && !c.dead && Math.hypot(c.x - fx, c.y - fy) < 85) close++;
-        const reachable = this.onFoot || !(this.player.model === "heli" && this.player.air); // nobody cuffs you in the air
+        const reachable = !this.inside && (this.onFoot || !(isAircraft(this.player.model) && this.player.air)); // nobody cuffs you in the air
         if (close > 0 && this.fspeed < 60 && reachable) this.bust += dt * (0.3 + close * 0.1) * D.bust * (this.onFoot ? 1.6 : 1);
         else this.bust = Math.max(0, this.bust - dt * 0.8);
         if (this.bust >= 1) { this.bust = 1; this.endRun("arrested"); }
@@ -1561,7 +1868,7 @@ export class Game {
       c.x += c.vx * dt; c.y += c.vy * dt; c.z += c.vz * dt;
       c.av *= Math.exp(-1.5 * dt);
       c.a += c.av * dt;
-      const gh = this.groundH(c.x, c.y);
+      const gh = this.groundH(c.x, c.y, c.z);
       if (c.z <= gh) { this.land(c, gh); }
       const ca = Math.cos(c.a), sa = Math.sin(c.a);
       c.vF = c.vx * ca + c.vy * sa; c.vR = -c.vx * sa + c.vy * ca;
@@ -1596,19 +1903,21 @@ export class Game {
   }
 
   private followTerrain(c: Car, dt: number) {
-    const gh = this.groundH(c.x, c.y);
+    const gh = this.groundH(c.x, c.y, c.z);
     const zFall = c.z + c.vz * dt - 0.5 * GRAV * dt * dt;
     // leave the ground when launched off a ramp or hill crest, or when driving off a roof edge
     if ((zFall > gh + 1.5 && c.vz > 40 && c.speed > 120) || c.z - gh > 25) { c.air = true; c.airT = 0; c.z = zFall; }
     else { c.vz = clamp((gh - c.z) / dt, -900, 900); c.z = gh; }
   }
 
-  // ground height under a car: terrain (the sea floor in the bay), ramps and building roofs
-  private groundH(x: number, y: number): number {
+  // ground height under a car: terrain (the sea floor in the bay), ramps, building roofs and (when up there) the top of a tunnel
+  private groundH(x: number, y: number, z = -Infinity): number {
     const w = this.world, r = w.rampH(x, y);
-    return Math.max(terrainH(x, y), r > 0 ? r : -Infinity, w.roofAt(x, y));
+    const lid = z > -Infinity ? tunnelLid(x, y, z) : null;
+    return Math.max(terrainH(x, y), r > 0 ? r : -Infinity, w.roofAt(x, y), lid ?? -Infinity);
   }
-  groundAt(x: number, y: number) { return Math.max(this.groundH(x, y), WATER_Y); } // for the helicopter: the water surface counts
+  // for aircraft: the water surface counts, and they stay above the tunnels
+  groundAt(x: number, y: number) { return Math.max(this.groundH(x, y, Infinity), WATER_Y); }
 
   // water spray / wake (boats, sinking cars)
   spray(x: number, y: number, z: number, vx: number, vy: number) { this.emit(x, y, z, vx + rnd(-25, 25), vy + rnd(-25, 25), rnd(30, 90), rnd(0.4, 0.8), rnd(4, 8), 18, "#e8f6ff", 0, 2.5); }
@@ -1659,8 +1968,8 @@ export class Game {
     c.x += c.vx * dt; c.y += c.vy * dt;
     const ca = Math.cos(c.a), sa = Math.sin(c.a);
     c.vF = c.vx * ca + c.vy * sa; c.vR = -c.vx * sa + c.vy * ca;
-    if (c.air) { c.vz -= GRAV * dt; c.z += c.vz * dt; const gh = this.groundH(c.x, c.y); if (c.z <= gh) { c.z = gh; c.air = false; c.vz = 0; } }
-    else c.z = this.groundH(c.x, c.y);
+    if (c.air) { c.vz -= GRAV * dt; c.z += c.vz * dt; const gh = this.groundH(c.x, c.y, c.z); if (c.z <= gh) { c.z = gh; c.air = false; c.vz = 0; } }
+    else c.z = this.groundH(c.x, c.y, c.z);
   }
 
   private collideWorld(c: Car) {
@@ -1685,7 +1994,7 @@ export class Game {
       if (px > MAP_MAX - R) resolve(-1, 0, px - (MAP_MAX - R), MAP_MAX, py);
       if (py > MAP_MAX - R) resolve(0, -1, py - (MAP_MAX - R), px, MAP_MAX);
       for (const b of bs) {
-        if (c.z >= roofOf(b) - 25) continue; // car is up on/above the roof: no wall
+        if (c.z >= roofOf(b) - (this.world.rampBld.has(b) ? 25 : 10)) continue; // car is up on/above the roof (or driving up its ramp): no wall
         const qx = c.x + ca * 12 * s, qy = c.y + sa * 12 * s;
         const cx = clamp(qx, b.x, b.x + b.w), cy = clamp(qy, b.y, b.y + b.h);
         let dx = qx - cx, dy = qy - cy;
@@ -1702,6 +2011,18 @@ export class Game {
         dx /= d; dy /= d;
         resolve(dx, dy, R - d, cx, cy);
       }
+    }
+    // the middle of the car ended up inside a wall (very fast, or pushed in by another car):
+    // back out on the side it came from, never through to the other side
+    for (const b of bs) {
+      if (c.z >= roofOf(b) - (this.world.rampBld.has(b) ? 25 : 10)) continue;
+      if (!(c.x > b.x && c.x < b.x + b.w && c.y > b.y && c.y < b.y + b.h)) continue;
+      let nx = 0, ny = 0;
+      if (c.px <= b.x) nx = -1; else if (c.px >= b.x + b.w) nx = 1; else if (c.py <= b.y) ny = -1; else if (c.py >= b.y + b.h) ny = 1;
+      if (nx < 0) c.x = b.x - R; else if (nx > 0) c.x = b.x + b.w + R; else if (ny < 0) c.y = b.y - R; else if (ny > 0) c.y = b.y + b.h + R;
+      else { const o = this.world.pushOut(c.x, c.y, R); if (o) { nx = Math.sign(o.x - c.x); ny = nx ? 0 : Math.sign(o.y - c.y); c.x = o.x; c.y = o.y; } }
+      const vn = c.vx * nx + c.vy * ny;
+      if (vn < 0) { c.vx -= 1.3 * vn * nx; c.vy -= 1.3 * vn * ny; if (-vn > maxImpact) { maxImpact = -vn; hx = c.x; hy = c.y; hnx = nx; hny = ny; } }
     }
     if (maxImpact > 90) this.onWallHit(c, maxImpact, hx, hy, hnx, hny);
   }
@@ -1878,10 +2199,16 @@ export class Game {
     const { cw, ch, dpr } = this;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cw, ch);
-    this.drawTexts(ctx);
+    if (!this.inside) this.drawTexts(ctx);
     if (this.player.nitro && this.state === "playing" && !this.onFoot) this.drawSpeedLines(ctx);
-    if (this.state === "playing" && !this.ending && this.config.camera !== "top") this.drawCrosshair(ctx);
+    if (this.state === "playing" && !this.ending && this.config.camera !== "top" && !this.inside) this.drawCrosshair(ctx);
     if (this.state !== "menu") { this.drawMinimap(ctx); this.drawBanners(ctx); }
+    // black fade after a door or a night's sleep
+    if (this.fadeT > 0) {
+      this.fadeT = Math.max(0, this.fadeT - 1 / 60);
+      ctx.fillStyle = `rgba(5,3,10,${Math.min(1, (this.fadeT / this.fadeMax) * 1.3)})`;
+      ctx.fillRect(0, 0, cw, ch);
+    }
   }
 
   private drawCrosshair(ctx: CanvasRenderingContext2D) {
@@ -2002,6 +2329,17 @@ export class Game {
       if (this.wanted.searching) {
         ctx.strokeStyle = Math.sin(this.t * 8) > 0 ? "rgba(255,40,70,0.75)" : "rgba(60,120,255,0.75)"; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(cxm + (this.police.lastX - fx) * m, cym + (this.police.lastY - fy) * m, this.police.searchRadius * m, 0, TAU); ctx.stroke();
+      }
+      // police jets: white arrows, on the edge when far away
+      for (const j of this.police.jets as PoliceJet[]) {
+        if (j.dead) continue;
+        let dx = (j.x - fx) * m, dy = (j.y - fy) * m;
+        const d = Math.hypot(dx, dy);
+        if (d > size / 2 - 6) { dx *= (size / 2 - 6) / d; dy *= (size / 2 - 6) / d; }
+        ctx.save(); ctx.translate(cxm + dx, cym + dy); ctx.rotate(j.a);
+        ctx.fillStyle = Math.sin(this.t * 10) > 0 ? "#ffffff" : "#ff3a4d";
+        ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(-4, -5); ctx.lineTo(-2, 0); ctx.lineTo(-4, 5); ctx.closePath(); ctx.fill();
+        ctx.restore();
       }
       const h = this.police.heli;
       if (h && !h.dead) {

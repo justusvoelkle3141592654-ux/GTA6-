@@ -2,6 +2,7 @@ import { CAR_MODELS, type CarModel, type FactionId } from "./vehicles";
 import { WEAPONS, WEAPON_DEFS, type InventorySave, type Weapon } from "./weapons";
 import { MAX_TUNE, TUNE_PARTS, noTune, type OwnedCar, type Tune } from "./garage";
 import { STATIONS } from "./radio";
+import { ROOMS } from "./interiors";
 
 export type SaveDifficulty = "easy" | "normal" | "hard";
 const DIFFICULTIES: SaveDifficulty[] = ["easy", "normal", "hard"];
@@ -20,6 +21,7 @@ export interface Progress {
   jobs: Record<string, number>;     // side job level per kind
   rep: Record<FactionId, number>;   // gang reputation (-100 hostile .. 100 friendly)
   records: Record<string, number>;  // best race times etc.
+  homes: string[];                  // bought apartments / the villa (room ids)
 }
 export interface SaveData {
   v: typeof SAVE_VERSION;
@@ -41,7 +43,7 @@ export interface SaveData {
 export type SaveResult = "saved" | "memory" | "wanted" | "busy" | "mode";
 
 export const emptyStats = (): SaveStats => ({ playTime: 0, carsStolen: 0, pedsHit: 0, deaths: 0, arrests: 0, maxStars: 0, earned: 0, jobsDone: 0 });
-export const emptyProgress = (): Progress => ({ missions: [], shells: [], jumps: [], jobs: {}, rep: { halcones: 0, kings: 0 }, records: {} });
+export const emptyProgress = (): Progress => ({ missions: [], shells: [], jumps: [], jobs: {}, rep: { halcones: 0, kings: 0 }, records: {}, homes: [] });
 
 // fallback when localStorage is missing or blocked: keeps the save until the page is reloaded
 let memory: string | null = null;
@@ -144,6 +146,7 @@ function validate(d: unknown): SaveData | null {
     progress.missions = Array.isArray(pr.missions) ? pr.missions.filter((m): m is string => typeof m === "string") : [];
     progress.shells = numList(pr.shells); progress.jumps = numList(pr.jumps);
     progress.jobs = numMap(pr.jobs); progress.records = numMap(pr.records);
+    progress.homes = Array.isArray(pr.homes) ? [...new Set(pr.homes.filter((h): h is string => typeof h === "string" && h in ROOMS))] : [];
     if (isObj(pr.rep)) { progress.rep.halcones = clampN(pr.rep.halcones, -100, 100, 0); progress.rep.kings = clampN(pr.rep.kings, -100, 100, 0); }
   }
   const garage: OwnedCar[] = [];

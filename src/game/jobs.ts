@@ -12,7 +12,7 @@ export interface JobDef { kind: JobKind; name: string; models: CarModel[]; desc:
 export const JOB_DEFS: Record<JobKind, JobDef> = {
   taxi: { kind: "taxi", name: "Taxi", models: ["taxi"], desc: "Fahrgäste einsammeln und pünktlich absetzen" },
   delivery: { kind: "delivery", name: "Lieferung", models: ["van", "truck"], desc: "Ware rechtzeitig zum Laden bringen" },
-  bounty: { kind: "bounty", name: "Streife", models: ["police", "swat"], desc: "Flüchtige stoppen und zu Fuß festnehmen" },
+  bounty: { kind: "bounty", name: "Streife", models: ["police", "interceptor", "polsuv", "swat"], desc: "Flüchtige stoppen und zu Fuß festnehmen" },
 };
 export const JOB_KINDS: JobKind[] = ["taxi", "delivery", "bounty"];
 // the vehicle that waits at each start point

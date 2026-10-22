@@ -7,6 +7,7 @@ import { JOB_DEFS, JOB_KINDS, RACES } from "../game/jobs";
 import { ACTIONS, ACTION_LABEL, keyLabel, type Action } from "../game/input";
 import { CHANNELS } from "../game/audio";
 import { SPAWN_MODELS, type SpawnPeople } from "../game/spawner";
+import { ROOMS } from "../game/interiors";
 import { MODEL_NAME } from "../game/vehicles";
 import { CHANNEL_LABEL, applySettings, loadSettings, saveSettings, type Settings } from "../game/settings";
 import BigMap from "./BigMap";
@@ -87,10 +88,11 @@ function Progress({ game }: { game: Game }) {
           <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Nebenbei</h3>
           <div>🐚 Muscheln: <b>{pr.shells.length}/{game.jobs.shells.length}</b></div>
           <div>🛹 Stuntsprünge: <b>{pr.jumps.length}/{game.jobs.jumps.length}</b></div>
-          {JOB_KINDS.map((k) => <div key={k}>💼 {JOB_DEFS[k].name}: <b>{pr.jobs[k] ?? 0}</b> erledigt <span className="text-xs text-white/45">({JOB_DEFS[k].models.join("/")})</span></div>)}
+          {JOB_KINDS.map((k) => <div key={k}>💼 {JOB_DEFS[k].name}: <b>{pr.jobs[k] ?? 0}</b> erledigt <span className="text-xs text-white/45">({JOB_DEFS[k].models.map((m) => MODEL_NAME[m]).join(", ")})</span></div>)}
           {RACES.map((r) => <div key={r.id}>🏁 {r.name}: <b>{pr.records[r.id] ? `${pr.records[r.id].toFixed(1)} s` : "–"}</b> <span className="text-xs text-white/45">(Ziel {r.par} s)</span></div>)}
           <div>🙈 Versteckspiel: <b>{pr.records.hide ?? 0}/{HIDE_ROUNDS.length}</b> Runden</div>
           <div>🏦 Bankkonto: <b>${fmt(game.bank)}</b></div>
+          <div>🏠 Wohnungen: <b>{pr.homes.length}/{Object.values(ROOMS).filter((r) => r.price).length}</b>{pr.homes.length > 0 && <span className="text-xs text-white/45"> ({pr.homes.map((h) => ROOMS[h]?.name).join(", ")})</span>}</div>
         </div>
         <div className="rounded-2xl border border-white/10 bg-black/50 p-4 text-sm">
           <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Statistik</h3>

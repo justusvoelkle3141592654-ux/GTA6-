@@ -8,7 +8,7 @@ import { fmt } from "./ui";
 
 const TITLE: Record<Place["kind"], string> = {
   hospital: "Klinik", police: "Wache", gunshop: "Waffenladen", workshop: "Werkstatt & Lackiererei", clothes: "Kleidung",
-  food: "Imbiss", safehouse: "Safehouse", contact: "", dock: "Bootssteg", heliport: "Heliport", park: "Park", job: "Job",
+  food: "Imbiss", safehouse: "Safehouse", contact: "", dock: "Bootssteg", heliport: "Heliport", park: "Park", job: "Job", home: "Wohnung", airport: "Flugplatz",
 };
 
 function Row({ children }: { children: React.ReactNode }) {

@@ -6,8 +6,10 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_MAX, MAP_SIZE, EXT, HIGHWAYS, H_SCALE, WATER_Y, terrainH, terrainGrad, cityDist, inCity, isHighway, seaDist, mulberry32, type Building, type Ramp } from "./world";
-import { isCraft } from "./vehicles";
+import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_MAX, MAP_SIZE, EXT, HIGHWAYS, H_SCALE, WATER_Y, terrainH, terrainGrad, cityDist, inCity, isHighway, seaDist, mulberry32, type Building, type Ramp,
+  TUNNELS, TUN_HW, TUN_H, TUN_PORTAL, TUN_SIDE, AIRFIELD, tunnelRoad, tunnelSink, naturalH, inRock, inTube, nearTunnel, nearAirfield } from "./world";
+import { InteriorView } from "./interior3d";
+import { isCraft, isAircraft, isCopModel } from "./vehicles";
 import { JETTY, HELI_SPOT, type Place } from "./places";
 import { CrowdRenderer } from "./crowd3d";
 import { DISTRICTS, blockDistrict } from "./districts";
@@ -145,7 +147,9 @@ const SPECS: Record<CarModel, CarSpec> = {
   bus: { L: 82, W: 28, y0: 4, noseY: 16, beltY: 17, deckY: 17, xCowl: 39, xRoofF: 37, xRoofR: -38, xDeck: -39.5, roofY: 34, r: 7, wx: 27, wxr: -25, wd: 5 },
   swat: { L: 54, W: 26, y0: 4.5, noseY: 12, beltY: 16, deckY: 16, xCowl: 25, xRoofF: 17, xRoofR: 15, xDeck: 15, roofY: 26, r: 7, wx: 17, wxr: -17, wd: 5 },
   armor: { L: 62, W: 29, y0: 6, noseY: 15, beltY: 19, deckY: 19, xCowl: 22, xRoofF: 16, xRoofR: -24, xDeck: -27, roofY: 25, r: 8, wx: 20, wxr: -20, wd: 6 },
-  boat: SEDAN, heli: SEDAN, // own geometry (boatGeo / heliGeo)
+  boat: SEDAN, heli: SEDAN, jet: SEDAN, // own geometry (boatGeo / heliGeo / jetGeo)
+  interceptor: { L: 50, W: 25, y0: 2.8, noseY: 6.5, beltY: 10.8, deckY: 11.8, xCowl: 10, xRoofF: 1, xRoofR: -8, xDeck: -14, roofY: 16.5, r: 6, wx: 16, wxr: -15, wd: 5 },
+  polsuv: { L: 52, W: 26, y0: 5, noseY: 13.5, beltY: 17.5, deckY: 18, xCowl: 12, xRoofF: 8, xRoofR: -19, xDeck: -22, roofY: 27, r: 7.5, wx: 16, wxr: -16, wd: 5 },
   bike: { L: 34, W: 8, y0: 6, noseY: 12, beltY: 14, deckY: 14, xCowl: 6, xRoofF: 2, xRoofR: -4, xDeck: -6, roofY: 18, r: 6, wx: 13, wxr: -13, wd: 3 },
 };
 
@@ -183,6 +187,38 @@ function boatGeo(color: string): CarGeo {
   for (const g of [...B, ...G, ...Lg]) g.dispose();
   return res;
 }
+// fighter jet: fuselage along x, delta wings, two tail fins, canopy; stands on its landing gear
+function jetGeo(color: string, police = false): CarGeo {
+  const B: THREE.BufferGeometry[] = [], G: THREE.BufferGeometry[] = [], Lg: THREE.BufferGeometry[] = [];
+  const body = C(color), dark = body.clone().multiplyScalar(0.55), y = 10;
+  B.push(ni(withColor(new THREE.CylinderGeometry(4.6, 4.2, 50, 16).rotateZ(Math.PI / 2).translate(-4, y, 0), body)));
+  B.push(ni(withColor(new THREE.ConeGeometry(4.6, 16, 16).rotateZ(-Math.PI / 2).translate(29, y, 0), body)), ni(withColor(new THREE.ConeGeometry(1.2, 4, 8).rotateZ(-Math.PI / 2).translate(38.5, y, 0), C("#2a2d36"))));
+  B.push(ni(withColor(new THREE.CylinderGeometry(3.6, 4.2, 5, 16).rotateZ(Math.PI / 2).translate(-31, y, 0), C("#3a3d45"))));
+  for (const sd of [-1, 1]) B.push(nb(14, 5, 3.4, 8, y - 1.5, sd * 5.4, dark));
+  // wings and tail planes: flat triangles extruded across their thickness
+  const plate = (pts: [number, number][], th: number, yy: number, col: THREE.Color) => {
+    const sh = new THREE.Shape(); pts.forEach(([a, b], i) => (i ? sh.lineTo(a, b) : sh.moveTo(a, b))); sh.closePath();
+    const g = new THREE.ExtrudeGeometry(sh, { depth: th, bevelEnabled: false });
+    g.rotateX(Math.PI / 2); g.translate(0, yy + th / 2, 0);
+    return ni(withColor(g, col));
+  };
+  B.push(plate([[12, 3], [-14, 27], [-22, 27], [-20, 3]], 1.2, y - 1, body), plate([[12, -3], [-14, -27], [-22, -27], [-20, -3]], 1.2, y - 1, body));
+  B.push(plate([[-22, 3], [-31, 13], [-35, 13], [-34, 3]], 0.9, y, body), plate([[-22, -3], [-31, -13], [-35, -13], [-34, -3]], 0.9, y, body));
+  for (const sd of [-1, 1]) {
+    const sh = new THREE.Shape(); sh.moveTo(-20, 0); sh.lineTo(-30, 15); sh.lineTo(-35, 15); sh.lineTo(-34, 0); sh.closePath();
+    const fin = new THREE.ExtrudeGeometry(sh, { depth: 0.9, bevelEnabled: false }); fin.translate(0, 0, -0.45); fin.rotateX(sd * 0.32); fin.translate(0, y + 2, sd * 3.2);
+    B.push(ni(withColor(fin, police ? C("#f4f6fa") : body)));
+  }
+  if (police) for (const sd of [-1, 1]) B.push(nb(30, 1.2, 0.3, 0, y + 1.5, sd * 4.55, "#f4f6fa"), nb(8, 0.5, 6, -16, y - 0.2, sd * 18, "#f4f6fa"));
+  // landing gear (folded in the air: see syncCars)
+  for (const [gx, gz] of [[22, 0], [-8, -6], [-8, 6]]) B.push(nb(1.2, y - 3, 1.2, gx, (y - 3) / 2 + 2, gz, "#2a2d36"), ni(withColor(new THREE.CylinderGeometry(2, 2, 1.6, 12).rotateX(Math.PI / 2).translate(gx, 2, gz), C("#121214"))));
+  G.push(ni(withColor(new THREE.SphereGeometry(4, 14, 10).scale(2.6, 1, 0.95).translate(14, y + 3.4, 0), C("#0b121c"))));
+  Lg.push(nb(1.2, 1.2, 1.2, -18, y - 0.4, 27.2, "#3dff8b", 2.6), nb(1.2, 1.2, 1.2, -18, y - 0.4, -27.2, "#ff1838", 2.6), nb(1, 1, 1, -35, y + 15, 0, "#ffffff", 2.4));
+  const res: CarGeo = { body: mergeGeometries(B)!, glass: mergeGeometries(G)!, lights: mergeGeometries(Lg)!, wheels: [], roofY: y + 8 };
+  for (const g of [...B, ...G, ...Lg]) g.dispose();
+  return res;
+}
+
 // helicopter: fuselage, tail boom, skids, cockpit glass (the rotor is a separate mesh, see makeCar)
 function heliGeo(color: string): CarGeo {
   const B: THREE.BufferGeometry[] = [], G: THREE.BufferGeometry[] = [], Lg: THREE.BufferGeometry[] = [];
@@ -208,6 +244,7 @@ function getCarGeo(model: CarModel, color: string): CarGeo {
   if (model === "bike") { const g = bikeGeo(color); carGeoCache.set(key, g); return g; }
   if (model === "boat") { const g = boatGeo(color); carGeoCache.set(key, g); return g; }
   if (model === "heli") { const g = heliGeo(color); carGeoCache.set(key, g); return g; }
+  if (model === "jet") { const g = jetGeo(color); carGeoCache.set(key, g); return g; }
   const B: THREE.BufferGeometry[] = [], G: THREE.BufferGeometry[] = [], Lg: THREE.BufferGeometry[] = [];
   const s = SPECS[model] ?? SEDAN;
   const body = C(color), dark = body.clone().multiplyScalar(0.45);
@@ -285,6 +322,23 @@ function getCarGeo(model: CarModel, color: string): CarGeo {
       Lg.push(nb(1, 1.2, 3, hl + 0.3, s.y0 + 2.7, 9.5, "#ffb020", 2.2), nb(1, 1.2, 3, hl + 0.3, s.y0 + 2.7, -9.5, "#ffb020", 2.2));
       break;
     }
+    case "interceptor": {
+      // black-and-white police supercar: white doors, push bar, big wing
+      for (const sd of [-1, 1]) B.push(nb(20, 6, 0.4, -2, 7.4, sd * (hw + 0.05), "#f4f6fa"));
+      B.push(rbox(6, 0.9, s.W + 1, -hl + 3, s.deckY + 5.5, 0, trim, 0.3), nb(1.4, 5, 1.4, -hl + 3.4, s.deckY + 2.7, 8, trim), nb(1.4, 5, 1.4, -hl + 3.4, s.deckY + 2.7, -8, trim));
+      B.push(nb(1.5, 5, 20, hl + 1.2, 5.5, 0, "#2a2d36"), nb(1.2, 3.5, 7, hl + 1.6, 5.5, 0, "#2a2d36"));
+      Lg.push(nb(1, 1, 3, hl + 0.3, s.y0 + 2.2, 9.5, "#2a5bff", 2.4), nb(1, 1, 3, hl + 0.3, s.y0 + 2.2, -9.5, "#ff1a3a", 2.4));
+      break;
+    }
+    case "polsuv": {
+      const navy = "#0b1530";
+      B.push(rbox(16, 9, s.W + 0.3, 14, 10, 0, navy, 0.6), nb(s.L - 2, 0.6, s.W + 0.35, 0, 15.6, 0, navy));
+      B.push(nb(2, 9, 24, hl + 1.6, 8, 0, "#2a2d36"), nb(1.5, 2, 2, hl + 1.6, 13, 11, "#2a2d36"), nb(1.5, 2, 2, hl + 1.6, 13, -11, "#2a2d36"));
+      for (const sd of [-1, 1]) B.push(nb(26, 0.8, 0.8, rm, s.roofY + 1.7, sd * (hw - 3), "#2a2c33"));
+      B.push(cylX(6, 2.6, -hl - 1.8, 14, 0, "#121214", 18));
+      Lg.push(nb(1, 1.4, 3, hl + 0.3, s.y0 + 4, 9.5, "#ffb020", 2.2), nb(1, 1.4, 3, hl + 0.3, s.y0 + 4, -9.5, "#ffb020", 2.2));
+      break;
+    }
     case "taxi":
       Lg.push(nb(4, 3.5, 10, -3, s.roofY + 2.8, 0, "#fff5b0", 1.8));
       for (let i = 0; i < 8; i++) for (const sd of [-1, 1]) B.push(nb(3, 1.2, 0.3, -10 + i * 3.2, s.beltY - 3.2 + (i % 2) * 1.2, sd * (hw + 0.12), "#111"));
@@ -328,7 +382,7 @@ function getCarGeo(model: CarModel, color: string): CarGeo {
 }
 
 interface CarObj {
-  group: THREE.Group; tilt: THREE.Group; body: THREE.Mesh; glass: THREE.Mesh; lights: THREE.Mesh; pool: THREE.Mesh; glow?: THREE.Mesh; rotor?: THREE.Mesh;
+  group: THREE.Group; tilt: THREE.Group; body: THREE.Mesh; glass: THREE.Mesh; lights: THREE.Mesh; pool: THREE.Mesh; glow?: THREE.Mesh; rotor?: THREE.Mesh; burner?: THREE.Mesh; shadow: THREE.Mesh;
   wheels: { pivot: THREE.Group; spin: THREE.Mesh; front: boolean; r: number }[];
   bar?: { reds: THREE.MeshBasicMaterial; blues: THREE.MeshBasicMaterial; white: THREE.MeshBasicMaterial };
   model: CarModel; color: string; wreck: boolean; pitch: number; roll: number; spinA: number; steerA: number;
@@ -521,6 +575,8 @@ export class Renderer3D {
   camYaw = 0;
 
   private moon!: THREE.DirectionalLight;
+  private hemi!: THREE.HemisphereLight;
+  private dark = 0; // 0 daylight .. 1 inside a tunnel (sky light dimmed)
   private head!: THREE.SpotLight;
   private plights: THREE.PointLight[] = [];
   private sky!: THREE.Mesh;
@@ -543,6 +599,8 @@ export class Renderer3D {
   private shadowGeo!: THREE.PlaneGeometry; private shadowMat!: THREE.MeshBasicMaterial;
   private rotorGeo!: THREE.BufferGeometry; private rotorMat!: THREE.MeshStandardMaterial;
   private glowGeo!: THREE.PlaneGeometry; private glowMat!: THREE.MeshBasicMaterial;
+  private burnerGeo = new THREE.ConeGeometry(3.4, 16, 12).rotateZ(Math.PI / 2).translate(-8, 0, 0);
+  private burnerMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 1.4, 0.5), transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
   private barSeg = new THREE.BoxGeometry(3.2, 2, 2.6);
   private decalGeo = new THREE.PlaneGeometry(20, 5.5);
   private decalMat!: THREE.MeshBasicMaterial; private decalMatB!: THREE.MeshBasicMaterial; private roofDecalMat!: THREE.MeshBasicMaterial;
@@ -559,6 +617,8 @@ export class Renderer3D {
   private arrow!: THREE.Mesh;
   private ped!: PedModel;
   private crowd!: CrowdRenderer;
+  private renderPass: RenderPass | null = null;
+  interior!: InteriorView;
   private camPos = new THREE.Vector3(); private camLook = new THREE.Vector3(); private camInit = false; private orbit = 0; private fov = 62;
   private tmpV = new THREE.Vector3();
   private copRed = C("#ff1a3a"); private copBlue = C("#2a5bff");
@@ -577,7 +637,7 @@ export class Renderer3D {
     pmrem.dispose();
     this.scene.fog = new THREE.Fog(0xcdbca4, 450, 3600);
     this.scene.background = new THREE.Color(0xb7cbe6);
-    this.buildLights(); this.buildSky(); this.buildGround(); this.buildTerrain(); this.buildCity(); this.buildRamps(); this.buildLamps(); this.buildShared(); this.buildPlaces(places); this.buildMarkers(); this.buildHeli(); this.buildSpikes();
+    this.buildLights(); this.buildSky(); this.buildGround(); this.buildTerrain(); this.buildCity(); this.buildRamps(); this.buildLamps(); this.buildShared(); this.buildPlaces(places); this.buildMarkers(); this.buildHeli(); this.buildSpikes(); this.buildTunnels(); this.buildAirfield(); this.buildPoliceJets();
     this.setQuality(quality);
   }
 
@@ -590,6 +650,7 @@ export class Renderer3D {
     for (const m of this.cityMeshes) m.castShadow = hi && m.userData.cast;
     for (const f of this.forest) f.castShadow = hi;
     this.crowd.setShadows(hi);
+    this.interior?.setShadows(hi);
     const fog = this.scene.fog as THREE.Fog;
     fog.far = hi ? 4600 : 3000;
     this.camera.far = hi ? 9000 : 7000;
@@ -597,11 +658,12 @@ export class Renderer3D {
     if (hi) {
       if (!this.composer) {
         this.composer = new EffectComposer(this.renderer);
-        this.composer.addPass(new RenderPass(this.scene, this.camera));
+        this.renderPass = new RenderPass(this.scene, this.camera);
+        this.composer.addPass(this.renderPass);
         this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(this.w, this.h), 0.28, 0.5, 0.92));
         this.composer.addPass(new OutputPass());
       }
-    } else if (this.composer) { this.composer.dispose(); this.composer = null; }
+    } else if (this.composer) { this.composer.dispose(); this.composer = null; this.renderPass = null; }
     this.resize(this.w, this.h);
   }
 
@@ -623,7 +685,8 @@ export class Renderer3D {
 
   // ---------------------------------------------------------- build
   private buildLights() {
-    this.scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x80705c, 1.35));
+    this.hemi = new THREE.HemisphereLight(0xbcd4ff, 0x80705c, 1.35);
+    this.scene.add(this.hemi);
     const moon = new THREE.DirectionalLight(0xffe4bd, 4.2);
     moon.shadow.mapSize.set(2048, 2048);
     const sc = moon.shadow.camera;
@@ -748,13 +811,16 @@ export class Renderer3D {
     geo.translate(MAP_MIN + MAP_SIZE / 2, 0, MAP_MIN + MAP_SIZE / 2);
     const pos = geo.attributes.position as THREE.BufferAttribute;
     const cols = new Float32Array(pos.count * 3);
+    const vh = new Float32Array(pos.count); // vertex heights: the roads lie on the mesh exactly as it is drawn
     const grassLo = C("#667a3c"), grassHi = C("#9a9158"), rock = C("#6e665c"), peak = C("#5f574c"), sand = C("#d2bf91"), dirt = C("#8d7352");
     const tmp = new THREE.Color();
     const r = mulberry32(55);
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i);
       const h = terrainH(x, z);
-      pos.setY(i, h - 0.6);
+      const sink = tunnelSink(x, z); // under a tunnel the hillside is replaced by the tube and its lid
+      pos.setY(i, (sink ?? h) - 0.6);
+      vh[i] = (sink ?? h) - 0.6;
       const d = cityDist(x, z);
       const g = terrainGrad(x, z, 12);
       const slope = Math.hypot(g.x, g.y);
@@ -776,15 +842,26 @@ export class Renderer3D {
     this.terrain.receiveShadow = true;
     this.scene.add(this.terrain);
 
+    // height of the drawn terrain mesh (same triangles as the PlaneGeometry), so no hill pokes through a road
+    const cell = MAP_SIZE / SEG, row = SEG + 1;
+    const meshH = (x: number, z: number) => {
+      const fx = (x - MAP_MIN) / cell, fz = (z - MAP_MIN) / cell;
+      const ix = clamp(Math.floor(fx), 0, SEG - 1), iz = clamp(Math.floor(fz), 0, SEG - 1), u = fx - ix, v = fz - iz;
+      const ha = vh[iz * row + ix], hb = vh[(iz + 1) * row + ix], hc = vh[(iz + 1) * row + ix + 1], hd = vh[iz * row + ix + 1];
+      return u + v <= 1 ? ha + (hd - ha) * u + (hb - ha) * v : hc + (hb - hc) * (1 - u) + (hd - hc) * (1 - v);
+    };
+    const roadH = (x: number, z: number) => Math.max(terrainH(x, z), meshH(x, z));
     // highways as terrain-conforming ribbons
     const R: THREE.BufferGeometry[] = [];
     const ribbon = (ax: number, ay: number, bx: number, by: number, width: number, col: string, lift: number) => {
-      const L = Math.hypot(bx - ax, by - ay), n = Math.ceil(L / 25);
+      const L = Math.hypot(bx - ax, by - ay), n = Math.ceil(L / 12);
       const dx = (bx - ax) / L, dy = (by - ay) / L, nx = -dy * width / 2, ny = dx * width / 2;
       const v: number[] = [], idx: number[] = [];
       for (let i = 0; i <= n; i++) {
         const t = i / n, x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
-        v.push(x + nx, terrainH(x + nx, y + ny) + lift, y + ny, x - nx, terrainH(x - nx, y - ny) + lift, y - ny);
+        // the middle of the road counts too (a crest between the edges)
+        const mid = Math.max(0, roadH(x, y) - (roadH(x + nx, y + ny) + roadH(x - nx, y - ny)) / 2);
+        v.push(x + nx, roadH(x + nx, y + ny) + lift + mid, y + ny, x - nx, roadH(x - nx, y - ny) + lift + mid, y - ny);
         if (i < n) { const b = i * 2; idx.push(b, b + 2, b + 1, b + 1, b + 2, b + 3); }
       }
       const g = new THREE.BufferGeometry();
@@ -824,7 +901,7 @@ export class Renderer3D {
     while (placed < treeN && guard++ < treeN * 12) {
       const x = MAP_MIN + 400 + rr() * (MAP_SIZE - 800), z = MAP_MIN + 400 + rr() * (MAP_SIZE - 800);
       const d = cityDist(x, z);
-      if (d < 320 || d > EXT - 420 || seaDist(x, z) > -260 || Math.hypot(x - HELI_SPOT.x, z - HELI_SPOT.y) < 230) continue;
+      if (d < 320 || d > EXT - 420 || seaDist(x, z) > -260 || Math.hypot(x - HELI_SPOT.x, z - HELI_SPOT.y) < 230 || nearTunnel(x, z, 40) || nearAirfield(x, z, 120)) continue;
       if (isHighway(x, z) || Math.min(...HIGHWAYS.map((i) => Math.abs(x - (i * BLOCK + ROAD / 2)))) < 110 || Math.min(...HIGHWAYS.map((i) => Math.abs(z - (i * BLOCK + ROAD / 2)))) < 110) continue;
       const h = terrainH(x, z);
       const g = terrainGrad(x, z, 10);
@@ -838,7 +915,7 @@ export class Renderer3D {
     while (placed < rockN && guard++ < rockN * 12) {
       const x = MAP_MIN + 400 + rr() * (MAP_SIZE - 800), z = MAP_MIN + 400 + rr() * (MAP_SIZE - 800);
       const d = cityDist(x, z);
-      if (d < 420 || d > EXT - 420 || isHighway(x, z) || seaDist(x, z) > -120 || Math.hypot(x - HELI_SPOT.x, z - HELI_SPOT.y) < 230) continue;
+      if (d < 420 || d > EXT - 420 || isHighway(x, z) || seaDist(x, z) > -120 || Math.hypot(x - HELI_SPOT.x, z - HELI_SPOT.y) < 230 || nearTunnel(x, z, 60) || nearAirfield(x, z, 120)) continue;
       const h = terrainH(x, z);
       const g = terrainGrad(x, z, 10);
       if (h < 120 && Math.hypot(g.x, g.y) < 0.2 && rr() < 0.7) continue;
@@ -1202,6 +1279,8 @@ export class Renderer3D {
     });
     this.ped = new PedModel(shirtTex, this.shadowGeo, this.shadowMat);
     this.scene.add(this.ped.group);
+    // rooms you walk into have their own scene (with a second copy of the player model)
+    this.interior = new InteriorView(this.scene.environment, new PedModel(shirtTex, this.shadowGeo, this.shadowMat), this.quality === "high");
     this.crowd = new CrowdRenderer(this.scene, MAX_PEDS, this.quality === "high", this.shadowGeo, this.shadowMat);
   }
 
@@ -1232,13 +1311,14 @@ export class Renderer3D {
     const pool = new THREE.Mesh(this.poolGeo, c.kind === "player" ? this.poolMatP : this.poolMat);
     pool.renderOrder = 2;
     group.add(shadow, pool);
-    const obj: CarObj = { group, tilt, body, glass, lights, pool, wheels, model: c.model, color: c.color, wreck: false, pitch: 0, roll: 0, spinA: 0, steerA: 0 };
+    const obj: CarObj = { group, tilt, body, glass, lights, pool, shadow, wheels, model: c.model, color: c.color, wreck: false, pitch: 0, roll: 0, spinA: 0, steerA: 0 };
     if (c.kind === "player") { obj.glow = new THREE.Mesh(this.glowGeo, this.glowMat); obj.glow.renderOrder = 2; group.add(obj.glow); }
     if (c.model === "heli") { obj.rotor = new THREE.Mesh(this.rotorGeo, this.rotorMat); obj.rotor.position.y = 27; tilt.add(obj.rotor); shadow.visible = false; }
     if (c.model === "boat") { shadow.visible = false; pool.visible = false; }
+    if (c.model === "jet") { obj.burner = new THREE.Mesh(this.burnerGeo, this.burnerMat); obj.burner.position.set(-33.5, 10, 0); tilt.add(obj.burner); shadow.scale.set(1.3, 1, 1.4); pool.visible = false; }
     if (c.model === "bike") shadow.scale.set(0.6, 1, 0.35);
     else if (c.model === "bus" || c.model === "truck") shadow.scale.set(1.5, 1, 1.15);
-    if (c.model === "police" || c.model === "swat") {
+    if (isCopModel(c.model)) {
       const reds = new THREE.MeshBasicMaterial({ color: this.copRed.clone(), toneMapped: false });
       const blues = new THREE.MeshBasicMaterial({ color: this.copBlue.clone(), toneMapped: false });
       const white = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1, 1), toneMapped: false });
@@ -1249,9 +1329,12 @@ export class Renderer3D {
         seg.position.set(-3, geo.roofY + 1.5, z);
         tilt.add(seg);
       }
+      if (c.model === "police" || c.model === "polsuv" || c.model === "interceptor") {
+        const hz = SPECS[c.model].W / 2 + 0.15, dy = c.model === "polsuv" ? 11 : c.model === "interceptor" ? 7 : 8.2;
+        const d1 = new THREE.Mesh(this.decalGeo, this.decalMat); d1.position.set(-1, dy, hz); tilt.add(d1);
+        const d2 = new THREE.Mesh(this.decalGeo, this.decalMatB); d2.position.set(-1, dy, -hz); d2.rotation.y = Math.PI; tilt.add(d2);
+      }
       if (c.model === "police") {
-        const d1 = new THREE.Mesh(this.decalGeo, this.decalMat); d1.position.set(-1, 8.2, 12.65); tilt.add(d1);
-        const d2 = new THREE.Mesh(this.decalGeo, this.decalMatB); d2.position.set(-1, 8.2, -12.65); d2.rotation.y = Math.PI; tilt.add(d2);
         const d3 = new THREE.Mesh(new THREE.PlaneGeometry(12, 6), this.roofDecalMat); d3.rotation.x = -Math.PI / 2; d3.rotation.z = -Math.PI / 2; d3.position.set(-3, geo.roofY + 0.05, 0); tilt.add(d3);
         const d4 = new THREE.Mesh(new THREE.PlaneGeometry(12, 6), this.roofDecalMat); d4.rotation.x = -Math.PI / 2; d4.rotation.z = -Math.PI / 2; d4.position.set(14, 12.15, 0); tilt.add(d4);
       }
@@ -1288,7 +1371,14 @@ export class Renderer3D {
       const k = Math.min(1, dt * (c.air ? 3 : 12));
       o.pitch += (tp - o.pitch) * k; o.roll += (tr - o.roll) * k;
       o.group.rotation.set(o.roll, -c.a, o.pitch);
-      if (c.model === "heli") {
+      if (c.model === "jet") {
+        // nose follows the climb, wings bank into the turn, gear folds away in the air, afterburner glows
+        o.tilt.rotation.z = c.air ? clamp(Math.atan2(c.vz, Math.max(150, c.vF)), -0.6, 0.6) : 0;
+        o.tilt.rotation.x = c.air ? clamp(-c.av * 0.45, -0.9, 0.9) : 0;
+        o.group.rotation.x = 0; o.group.rotation.z = 0;
+        if (o.burner) { const k = c.dead ? 0 : c.rotor; o.burner.visible = k > 0.05; o.burner.scale.set(0.6 + k * 1.4, 0.8 + k * 0.4, 0.8 + k * 0.4); }
+        o.shadow.visible = !c.air;
+      } else if (c.model === "heli") {
         // nose down when flying forward, bank into turns, spinning rotor
         o.tilt.rotation.z = clamp(-c.vF / 1400, -0.3, 0.2);
         o.tilt.rotation.x = clamp(-c.av * 0.12, -0.3, 0.3);
@@ -1609,6 +1699,149 @@ export class Renderer3D {
     this.heliSpot.position.set(sx, terrainH(sx, sy) + 1, sy);
   }
 
+  // ---------------------------------------------------------- tunnels
+  private tunnelRoofs: THREE.Mesh[] = []; // ceiling and lid: hidden in the bird's eye view while you drive inside
+  private buildTunnels() {
+    const std: THREE.BufferGeometry[] = [], glow: THREE.BufferGeometry[] = [], roofG: THREE.BufferGeometry[] = [];
+    const strip = (dst: THREE.BufferGeometry[], col: string, s0: number, s1: number, edge: (s: number) => [number[], number[]]) => {
+      const n = Math.max(1, Math.ceil((s1 - s0) / 40)), v: number[] = [], idx: number[] = [];
+      for (let i = 0; i <= n; i++) { const [a, b] = edge(s0 + ((s1 - s0) * i) / n); v.push(...a, ...b); if (i < n) { const k = i * 2; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); } }
+      const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3)); g.setIndex(idx); g.computeVertexNormals();
+      g.setAttribute("uv", new THREE.Float32BufferAttribute(new Float32Array((v.length / 3) * 2), 2)); // same attributes as the boxes it is merged with
+      dst.push(withColor(g, C(col)));
+    };
+    const sign = (text: string) => canvasTex(512, 96, (g) => {
+      g.fillStyle = "#1d4e89"; g.fillRect(0, 0, 512, 96); g.strokeStyle = "#ffffff"; g.lineWidth = 6; g.strokeRect(6, 6, 500, 84);
+      g.fillStyle = "#ffffff"; g.font = "bold 64px 'Bebas Neue', Impact, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(text, 256, 52);
+    });
+    for (const t of TUNNELS) {
+      const P = (s: number, d: number, y: number) => (t.alongX ? [s, y, t.c + d] : [t.c + d, y, s]);
+      const R = (s: number) => tunnelRoad(t, s);
+      const S0 = t.cov0 - TUN_PORTAL, S1 = t.cov1 + TUN_PORTAL;
+      // walls (dark band at the bottom, light tiles above), raised walkways, ceiling
+      for (const sd of [-1, 1]) {
+        strip(std, "#3a3d45", S0, S1, (s) => [P(s, sd * TUN_HW, R(s) - 2), P(s, sd * TUN_HW, R(s) + 12)]);
+        strip(std, "#8e8b84", S0, S1, (s) => [P(s, sd * TUN_HW, R(s) + 12), P(s, sd * TUN_HW, R(s) + TUN_H)]);
+        strip(std, "#5f5d58", S0, S1, (s) => [P(s, sd * 76, R(s) + 3), P(s, sd * TUN_HW, R(s) + 3)]);
+        strip(std, "#8a8780", S0, S1, (s) => [P(s, sd * 76, R(s)), P(s, sd * 76, R(s) + 3)]);
+        strip(glow, "#ffb84a", S0, S1, (s) => [P(s, sd * (TUN_HW - 0.3), R(s) + 30), P(s, sd * (TUN_HW - 0.3), R(s) + 31.5)]);
+      }
+      strip(roofG, "#35343a", S0, S1, (s) => [P(s, -TUN_HW - 1, R(s) + TUN_H), P(s, TUN_HW + 1, R(s) + TUN_H)]);
+      // lamps on the ceiling, emergency signs on the walls
+      for (let s = S0 + 20; s < S1; s += 48) for (const d of [-36, 36]) { const [x, y, z] = P(s, d, R(s) + TUN_H - 1); glow.push(t.alongX ? box(16, 1.2, 4, x, y, z, "#fff2d0", 2.2) : box(4, 1.2, 16, x, y, z, "#fff2d0", 2.2)); }
+      for (let s = S0 + 150; s < S1; s += 400) for (const sd of [-1, 1]) { const [x, y, z] = P(s, sd * (TUN_HW - 0.6), R(s) + 22); glow.push(t.alongX ? box(10, 5, 1, x, y, z, "#3dff8b", 1.8) : box(1, 5, 10, x, y, z, "#3dff8b", 1.8)); }
+      // portal blocks with the opening, warning stripes and the name sign
+      for (const end of [0, 1]) {
+        const sA = end === 0 ? S0 : t.cov1, sB = end === 0 ? t.cov0 : S1, top = end === 0 ? t.top0 : t.top1;
+        const lo = Math.min(R(sA), R(sB)) - 40, hiRoad = Math.max(R(sA), R(sB)), ms = (sA + sB) / 2, ls = sB - sA;
+        const blk = (d0: number, d1: number, y0: number, y1: number, col: string) => {
+          const md = (d0 + d1) / 2, ld = d1 - d0, [x, , z] = P(ms, md, 0);
+          std.push(t.alongX ? box(ls, y1 - y0, ld, x, (y0 + y1) / 2, z, col) : box(ld, y1 - y0, ls, x, (y0 + y1) / 2, z, col));
+        };
+        blk(TUN_HW, TUN_SIDE + 8, lo, top, "#8e8a82"); blk(-TUN_SIDE - 8, -TUN_HW, lo, top, "#8e8a82"); blk(-TUN_HW, TUN_HW, hiRoad + TUN_H, top, "#a09b92");
+        // warning stripes round the opening, on the outer face
+        const face = end === 0 ? sA - 0.6 : sB + 0.6, fr = R(face);
+        for (let k = -TUN_HW; k < TUN_HW; k += 12) { const [x, y, z] = P(face, k + 6, fr + TUN_H + 3); std.push(t.alongX ? box(1, 6, 6, x, y, z, (k / 12) % 2 === 0 ? "#ffd23f" : "#15161b") : box(6, 6, 1, x, y, z, (k / 12) % 2 === 0 ? "#ffd23f" : "#15161b")); }
+        const pm = new THREE.Mesh(new THREE.PlaneGeometry(110, 21), new THREE.MeshBasicMaterial({ map: sign(t.name), toneMapped: false }));
+        const [px, py, pz] = P(face + (end === 0 ? -0.4 : 0.4), 0, fr + TUN_H + 18);
+        pm.position.set(px, py, pz);
+        pm.rotation.y = t.alongX ? (end === 0 ? -Math.PI / 2 : Math.PI / 2) : end === 0 ? Math.PI : 0;
+        this.scene.add(pm);
+      }
+      // the lid: hillside over the tube (follows the mountain, never lower than the ceiling)
+      const lidV: number[] = [], lidC: number[] = [], lidI: number[] = [];
+      const ns = Math.ceil((t.cov1 - t.cov0) / 25), nd = 20, DW = 230;
+      const grass = C("#667a3c"), grassHi = C("#9a9158"), rock = C("#6e665c"), tmp = new THREE.Color();
+      const hAt = (s: number, d: number) => { const [x, , z] = P(s, d, 0), nat = naturalH(x, z); return Math.abs(d) <= 170 ? Math.max(nat, R(s) + TUN_H + 8) : nat; };
+      for (let i = 0; i <= ns; i++) for (let j = 0; j <= nd; j++) {
+        const sv = t.cov0 + ((t.cov1 - t.cov0) * i) / ns, d = -DW + (2 * DW * j) / nd, h = hAt(sv, d);
+        const [x, , z] = P(sv, d, 0);
+        lidV.push(x, h + 0.8, z);
+        const slope = Math.abs(hAt(sv + 12, d) - hAt(sv - 12, d)) / 24 + Math.abs(hAt(sv, d + 12) - hAt(sv, d - 12)) / 24;
+        tmp.copy(grass).lerp(grassHi, clamp(h / 350, 0, 1)).lerp(rock, clamp((slope - 0.25) * 2.2, 0, 1));
+        lidC.push(tmp.r, tmp.g, tmp.b);
+        if (i < ns && j < nd) { const a = i * (nd + 1) + j, b = a + nd + 1; lidI.push(a, b, a + 1, b, b + 1, a + 1); }
+      }
+      const lg = new THREE.BufferGeometry();
+      lg.setAttribute("position", new THREE.Float32BufferAttribute(lidV, 3)); lg.setAttribute("color", new THREE.Float32BufferAttribute(lidC, 3)); lg.setIndex(lidI); lg.computeVertexNormals();
+      const lid = new THREE.Mesh(lg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide, envMapIntensity: 0.25 }));
+      lid.receiveShadow = true;
+      this.scene.add(lid); this.tunnelRoofs.push(lid);
+    }
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide, envMapIntensity: 0.12 });
+    const tube = new THREE.Mesh(mergeGeometries(std)!, mat);
+    tube.castShadow = true; tube.receiveShadow = true; tube.userData.cast = true;
+    this.scene.add(tube); this.cityMeshes.push(tube);
+    const ceil = new THREE.Mesh(mergeGeometries(roofG)!, mat);
+    ceil.castShadow = true; ceil.receiveShadow = true; ceil.userData.cast = true;
+    this.scene.add(ceil); this.cityMeshes.push(ceil); this.tunnelRoofs.push(ceil);
+    this.scene.add(new THREE.Mesh(mergeGeometries(glow)!, new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, side: THREE.DoubleSide })));
+    for (const g of [...std, ...glow, ...roofG]) g.dispose();
+  }
+
+  // ---------------------------------------------------------- airfield: runway, apron, hangar, tower
+  private buildAirfield() {
+    const A = AIRFIELD, P: THREE.BufferGeometry[] = [], G: THREE.BufferGeometry[] = [];
+    const len = A.y1 - A.y0, cy = (A.y0 + A.y1) / 2;
+    P.push(box(A.hw * 2, 0.6, len, A.x, 0.3, cy, "#3a3742"));
+    for (let y = A.y0 + 80; y < A.y1 - 80; y += 60) P.push(box(2.4, 0.7, 30, A.x, 0.35, y, "#f4f4f4"));
+    for (const sd of [-1, 1]) P.push(box(2, 0.7, len - 10, A.x + sd * (A.hw - 5), 0.35, cy, "#f4f4f4"));
+    for (const yEnd of [A.y0 + 30, A.y1 - 30]) for (let k = -4; k <= 4; k++) if (k) P.push(box(4, 0.7, 34, A.x + k * 10, 0.36, yEnd, "#f4f4f4"));
+    for (let y = A.y0 + 10; y < A.y1; y += 80) for (const sd of [-1, 1]) G.push(box(2.4, 1.6, 2.4, A.x + sd * (A.hw + 3), 1, y, sd < 0 ? "#3dff8b" : "#ffd23f", 2));
+    // apron between runway and hangar
+    P.push(box(150, 0.5, 520, A.x + A.hw + 75, 0.25, 3460, "#4a4752"));
+    for (const e of this.world.extras) {
+      if (e.detail !== -1) continue;
+      const cx = e.x + e.w / 2, cz = e.y + e.h / 2, H = e.height * H_SCALE + 14;
+      if (e.w > 100) {
+        // hangar: corrugated walls, big gate towards the runway
+        P.push(box(e.w, H - 4, e.h, cx, (H - 4) / 2, cz, "#8f959e"), box(e.w + 4, 4, e.h + 4, cx, H - 2, cz, "#6a707a"));
+        for (let k = 0; k < 7; k++) P.push(box(e.w + 0.6, 1, 2, cx, H - 4, e.y + 20 + k * 25, "#9aa3ad"));
+        P.push(box(1, H * 0.7, e.h * 0.7, e.x - 0.6, H * 0.35, cz, "#3a3d45"));
+        for (let k = 0; k < 10; k++) P.push(box(1.2, 4, e.h * 0.07, e.x - 1, H * 0.7 + 2, e.y + e.h * 0.15 + k * e.h * 0.07, k % 2 ? "#15161b" : "#ffd23f"));
+      } else {
+        // tower: shaft, glass cab, antenna
+        P.push(box(e.w * 0.6, H - 22, e.h * 0.6, cx, (H - 22) / 2, cz, "#b8b2a8"), box(e.w + 6, 3, e.h + 6, cx, H - 20.5, cz, "#5a5d66"), box(e.w + 4, 2, e.h + 4, cx, H, cz, "#5a5d66"), box(1, 18, 1, cx, H + 9, cz, "#c9ced8"));
+        G.push(box(e.w + 3, 16, e.h + 3, cx, H - 10, cz, "#8ad0ff", 1.2), box(2, 2, 2, cx, H + 18.5, cz, "#ff2040", 2.5));
+      }
+    }
+    // windsock
+    P.push(cyl(0.8, 0.8, 34, A.x + A.hw + 30, 17, A.y0 + 60, "#c9ced8", 6), withColor(new THREE.ConeGeometry(3.5, 16, 10).rotateZ(Math.PI / 2).translate(A.x + A.hw + 38, 32, A.y0 + 60), C("#ff8a1f")));
+    const m = new THREE.Mesh(mergeGeometries(P)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, polygonOffset: true, polygonOffsetFactor: -1 }));
+    m.receiveShadow = true; m.castShadow = this.quality === "high"; m.userData.cast = true;
+    this.scene.add(m); this.cityMeshes.push(m);
+    this.scene.add(new THREE.Mesh(mergeGeometries(G)!, new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false })));
+    for (const g of [...P, ...G]) g.dispose();
+  }
+
+  // ---------------------------------------------------------- police fighter jets
+  private jetObjs: { g: THREE.Group; burner: THREE.Mesh }[] = [];
+  private buildPoliceJets() {
+    const geo = jetGeo("#22355e", true);
+    for (let i = 0; i < 3; i++) {
+      const g = new THREE.Group(); g.rotation.order = "YXZ";
+      const tilt = new THREE.Group();
+      tilt.add(new THREE.Mesh(geo.body, this.bodyMat), new THREE.Mesh(geo.glass, this.glassMat), new THREE.Mesh(geo.lights, this.lightMat));
+      const burner = new THREE.Mesh(this.burnerGeo, this.burnerMat); burner.position.set(-33.5, 10, 0); burner.scale.set(1.8, 1.1, 1.1);
+      tilt.add(burner); tilt.position.y = -10;
+      g.add(tilt); g.visible = false;
+      this.scene.add(g);
+      this.jetObjs.push({ g, burner });
+    }
+  }
+  private syncPoliceJets(g: Game) {
+    const js = g.police.jets;
+    this.jetObjs.forEach((o, i) => {
+      const j = js[i];
+      o.g.visible = !!j && g.state !== "menu";
+      if (!j) return;
+      o.g.position.set(j.x, j.z, j.y);
+      o.g.rotation.set(j.dead ? j.bank : clamp(-j.bank * 0.6, -1.1, 1.1), -j.a, Math.atan2(j.vz, 760) * 0.8);
+      o.burner.visible = !j.dead;
+      o.burner.scale.x = 1.6 + Math.sin(g.t * 40 + i) * 0.2;
+    });
+  }
+
   private tmpM = new THREE.Matrix4(); private tmpQ = new THREE.Quaternion(); private tmpS = new THREE.Vector3(); private tmpP = new THREE.Vector3(); private up = new THREE.Vector3(0, 1, 0);
 
   private updateCamera(g: Game, dt: number) {
@@ -1663,8 +1896,8 @@ export class Renderer3D {
         let desired = p.a;
         if (p.vF > 60) desired = p.a + wrapA(Math.atan2(p.vy, p.vx) - p.a) * 0.55;
         this.camYaw += wrapA(desired - this.camYaw) * (1 - Math.exp(-dt * 5));
-        const fly = p.model === "heli";
-        const full = 112 + sp * 0.07 + (fly ? 70 : 0);
+        const fly = isAircraft(p.model);
+        const full = 112 + sp * 0.07 + (fly ? (p.model === "jet" ? 110 : 70) : 0);
         let dist = full;
         const cx = Math.cos(this.camYaw), cy = Math.sin(this.camYaw);
         for (let s = 0.12; s <= 1.0001; s += 0.08) if (this.world.isSolid(p.x - cx * full * s, p.y - cy * full * s, 6)) { dist = Math.max(36, full * s - 12); break; }
@@ -1689,6 +1922,9 @@ export class Renderer3D {
       this.camPos.lerp(tgt, k);
       this.camLook.lerp(tgt.set(lx, ly, lz), 1 - Math.exp(-dt * kp * 1.4));
     }
+    // never look through a wall, a hillside or a tunnel ceiling: pull the camera in front of it
+    if (cin) this.unblock(cin.x, cin.z + 20, cin.y);
+    else if (g.state !== "menu" && this.camMode === "chase") this.unblock(fx, fz + 14, fy);
     const cam = this.camera;
     cam.position.copy(this.camPos);
     cam.position.x += g.shakeX * 0.5; cam.position.y += g.shakeY * 0.35;
@@ -1699,7 +1935,45 @@ export class Renderer3D {
     this.sky.position.copy(cam.position);
   }
 
+  // the camera (already moved) and the point it looks at: is anything solid in between?
+  private unblock(tx: number, th: number, ty: number) {
+    const c = this.camPos, dx = c.x - tx, dh = c.y - th, dy = c.z - ty, N = 16;
+    let free = 1;
+    for (let i = 1; i <= N; i++) {
+      const k = i / N, x = tx + dx * k, h = th + dh * k, y = ty + dy * k;
+      const hit = (this.world.isSolid(x, y, 4) && h < this.world.roofAt(x, y) + 4) || h < terrainH(x, y) + 3 || inRock(x, y, h + 6);
+      if (hit) { free = (i - 1) / N; break; }
+    }
+    if (free < 1) { const k = Math.max(0.1, free - 0.04); c.set(tx + dx * k, th + dh * k, ty + dy * k); }
+  }
+
+  // draw: the room you are in, or the city
+  private draw(scene: THREE.Scene, cam: THREE.Camera, dt: number) {
+    if (this.composer && this.renderPass) {
+      const ps = this.renderPass.scene, pc = this.renderPass.camera;
+      this.renderPass.scene = scene; this.renderPass.camera = cam;
+      this.composer.render(dt);
+      this.renderPass.scene = ps; this.renderPass.camera = pc;
+    } else this.renderer.render(scene, cam);
+  }
+
   render(g: Game, dt: number) {
+    if (g.inside) {
+      const ins = g.inside;
+      this.interior.load(ins.room.id);
+      this.interior.update(g, dt, this.w / Math.max(1, this.h), ins.spot);
+      this.renderer.toneMappingExposure = 0.85; // indoor light: no blown-out white walls
+      this.draw(this.interior.scene, this.interior.camera, dt);
+      this.renderer.toneMappingExposure = 1;
+      return;
+    }
+    // driving through a tunnel in the bird's eye view: the hill and the ceiling are left out
+    const tube = !!inTube(g.fx, g.fy, g.fz);
+    const hideRoof = this.camMode === "top" && tube;
+    for (const m of this.tunnelRoofs) m.visible = !hideRoof;
+    // in a tunnel the daylight fades, the lamps take over (and back when you come out)
+    this.dark += ((tube && g.state !== "menu" ? 1 : 0) - this.dark) * Math.min(1, dt * 2.5);
+    this.hemi.intensity = 1.35 - this.dark * 0.95; this.moon.intensity = 4.2 - this.dark * 3.6;
     this.syncCars(g, dt);
     this.syncPickups(g);
     this.syncProjs(g);
@@ -1709,6 +1983,7 @@ export class Renderer3D {
     this.syncArrow(g);
     this.syncMarkers(g);
     this.syncHeli(g);
+    this.syncPoliceJets(g);
     this.syncSpikes(g);
     this.ped.update(g, dt);
     this.crowd.update(g.peds.list, g.state !== "menu");
@@ -1716,7 +1991,6 @@ export class Renderer3D {
     const scale = this.renderer.domElement.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
     this.smoke.mat.uniforms.scale.value = scale;
     this.glowPts.mat.uniforms.scale.value = scale;
-    if (this.composer) this.composer.render(dt);
-    else this.renderer.render(this.scene, this.camera);
+    this.draw(this.scene, this.camera, dt);
   }
 }

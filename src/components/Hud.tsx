@@ -40,12 +40,12 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onTog
         </button>
         <button onClick={onCam} className="flex h-11 items-center justify-center rounded-full border border-white/20 bg-black/40 px-3 text-xs font-bold tracking-wider backdrop-blur active:scale-90">🎥 {camera === "chase" ? "3D" : camera === "fp" ? "EGO" : "TOP"}</button>
         <button onClick={onToggleCar} className={"flex h-11 items-center justify-center rounded-full border px-3 text-xs font-bold tracking-wider backdrop-blur active:scale-90 " + (hud.onFoot && hud.canEnter ? "animate-pulse border-yellow-300 bg-yellow-400/30" : "border-white/20 bg-black/40")}>
-          {hud.onFoot ? "🚗 EINSTEIGEN" : "🚪 AUSSTEIGEN"}
+          {hud.room ? "🚪 RAUS" : hud.onFoot ? "🚗 EINSTEIGEN" : "🚪 AUSSTEIGEN"}
         </button>
         {!hud.onFoot && rules.city && <button onClick={onRadio} className="flex h-11 items-center justify-center rounded-full border border-white/20 bg-black/40 px-3 text-xs font-bold backdrop-blur active:scale-90" aria-label="Radio">📻</button>}
         {hud.job && <button onClick={onJob} className={"flex h-11 items-center justify-center rounded-full border px-3 text-xs font-bold backdrop-blur active:scale-90 " + (hud.job === "starten" ? "border-cyan-300 bg-cyan-400/25" : "border-white/20 bg-black/40")}>💼 JOB {hud.job === "starten" ? "" : "ENDE"}{!isTouch && " [J]"}</button>}
       </div>
-      <div className="absolute left-1/2 top-16 -translate-x-1/2 text-center text-xs font-semibold tracking-widest text-white/60">{fmtTime(hud.time)}{rules.cops && !rules.respawn && <> · {hud.takedowns} 🚓</>}</div>
+      <div className="absolute left-1/2 top-16 -translate-x-1/2 text-center text-xs font-semibold tracking-widest text-white/60">{hud.room ? `🏠 ${hud.room}` : fmtTime(hud.time)}{rules.cops && !rules.respawn && <> · {hud.takedowns} 🚓</>}</div>
 
       {/* mission objective */}
       {hud.objective && (
@@ -85,15 +85,18 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onTog
         ))}
         <button onClick={onWheel} className="flex h-14 w-10 items-center justify-center rounded-xl border border-white/15 bg-black/40 text-xs text-white/60 hover:border-white/40" aria-label="Waffenrad">◎</button>
         {hud.bombsPlaced > 0 && <button onClick={onDetonate} className="ml-2 flex h-14 w-20 animate-pulse flex-col items-center justify-center rounded-xl border border-red-400 bg-red-600/60 shadow-[0_0_20px_rgba(255,40,60,0.8)]"><span className="text-xl">💥</span><span className="font-display text-sm tracking-wider">ZÜNDEN [G]</span></button>}
+        {hud.jet && <button onClick={onDetonate} className="ml-2 flex h-14 w-20 flex-col items-center justify-center rounded-xl border border-orange-300 bg-orange-500/40 shadow-[0_0_16px_rgba(255,140,40,0.7)]"><span className="text-xl">🚀</span><span className="font-display text-sm tracking-wider">RAKETE [G]</span></button>}
       </div>
       {!isTouch && (
         <div className="absolute bottom-24 right-4 text-right">
-          <div className="font-display text-2xl tracking-wider text-white">{wIcon(hud.weapon)} {wName(hud.weapon)} {ammo && <span className={hud.reloading ? "text-yellow-300" : "text-white/80"}>{hud.reloading ? "NACHLADEN" : ammo}</span>}</div>
+          {hud.jet
+            ? <div className="font-display text-2xl tracking-wider text-white">✈️ BORDKANONE <span className="text-white/80">∞</span></div>
+            : <div className="font-display text-2xl tracking-wider text-white">{wIcon(hud.weapon)} {wName(hud.weapon)} {ammo && <span className={hud.reloading ? "text-yellow-300" : "text-white/80"}>{hud.reloading ? "NACHLADEN" : ammo}</span>}</div>}
           <div className="text-[11px] text-white/45">Klick / F = Feuer · Q / Mausrad = Wechsel · Tab = Waffenrad · R = Nachladen</div>
         </div>
       )}
 
-      {!isTouch ? (
+      {hud.room ? null : !isTouch ? (
         <div className="absolute bottom-5 left-1/2 -translate-x-1/2 text-center">
           <div className="cyan-text font-display text-5xl leading-none tracking-wider">{hud.kmh}</div>
           <div className="text-[10px] font-semibold tracking-[0.3em] text-white/50">KM/H</div>

@@ -1,5 +1,5 @@
 import { Car, MODEL_STATS, type CarModel } from "./vehicles";
-import { WATER_Y, isWater, terrainH } from "./world";
+import { AIRFIELD, MAP_MAX, MAP_MIN, WATER_Y, isWater, surfaceH, terrainGrad, terrainH } from "./world";
 import { DOCK_SPOT, HELI_SPOT } from "./places";
 import { steerTo } from "./traffic";
 import { sfx } from "./audio";
@@ -10,6 +10,8 @@ const SPAWN_NEAR = 1600, SPAWN_MIN = 260; // the vehicle (re)appears at its spot
 const SPOT_FREE = 300;                    // ... and none of its kind is closer to the spot than this
 export const HELI_CEIL = 900;             // highest flying altitude
 const HELI_CLIMB = 230, HELI_TURN = 1.9, HELI_LAND_HIT = 260;
+export const JET_CEIL = 1600;
+const JET_TAKEOFF = 330, JET_STALL = 300, JET_CLIMB = 320, JET_TURN = 1.3, JET_LAND_V = 480, JET_LAND_VZ = 240, JET_GROUND_MAX = 620;
 const SINK_TIME = 1.1;                    // seconds until a car in the water is lost
 const FLEE_TRY = [0, 0.5, -0.5, 1, -1, 1.6, -1.6, 2.3, -2.3, 3.1];
 
@@ -30,6 +32,7 @@ export class Craft {
     this.checkT = 1;
     this.keepAt("boat", DOCK_SPOT.x, DOCK_SPOT.y, DOCK_SPOT.a, "#f4f6fa");
     this.keepAt("heli", HELI_SPOT.x, HELI_SPOT.y, HELI_SPOT.a, "#ff3cac");
+    this.keepAt("jet", AIRFIELD.x, AIRFIELD.y1 - 70, -Math.PI / 2, "#8e9aa8");
   }
 
   // a vehicle of this model waits at (x, y) when you come close (also used for the job start points)
@@ -40,7 +43,7 @@ export class Craft {
     for (const c of g.cars) if (c.model === model && !c.dead && Math.hypot(c.x - x, c.y - y) < SPOT_FREE) return;
     const c = new Car("civ", model, color);
     const st = MODEL_STATS[model];
-    c.x = x; c.y = y; c.a = a; c.z = model === "boat" ? WATER_Y : terrainH(x, y) + (model === "heli" ? 3 : 0);
+    c.x = x; c.y = y; c.a = a; c.z = model === "boat" ? WATER_Y : model === "jet" ? this.jetGround(x, y) : terrainH(x, y) + (model === "heli" ? 3 : 0);
     c.hp = c.maxHp = st.hp; c.mass = st.mass;
     c.parked = true; c.handbrake = true; c.owned = true; // free to use: no crime
     g.cars.push(c);
@@ -137,6 +140,77 @@ export class Craft {
     c.air = c.z > gh + 2;
     // rotor sound for the player's helicopter
     if (engine && Math.random() < dt * 9) sfx.rotor(0.8);
+  }
+
+  // ---------- fighter jet ----------
+  // ground under a jet: hills, tunnel lids, roofs and the water surface
+  jetGround(x: number, y: number) { return Math.max(surfaceH(x, y), this.g.world.roofAt(x, y), WATER_Y); }
+
+  // rolls on the ground until it is fast enough, then climbs; lift: +1 climb, -1 descend; engine: somebody flies it
+  jet(c: Car, dt: number, lift: number, engine: boolean) {
+    const g = this.g, st = MODEL_STATS.jet;
+    const ca = Math.cos(c.a), sa = Math.sin(c.a);
+    let vF = c.vx * ca + c.vy * sa, vR = -c.vx * sa + c.vy * ca;
+    const thr = engine ? c.throttle : 0;
+    c.rotor += ((engine ? Math.max(0.25, thr) : 0) - c.rotor) * Math.min(1, dt * 3); // afterburner glow
+    const zPrev = c.z;
+    if (!c.air) {
+      // rolling: accelerate, brake, steer like a slow car; pull up (climb) when fast enough
+      if (thr > 0) vF += thr * st.acc * 0.8 * dt;
+      else if (thr < 0) vF = vF > 0 ? Math.max(0, vF - 520 * -thr * dt) : Math.max(-70, vF - 120 * -thr * dt);
+      vF -= vF * 0.25 * dt;
+      vF = clamp(vF, -70, JET_GROUND_MAX);
+      vR *= Math.exp(-8 * dt);
+      c.av += ((engine ? c.steer * 1.1 * Math.min(1, Math.abs(vF) / 90) * (vF < 0 ? -1 : 1) : 0) - c.av) * Math.min(1, dt * 6);
+      c.vz = 0;
+      if (engine && lift > 0 && vF > JET_TAKEOFF) { c.air = true; c.vz = 140; c.airT = 0; }
+      else if (engine && lift > 0 && Math.random() < dt * 2) g.hintMsg(`Abheben ab ${Math.round(JET_TAKEOFF * 0.36)} km/h`);
+    } else {
+      c.airT += dt;
+      if (thr > 0) vF += thr * st.acc * dt;
+      else if (thr < 0) vF -= 260 * -thr * dt;
+      else vF += (Math.max(vF, 520) - vF) * 0.3 * dt;
+      vF = clamp(vF, engine ? 220 : 160, st.maxV);
+      vR *= Math.exp(-3 * dt);
+      let turn = engine ? c.steer * JET_TURN * Math.min(1, vF / 400) : 0;
+      // edge of the airspace: the jet turns back towards the map by itself
+      const edge = 700, out = c.x < MAP_MIN + edge || c.x > MAP_MAX - edge || c.y < MAP_MIN + edge || c.y > MAP_MAX - edge;
+      if (out) {
+        const home = Math.atan2((MAP_MIN + MAP_MAX) / 2 - c.y, (MAP_MIN + MAP_MAX) / 2 - c.x);
+        let da = home - c.a; while (da > Math.PI) da -= Math.PI * 2; while (da < -Math.PI) da += Math.PI * 2;
+        if (Math.abs(da) > 0.3) turn = Math.sign(da) * JET_TURN;
+        if (c.kind === "player" && Math.random() < dt) g.hintMsg("Ende des Luftraums – der Jet dreht um");
+      }
+      c.av += (turn - c.av) * Math.min(1, dt * 3);
+      // too slow (or nobody at the stick): the jet sinks
+      const stall = !engine ? 1 : clamp((JET_STALL - vF) / 80, 0, 1);
+      const want = (engine ? lift * JET_CLIMB * Math.min(1, vF / 500) : 0) * (1 - stall) - stall * 160;
+      c.vz += (want - c.vz) * Math.min(1, dt * 2.5);
+    }
+    c.a += c.av * dt;
+    c.vx = ca * vF - sa * vR; c.vy = sa * vF + ca * vR;
+    c.x += c.vx * dt; c.y += c.vy * dt;
+    c.x = clamp(c.x, MAP_MIN + 60, MAP_MAX - 60); c.y = clamp(c.y, MAP_MIN + 60, MAP_MAX - 60);
+    c.vF = vF; c.vR = vR;
+    const gh = this.jetGround(c.x, c.y);
+    if (c.air) {
+      c.z += c.vz * dt;
+      if (c.z > JET_CEIL) { c.z = JET_CEIL; c.vz = Math.min(0, c.vz); }
+      if (c.z <= gh) {
+        // touch down on something flat and dry, slow and gently enough; anything else (a wall, a hillside, the bay) is a crash
+        const gr = terrainGrad(c.x, c.y, 12);
+        const soft = lift <= 0 && vF < JET_LAND_V && -c.vz < JET_LAND_VZ && zPrev >= gh - 6 && Math.hypot(gr.x, gr.y) < 0.18 && !isWater(c.x, c.y);
+        c.z = gh;
+        if (soft) { c.air = false; c.vz = 0; if (c.kind === "player") sfx.land(); }
+        else { c.air = false; g.jetCrash(c); return; }
+      }
+    } else {
+      // rolling into a wall or off a cliff edge
+      if (gh - c.z > 14 && Math.abs(vF) > 120) { g.jetCrash(c); return; }
+      if (c.z - gh > 25) { c.air = true; c.vz = 0; }
+      else c.z = gh;
+    }
+    if (engine && Math.random() < dt * 9) sfx.jet(0.4 + 0.6 * Math.min(1, Math.abs(vF) / 700));
   }
 
   // a car that drove into the bay sinks (true when it is lost this frame)

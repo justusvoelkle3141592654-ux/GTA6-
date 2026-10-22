@@ -1,13 +1,17 @@
 // vehicle data and the shared car entity
 import { noTune, type Tune } from "./garage";
 
-export type CarModel = "sport" | "super" | "muscle" | "suv" | "sedan" | "van" | "police" | "taxi" | "bike" | "truck" | "bus" | "swat" | "armor" | "boat" | "heli";
-export const CAR_MODELS: CarModel[] = ["sport", "super", "muscle", "suv", "sedan", "van", "police", "taxi", "bike", "truck", "bus", "swat", "armor", "boat", "heli"];
+export type CarModel = "sport" | "super" | "muscle" | "suv" | "sedan" | "van" | "police" | "taxi" | "bike" | "truck" | "bus" | "swat" | "armor" | "boat" | "heli" | "interceptor" | "polsuv" | "jet";
+export const CAR_MODELS: CarModel[] = ["sport", "super", "muscle", "suv", "sedan", "van", "police", "taxi", "bike", "truck", "bus", "swat", "armor", "boat", "heli", "interceptor", "polsuv", "jet"];
 // not a car: drives on water / flies (own physics, no garage, no traffic)
-export const isCraft = (m: CarModel) => m === "boat" || m === "heli";
+export const isCraft = (m: CarModel) => m === "boat" || m === "heli" || m === "jet";
+export const isAircraft = (m: CarModel) => m === "heli" || m === "jet";
+// police cars with a light bar (the player may drive them too)
+export const isCopModel = (m: CarModel) => m === "police" || m === "interceptor" || m === "polsuv" || m === "swat";
 export const MODEL_NAME: Record<CarModel, string> = {
   sport: "Corsaro", super: "Zephyra", muscle: "Torvan", suv: "Granit", sedan: "Limousine", van: "Lieferwagen", police: "Streifenwagen",
   taxi: "Taxi", bike: "Motorrad", truck: "Lastwagen", bus: "Stadtbus", swat: "SEK-Transporter", armor: "Radpanzer", boat: "Speedboot", heli: "Hubschrauber",
+  interceptor: "Polizei-Interceptor", polsuv: "Polizei-Geländewagen", jet: "Kampfjet",
 };
 
 export interface CarDef { id: string; name: string; model: CarModel; color: string; maxV: number; acc: number; grip: number; hp: number; mass: number; desc: string; }
@@ -38,6 +42,9 @@ export const MODEL_STATS: Record<CarModel, ModelStats> = {
   armor: { maxV: 440, acc: 430, grip: 13, hp: 600, mass: 4, price: 9000 },
   boat: { maxV: 520, acc: 520, grip: 2.6, hp: 140, mass: 1.2, price: 6000 },
   heli: { maxV: 480, acc: 380, grip: 2, hp: 200, mass: 1.5, price: 12000 },
+  interceptor: { maxV: 660, acc: 760, grip: 12, hp: 140, mass: 1.35, price: 6000 },
+  polsuv: { maxV: 520, acc: 600, grip: 13, hp: 230, mass: 2.1, price: 4500 },
+  jet: { maxV: 1150, acc: 430, grip: 2, hp: 280, mass: 2, price: 40000 },
 };
 
 export type CarKind = "player" | "cop" | "civ";
@@ -62,7 +69,8 @@ export class Car {
   hunt = false;   // gang car chasing the player (drives faster)
   flat = false;   // tyres burst by a spike strip (slow and slippery until repaired)
   wetT = 0;       // seconds a car has been in the water (it sinks)
-  rotor = 0;      // helicopter rotor angle
+  rotor = 0;      // helicopter rotor angle; jet: afterburner glow 0..1
+  px = 0; py = 0; // position before this physics step (walls push back to the side it came from)
   dead = false; deadT = 0; wrecked = false; wreckT = 0; parked = false;
   throttle = 0; steer = 0; handbrake = false; nitro = false;
   wpI = 0; wpJ = 0; prevI = -1; prevJ = -1; hasWp = false;

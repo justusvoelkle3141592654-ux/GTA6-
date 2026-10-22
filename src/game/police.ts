@@ -1,5 +1,5 @@
-import { Car } from "./vehicles";
-import { ROAD, GRID, WATER_Y, inCity, isWater, terrainH } from "./world";
+import { Car, isAircraft, type CarModel } from "./vehicles";
+import { ROAD, GRID, WATER_Y, inCity, inTube, isWater, surfaceH, terrainH } from "./world";
 import { steerTo, avoid, stuck } from "./traffic";
 import { SEEN_CLOSE, SEEN_DIST } from "./wanted";
 import { isPolice } from "./peds";
@@ -8,6 +8,10 @@ import type { Game } from "./engine";
 
 // police beyond the patrol cars: sight / last known position, cops on foot, roadblocks, helicopter, SWAT
 export const HELI_STARS = 4, ROADBLOCK_STARS = 3, SWAT_STARS = 5, ARMY_STARS = 6, SPIKE_STARS = 4;
+export const INTERCEPTOR_STARS = 2, POLSUV_STARS = 3, JET_STARS = 5, JET_AIR_STARS = 3; // fighter jets: from 5 stars, from 3 when you fly
+// top speed of the police models compared to a normal patrol car
+export const COP_SPEED: Partial<Record<CarModel, number>> = { interceptor: 1.22, polsuv: 1.05, armor: 0.9 };
+const JET_HP = 320, JET_SPEED = 820, JET_BOOST = 1200, JET_TURN = 0.9, JET_GUN_RANGE = 1050, JET_MISSILE_EVERY = 5.5, JET_BURST = 10;
 const SHELL_EVERY: [number, number] = [3.2, 4.5], SHELL_RANGE = 750; // armoured car: time between shots, range
 const PIT_RANGE = 150;            // a cop this close to a fast player aims for the rear corner (spin him out)
 const SPIKE_LIFE = 60, SPIKE_W = 120, SPIKE_D = 12;
@@ -17,12 +21,22 @@ const SEARCH_R = (stars: number) => 260 + stars * 120;
 
 export interface Spike { x: number; y: number; alongX: boolean; t: number; } // strip across the road, alongX: strip runs along x
 export interface Heli { x: number; y: number; z: number; a: number; vx: number; vy: number; hp: number; dead: boolean; vz: number; shootT: number; rotor: number; }
+// police fighter jet: strafing runs at you (and at armed gang members), missiles, falls down when shot
+export interface PoliceJet {
+  x: number; y: number; z: number; a: number; vx: number; vy: number; vz: number; bank: number;
+  hp: number; dead: boolean; shootT: number; burst: number; missileT: number;
+  passT: number;   // flies straight on for a moment after a pass
+  tgt: number;     // -1: the player, else a gang member (ped index)
+  retarget: number;
+}
 
 const TAU = Math.PI * 2;
+const wrapA = (a: number) => { while (a > Math.PI) a -= TAU; while (a < -Math.PI) a += TAU; return a; };
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 
 export class Police {
   heli: Heli | null = null;
+  jets: PoliceJet[] = [];
   spikes: Spike[] = [];
   lastX = 0; lastY = 0;        // where the police saw you last
   seen = false;                // somebody sees you right now
@@ -30,10 +44,11 @@ export class Police {
   private roadblockT = ROADBLOCK_EVERY;
   private armyCalled = false;
   private rotorT = 0;
+  private jetT = 0; private jetCalled = false; private jetSoundT = 0;
 
   constructor(private g: Game) {}
 
-  reset() { this.heli = null; this.seen = false; this.roadblockT = ROADBLOCK_EVERY; this.spikes.length = 0; }
+  reset() { this.heli = null; this.jets.length = 0; this.jetCalled = false; this.seen = false; this.roadblockT = ROADBLOCK_EVERY; this.spikes.length = 0; }
   get searchRadius() { return SEARCH_R(this.g.wanted.stars); }
 
   // a cop car / cop on foot / the helicopter can see (x, y)
@@ -50,7 +65,7 @@ export class Police {
       if (d < 120 || (d < 420 && g.world.lineClear(p.x, p.y, x, y, 40))) return true;
     }
     const h = this.heli;
-    return !!h && !h.dead && Math.hypot(h.x - x, h.y - y) < HELI_SPOT + 120;
+    return !!h && !h.dead && Math.hypot(h.x - x, h.y - y) < HELI_SPOT + 120 && !inTube(x, y, g.fz); // the helicopter can't look into a tunnel
   }
   // also counts calm patrol cars: a crime right in front of them is noticed
   patrolSees(x: number, y: number): boolean {
@@ -81,13 +96,19 @@ export class Police {
       const d = Math.hypot(x - fx, y - fy);
       if (d < 800 || d > 1350) continue;
       // SWAT vans at 5 stars, armoured cars of the military at 6 (open world)
-      const army = g.rules.city && g.wanted.stars >= ARMY_STARS && Math.random() < 0.45;
-      const swat = !army && g.rules.city && g.wanted.stars >= SWAT_STARS && Math.random() < 0.6;
-      const c = new Car("cop", army ? "armor" : swat ? "swat" : "police", army ? "#4b5320" : swat ? "#1b1d22" : "#f4f6fa");
+      // better cars the higher the wanted level: interceptors from 2 stars, heavy SUVs from 3, SWAT at 5, the military at 6
+      const st = g.wanted.stars, roll = Math.random(), r2 = Math.random();
+      const army = g.rules.city && st >= ARMY_STARS && roll < 0.4;
+      const swat = !army && g.rules.city && st >= SWAT_STARS && roll < 0.65;
+      const suv = !army && !swat && st >= POLSUV_STARS && r2 < 0.35;
+      const icp = !army && !swat && !suv && st >= INTERCEPTOR_STARS && r2 < (st >= POLSUV_STARS ? 0.7 : 0.5);
+      const model: CarModel = army ? "armor" : swat ? "swat" : suv ? "polsuv" : icp ? "interceptor" : "police";
+      const c = new Car("cop", model, army ? "#4b5320" : swat ? "#1b1d22" : icp ? "#15161b" : "#f4f6fa");
       c.x = x; c.y = y; c.z = terrainH(x, y);
       c.a = Math.atan2(fy - y, fx - x);
-      c.hp = c.maxHp = army ? 600 : swat ? 220 : g.config.difficulty === "easy" ? 70 : 100;
-      c.mass = army ? 4 : swat ? 2 : 1.25;
+      const easy = g.config.difficulty === "easy";
+      c.hp = c.maxHp = army ? 600 : swat ? 220 : suv ? (easy ? 150 : 200) : icp ? (easy ? 90 : 130) : easy ? 70 : 100;
+      c.mass = army ? 4 : swat ? 2 : suv ? 2.1 : icp ? 1.3 : 1.25;
       c.shootT = rnd(SHELL_EVERY[0], SHELL_EVERY[1]);
       if (army && !this.armyCalled) { this.armyCalled = true; g.banner("MILITÄR", "Radpanzer rücken aus – versteck dich!", "#9fb35a", 2.4); }
       c.driver = g.rules.city; // open world: officers get out when you are on foot
@@ -217,6 +238,7 @@ export class Police {
     if (!g.rules.city) return;
     if (w.stars < ARMY_STARS) this.armyCalled = false;
     this.updateHeli(dt);
+    this.updateJets(dt);
     this.updateSpikes(dt);
     // roadblocks ahead of you while you drive fast
     if (w.stars >= ROADBLOCK_STARS && !g.onFoot && inCity(g.fx, g.fy)) {
@@ -298,7 +320,7 @@ export class Police {
     const near = Math.hypot(h.x - g.fx, h.y - g.fy);
     if (this.rotorT <= 0) { this.rotorT = 0.11; sfx.rotor(Math.max(0, 1 - near / 1400)); }
     // the gunner shoots at the top wanted level
-    if (w.stars >= SWAT_STARS && this.seen && near < 420) {
+    if (w.stars >= SWAT_STARS && this.seen && near < 420 && !g.inside && !inTube(g.fx, g.fy, g.fz)) {
       h.shootT -= dt;
       if (h.shootT <= 0) {
         h.shootT = rnd(0.25, 0.5);
@@ -320,6 +342,128 @@ export class Police {
       g.crime("copTakedown", 2);
     }
     return true;
+  }
+
+  // ---------- fighter jets ----------
+  private jetsWanted() {
+    const g = this.g, s = g.wanted.stars, p = g.player;
+    const flying = !g.onFoot && isAircraft(p.model) && p.air;
+    let n = s >= ARMY_STARS ? 2 : s >= JET_STARS ? 1 : 0;
+    if (flying && s >= JET_AIR_STARS) n = Math.max(n, s >= JET_STARS ? 2 : 1); // nobody else can reach you up there
+    return n;
+  }
+
+  private updateJets(dt: number) {
+    const g = this.g;
+    const want = this.jetsWanted();
+    this.jetT -= dt;
+    let alive = 0;
+    for (const j of this.jets) if (!j.dead) alive++;
+    if (alive < want && this.jetT <= 0) {
+      this.jetT = 7;
+      const a = Math.random() * TAU;
+      const x = g.fx + Math.cos(a) * 3200, y = g.fy + Math.sin(a) * 3200;
+      this.jets.push({ x, y, z: Math.max(surfaceH(x, y) + 260, g.fz + 260), a: a + Math.PI, vx: 0, vy: 0, vz: 0, bank: 0, hp: JET_HP, dead: false, shootT: 0, burst: 0, missileT: 3, passT: 0, tgt: -1, retarget: 6 });
+      if (!this.jetCalled) { this.jetCalled = true; g.banner("KAMPFJETS", "Die Luftwaffe der Polizei greift an!", "#ff3a4d", 2.4); }
+    }
+    if (want === 0) this.jetCalled = false;
+    let nearest = Infinity, keep = want;
+    for (let i = this.jets.length - 1; i >= 0; i--) {
+      const j = this.jets[i];
+      if (j.dead) {
+        // falls burning and explodes on the ground
+        j.vz -= 320 * dt; j.x += j.vx * dt; j.y += j.vy * dt; j.z += j.vz * dt; j.bank += dt * 4;
+        if (Math.random() < 0.6) g.smokeAt(j.x, j.y, j.z);
+        if (j.z <= surfaceH(j.x, j.y) + 4) { g.explodeAt(j.x, j.y, 2); this.jets.splice(i, 1); }
+        continue;
+      }
+      const leaving = keep <= 0; // more jets than needed (or none needed any more): they fly home
+      if (!leaving) keep--;
+      // target: you, sometimes an armed gang member near you
+      j.retarget -= dt;
+      if (j.retarget <= 0) { j.retarget = rnd(8, 14); j.tgt = Math.random() < 0.3 ? g.peds.armedGangNear(g.fx, g.fy, 1400) : -1; }
+      const foe = j.tgt >= 0 ? g.peds.list[j.tgt] : null;
+      if (foe && (!foe.active || foe.state === "down")) j.tgt = -1;
+      const hidden = !foe && (!!g.inside || !!inTube(g.fx, g.fy, g.fz)); // in a tunnel (or indoors) the jets can't get at you
+      const known = !hidden && (this.seen || this.jetsSee());
+      const tx = foe ? foe.x : known ? g.fx : this.lastX, ty = foe ? foe.y : known ? g.fy : this.lastY, tz = foe ? foe.z : g.fz;
+      const dx = tx - j.x, dy = ty - j.y, d = Math.hypot(dx, dy);
+      nearest = Math.min(nearest, Math.hypot(j.x - g.fx, j.y - g.fy));
+      // heading: at the target, straight on for a bit after flying over it, away when no longer needed
+      j.passT -= dt;
+      if (d < 220 && j.passT <= 0) j.passT = 2.4;
+      const want_a = leaving ? j.a : Math.atan2(dy, dx);
+      const turn = j.passT > 0 ? 0 : Math.max(-JET_TURN * dt, Math.min(JET_TURN * dt, wrapA(want_a - j.a)));
+      j.a += turn;
+      j.bank += (turn / Math.max(dt, 1e-4) * 0.7 - j.bank) * Math.min(1, dt * 3);
+      const speed = !leaving && d > 1600 ? JET_BOOST : JET_SPEED; // afterburner to catch up
+      j.vx = Math.cos(j.a) * speed; j.vy = Math.sin(j.a) * speed;
+      j.x += j.vx * dt; j.y += j.vy * dt;
+      // altitude: dive towards the target on the attack run, never into the hills (it looks ahead)
+      const ahead = Math.max(surfaceH(j.x, j.y), surfaceH(j.x + j.vx * 0.6, j.y + j.vy * 0.6), surfaceH(j.x + j.vx * 1.2, j.y + j.vy * 1.2), g.world.roofAt(j.x, j.y));
+      const air = !foe && !g.onFoot && isAircraft(g.player.model) && g.player.air;
+      const zWant = leaving ? ahead + 600 : air ? tz : tz + 110 + Math.min(320, d * 0.22);
+      const zMin = ahead + 90;
+      j.vz += ((Math.max(zMin, zWant) - j.z) * 1.6 - j.vz) * Math.min(1, dt * 2);
+      j.z += j.vz * dt;
+      if (j.z < zMin - 40) j.z = zMin - 40;
+      if (leaving) { if (d > 4200) this.jets.splice(i, 1); continue; }
+      // guns: bursts when the nose points at the target
+      const aim = Math.abs(wrapA(Math.atan2(dy, dx) - j.a));
+      j.shootT -= dt; j.missileT -= dt;
+      if ((known || foe) && !hidden) {
+        if (aim < 0.3 && d < JET_GUN_RANGE && d > 120 && j.shootT <= 0) {
+          j.burst++;
+          j.shootT = j.burst >= JET_BURST ? (j.burst = 0, rnd(1.2, 1.8)) : 0.08;
+          const side = j.burst % 2 ? 9 : -9, ca = Math.cos(j.a), sa = Math.sin(j.a);
+          const ox = j.x + ca * 30 - sa * side, oy = j.y + sa * 30 + ca * side;
+          g.enemyShot3D(ox, oy, j.z - 4, tx + rnd(-14, 14), ty + rnd(-14, 14), tz + 10, 1500, g.config.difficulty === "easy" ? 4 : 7, "cop");
+        }
+        if (aim < 0.45 && d < 1400 && d > 300 && j.missileT <= 0) {
+          j.missileT = rnd(JET_MISSILE_EVERY, JET_MISSILE_EVERY + 2.5);
+          g.enemyMissile(j.x + Math.cos(j.a) * 30, j.y + Math.sin(j.a) * 30, j.z - 6, foe);
+        }
+      }
+    }
+    // engine roar when one is close
+    this.jetSoundT -= dt;
+    if (this.jetSoundT <= 0 && nearest < 1800) { this.jetSoundT = 0.12; sfx.jet(Math.max(0, 1 - nearest / 1800)); }
+  }
+  // jets have radar: they see a flying player anywhere close
+  private jetsSee() {
+    const g = this.g;
+    return !g.onFoot && isAircraft(g.player.model) && g.player.air && this.jets.some((j) => !j.dead && Math.hypot(j.x - g.fx, j.y - g.fy) < 2500);
+  }
+
+  // projectile at (x, y, z) hits a jet (real 3D distance: only aimed shots or missiles get up there)
+  hitJet(x: number, y: number, z: number, dmg: number, r = 42): PoliceJet | null {
+    for (const j of this.jets) {
+      if (j.dead || Math.abs(j.z - z) > r || Math.hypot(x - j.x, y - j.y) > r) continue;
+      j.hp -= dmg;
+      if (j.hp <= 0) {
+        j.dead = true; j.vz = 40;
+        const g = this.g;
+        g.banner("KAMPFJET ABGESCHOSSEN", "Die Polizei schickt den nächsten", "#ff3cac", 2.2);
+        g.crime("copTakedown", 2);
+        g.jetDown(j.x, j.y, j.z);
+      }
+      return j;
+    }
+    return null;
+  }
+
+  // the closest police jet or helicopter in front of you (rockets and the jet's guns lock on)
+  airTarget(ox: number, oy: number, facing: number, cone: number, range: number): { x: number; y: number; z: number; vx: number; vy: number } | null {
+    let best: { x: number; y: number; z: number; vx: number; vy: number } | null = null, bd = range;
+    const consider = (t: { x: number; y: number; z: number; vx: number; vy: number }) => {
+      const d = Math.hypot(t.x - ox, t.y - oy);
+      if (d >= bd) return;
+      if (Math.abs(wrapA(Math.atan2(t.y - oy, t.x - ox) - facing)) > cone) return;
+      best = t; bd = d;
+    };
+    for (const j of this.jets) if (!j.dead) consider(j);
+    if (this.heli && !this.heli.dead) consider(this.heli);
+    return best;
   }
 
   heliTarget(ox: number, oy: number, facing: number, cone: number): Heli | null {

@@ -1,7 +1,7 @@
-import { BLOCK, ROAD, GRID, WORLD, HELIPAD, type Building, type World } from "./world";
+import { BLOCK, ROAD, GRID, WORLD, HELIPAD, AIRFIELD, type Building, type World } from "./world";
 import type { EndReason } from "./engine";
 
-export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport" | "park" | "job";
+export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport" | "park" | "job" | "home" | "airport";
 export type PlaceAccess = "foot" | "car" | "both" | "none";
 
 export interface PlaceDef {
@@ -22,8 +22,8 @@ export const JETTY = { x0: DOCK_SPOT.x - 40, x1: -186, y: DOCK_SPOT.y - 26, hw: 
 export const onJetty = (x: number, y: number) => x > JETTY.x0 && x < JETTY.x1 && Math.abs(y - JETTY.y) < JETTY.hw;
 
 export const PLACE_DEFS: PlaceDef[] = [
-  { id: "hospital", kind: "hospital", name: "St. Aurelia Klinik", color: "#ff3b4e", icon: "+", near: [3, 7], access: "none" },
-  { id: "police", kind: "police", name: "Polizeiwache Mitte", color: "#3d8bff", icon: "*", near: [7, 3], access: "none" },
+  { id: "hospital", kind: "hospital", name: "St. Aurelia Klinik", color: "#ff3b4e", icon: "+", near: [3, 7], access: "foot" },
+  { id: "police", kind: "police", name: "Polizeiwache Mitte", color: "#3d8bff", icon: "*", near: [7, 3], access: "foot" },
   { id: "safehouse", kind: "safehouse", name: "Safehouse & Garage", color: "#3dff8b", icon: "H", near: [5, 6], access: "both" },
   { id: "gunshop", kind: "gunshop", name: "Kaliber Waffen", color: "#ff9f43", icon: "W", near: [6, 4], access: "foot" },
   { id: "workshop", kind: "workshop", name: "Lack & Turbo", color: "#9d4dff", icon: "T", near: [4, 4], access: "car" },
@@ -41,10 +41,14 @@ export const PLACE_DEFS: PlaceDef[] = [
   { id: "taxistand", kind: "job", job: "taxi", name: "Taxistand", color: "#ffc21a", icon: "X", near: [4, 7], access: "both" },
   { id: "depot", kind: "job", job: "delivery", name: "Lieferdepot", color: "#e67e22", icon: "P", near: [9, 6], access: "both" },
   { id: "patrol", kind: "job", job: "bounty", name: "Streife (Revier)", color: "#3d8bff", icon: "S", near: [7, 2], access: "both" },
+  // homes you can buy: the tower with six apartments, the villa near the beach
+  { id: "tower", kind: "home", name: "Wohnturm Bayview", color: "#ff8ad1", icon: "Z", near: [5, 3], access: "foot" },
+  { id: "villa", kind: "home", name: "Strandvilla", color: "#2bb3ff", icon: "Q", near: [1, 2], access: "foot" },
   // hide and seek in the park
   { id: "hide", kind: "park", name: "Versteckspiel im Park", color: "#3dff8b", icon: "V", near: [6, 7], access: "foot", inPark: true },
   { id: "jetty", kind: "dock", name: "Bootssteg", color: "#2bb3ff", icon: "B", near: [0, 6], access: "none", at: [-196, 3455, Math.PI] },
   { id: "helipad", kind: "heliport", name: "Heliport", color: "#ffd23f", icon: "F", near: [10, 3], access: "none", at: [WORLD + 440, 1900, Math.PI] },
+  { id: "airfield", kind: "airport", name: "Flugplatz", color: "#9fb4c8", icon: "J", near: [10, 6], access: "none", at: [AIRFIELD.x + AIRFIELD.hw + 30, AIRFIELD.y1 - 20, Math.PI] },
 ];
 
 export interface Place extends PlaceDef {
