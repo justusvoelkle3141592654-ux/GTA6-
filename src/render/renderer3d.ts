@@ -636,9 +636,11 @@ export class Renderer3D {
     for (const g of M) g.dispose();
   }
 
+  private padMat: THREE.MeshBasicMaterial | null = null;
   // launch ramps (wood, steel, concrete) and parking garage ramps
   private buildRamps() {
     const g = rampsMesh(this.world);
+    this.padMat = (g.userData.pad as THREE.MeshBasicMaterial | undefined) ?? null;
     g.traverse((o) => { if ((o as THREE.Mesh).isMesh && o.userData.cast) this.cityMeshes.push(o as THREE.Mesh); });
     this.scene.add(g);
   }
@@ -1830,6 +1832,7 @@ export class Renderer3D {
     this.rooms.update(g, dt, this.camPos);
     this.landmarks.update(g.clock, this.atm.state.night, g.t, dt);
     this.ped.update(g, dt, this.seatOf(g), this.camMode === "fp");
+    if (this.padMat?.map) this.padMat.map.offset.y = (this.padMat.map.offset.y - dt * 1.6) % 1; // boost pads: chevrons run towards the ramp
     this.people.update(g.peds.list, g.state !== "menu", this.camPos.x, this.camPos.z, g.fx, g.fy, dt);
     this.crowd.update(g.peds.list, g.state !== "menu", g.fx, g.fy, this.people.drawn);
     this.syncProps(g);

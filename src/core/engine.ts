@@ -1,5 +1,5 @@
 import { sfx } from "../audio/audio";
-import { World, MAP_MIN, MAP_MAX, WATER_Y, EDGE_LAND, SOFT_EDGE, TUNNEL, ROAD, inCity, isWater, isEdgeSea, edgeDist, terrainH, terrainGrad, tunnelAt, roofOf, type Building } from "../world/world";
+import { World, MAP_MIN, MAP_MAX, WATER_Y, EDGE_LAND, SOFT_EDGE, TUNNEL, ROAD, inCity, isWater, isEdgeSea, edgeDist, terrainH, terrainGrad, tunnelAt, roofOf, PAD_S0, PAD_S1, type Building } from "../world/world";
 import { Renderer3D } from "../render/renderer3d";
 import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, CRIMES, type Crime } from "../ai/wanted";
@@ -1674,6 +1674,10 @@ export class Game {
   // walls stop you, except the building you are standing on top of
   private pedBlocked(x: number, y: number) {
     const w = this.world;
+    // bridge rails: on the deck you cannot walk off the side
+    const pd = this.ped;
+    const deck = this.onDeck(pd.x, pd.y, pd.z) ? w.roads.bridgeAt(pd.x, pd.y, 4) : null;
+    if (deck) { const b = deck.b, s = b.alongX ? x : y, v = b.alongX ? y : x; if (s > b.s0 && s < b.s1 && Math.abs(v - b.c) > b.hw - 4) return true; }
     if (!w.isSolid(x, y, 7)) return false;
     return !(this.ped.z > 30 && w.roofAt(x, y) <= this.ped.z + 4);
   }
@@ -1702,7 +1706,8 @@ export class Game {
     if (!this.pedBlocked(nx, pd.y)) pd.x = nx; else pd.vx = 0;
     if (!this.pedBlocked(pd.x, ny)) pd.y = ny; else pd.vy = 0;
     const jetty = onJetty(pd.x, pd.y);
-    const wet = !jetty && isWater(pd.x, pd.y);
+    // on a bridge deck over the bay you walk, you do not swim
+    const wet = !jetty && isWater(pd.x, pd.y) && !this.onDeck(pd.x, pd.y, pd.z);
     // ground: water surface, jetty, bridge deck / tunnel floor / terrain, roofs (only the one you stand on), ramps
     let ground = wet ? WATER_Y - 13 : jetty ? 2.5 : this.groundH(pd.x, pd.y, pd.z + 4);
     if (!wet) ground = Math.max(ground, w.rampH(pd.x, pd.y), interiorFloor(this.interiors, pd.x, pd.y, pd.z));
@@ -1770,7 +1775,7 @@ export class Game {
     const fx = this.fx, fy = this.fy, e = edgeDist(fx, fy);
     const p = this.player;
     const craft = !this.onFoot && (isBoat(p.model) || isHeli(p.model));
-    if (!craft && e < EDGE_LAND + 600 && terrainH(fx, fy) < WATER_Y - 30 && this.fz > WATER_Y + 4 && (this.onFoot ? this.ped.air : p.air)) { this.startFall(true); return; }
+    if (!craft && e < EDGE_LAND + 600 && terrainH(fx, fy) < WATER_Y - 30 && this.fz > WATER_Y + 4 && (this.onFoot ? this.ped.air : p.air) && !this.world.roads.bridgeAt(fx, fy, 30)) { this.startFall(true); return; }
     if (!craft && isEdgeSea(fx, fy) && this.fz <= WATER_Y + 2) { this.startFall(false); return; }
     // soft border: current on the water, head wind in the air
     const zone = SOFT_EDGE + 500;
@@ -1876,8 +1881,12 @@ export class Game {
           // vehicle multiplier from the settings: more top speed and pull, a bit more grip so it stays drivable
           const vs = currentSettings.vehSpeed;
           const t = p.tune, top = st.maxV * tuneSpeed(t) * vs, grip = st.grip * tuneGrip(t) * Math.sqrt(vs);
-          const maxV = (p.nitro ? top + 280 : top) * (p.flat ? 0.6 : 1);
-          const acc = (p.nitro ? st.acc + 500 : st.acc) * tuneAcc(t) * vs;
+          // boost pad: much more top speed and pull for a moment
+          if (!p.air) this.boostPad(p, top);
+          if (p.boostT > 0) p.boostT -= dt;
+          const bo = p.boostT > 0 ? 1 + 0.5 * Math.min(1, p.boostT / 0.6) : 1;
+          const maxV = (p.nitro ? top + 280 : top) * (p.flat ? 0.6 : 1) * bo;
+          const acc = (p.nitro ? st.acc + 500 : st.acc) * tuneAcc(t) * vs * bo;
           const g2 = (grass ? grip * 0.5 : grip) * (p.flat ? 0.45 : 1);
           this.drive(c, dt, acc, grass ? maxV * 0.8 : maxV, g2, 1.7);
           if (p.flat && p.speed > 120 && P60(0.3, dt)) this.sparks(p.x - Math.cos(p.a) * 14, p.y - Math.sin(p.a) * 14, p.z + 2, 1, -p.vx, -p.vy, 0.4);
@@ -1890,7 +1899,7 @@ export class Game {
       else this.drive(c, dt, 300, c.cruise + 20, 12, 3);
       this.collideWorld(c);
       // cars that drive into the bay sink (going over the cliffs at the border is handled by checkBorder)
-      if (this.rules.city && !(c === p && this.fall) && this.craft.sink(c, dt)) this.onSunk(c);
+      if (this.rules.city && !(c === p && this.fall) && !this.onDeck(c.x, c.y, c.z) && this.craft.sink(c, dt)) this.onSunk(c);
     }
     this.collideCars();
     this.jobs.afterPhysics();
@@ -2144,7 +2153,7 @@ export class Game {
         const sp = Math.hypot(c.vx, c.vy);
         if (sp > AIR_MAX) { c.vx *= AIR_MAX / sp; c.vy *= AIR_MAX / sp; }
       }
-      c.vz -= GRAV * dt * (boostAir ? 0.45 : 1);
+      c.vz -= GRAV * dt * (boostAir ? 0.45 : 1) * (c.boostAir ? 0.7 : 1);
       c.x += c.vx * dt; c.y += c.vy * dt; c.z += c.vz * dt;
       this.sweep(c, dt);
       c.av *= Math.exp(-1.5 * dt);
@@ -2202,7 +2211,7 @@ export class Game {
     if ((zFall > gh + 1.5 && c.vz > 40 && c.speed > 120) || c.z - gh > 25) { c.air = true; c.airT = 0; c.z = zFall; }
     else {
       // following the road never makes the car shoot up faster than the slope allows
-      const maxUp = c.speed * 0.47 + 60;
+      const maxUp = c.speed * 0.6 + 60;
       c.vz = clamp((gh - c.z) / dt, -900, maxUp); c.z = gh;
     }
   }
@@ -2221,6 +2230,8 @@ export class Game {
     if (roof > g && z >= roof - 25) g = roof;
     return g;
   }
+  // standing / driving on a bridge deck (not under it)
+  onDeck(x: number, y: number, z: number) { const br = this.world.roads.bridgeAt(x, y, 4); return !!br && z >= br.h - 14; }
   groundAt(x: number, y: number) { return Math.max(this.groundH(x, y), WATER_Y); } // for the helicopter: the water surface counts
 
   // ramps: the surface only counts for a car that drove on over the low edge (or came down on it from above)
@@ -2229,7 +2240,15 @@ export class Game {
     if (c.onRamp >= 0) {
       const rp = w.ramps[c.onRamp], q = w.rampLocal(rp, c.x, c.y);
       if (q.s >= -8 && q.s <= rp.l && q.v >= -6 && q.v <= rp.w + 6) return rp.base + rp.h * clamp(q.s / rp.l, 0, 1);
-      if (q.s > rp.l && c.kind === "player") this.jumpStart = { x: c.x, y: c.y, ramp: c.onRamp }; // launched over the lip
+      if (q.s > rp.l && c.kind === "player") {
+        this.jumpStart = { x: c.x, y: c.y, ramp: c.onRamp }; // launched over the lip
+        if (rp.jump && !this.onFoot) {
+          // launch ramps kick you up a bit more and fill up the nitro; after a boost pad you fly much further
+          c.vz += 90;
+          if (c.boostT > 0) c.boostAir = true;
+          if (this.nitro < 1) { this.nitro = Math.min(1, this.nitro + 0.5); this.text(c.x, c.y - 40, "+NITRO", "#2bf0ff", 22); }
+        }
+      }
       c.onRamp = -1; // over the lip, back off the low end or off a side
       return -Infinity;
     }
@@ -2376,12 +2395,33 @@ export class Game {
     this.banner("ABGESOFFEN", "Der Wagen ist im Wasser versunken – schwimm an Land", "#2bb3ff", 2.2);
   }
 
+  // boost pad in front of a launch ramp (driving towards the ramp): a big push forward and a full nitro tank
+  private boostPad(c: Car, top: number) {
+    const w = this.world, ids = w.rampsAt(c.x, c.y);
+    if (!ids) return;
+    for (const i of ids) {
+      const rp = w.ramps[i];
+      if (!rp.jump) continue;
+      const q = w.rampLocal(rp, c.x, c.y);
+      if (q.s < PAD_S0 || q.s > PAD_S1 || q.v < 0 || q.v > rp.w) continue;
+      const ra = w.rampDir(rp);
+      if (Math.cos(c.a - ra) < 0.5) return;
+      if (c.boostT < 1) { sfx.nitro(); this.text(c.x, c.y - 40, "BOOST", "#ff3cac", 26); this.shake(0.15); }
+      c.boostT = 1.6;
+      this.nitro = 1;
+      // push along the heading up to well over the normal top speed
+      const ca = Math.cos(c.a), sa = Math.sin(c.a), vF = c.vx * ca + c.vy * sa, want = Math.max(vF, top * 1.4);
+      c.vx += ca * (want - vF); c.vy += sa * (want - vF);
+      return;
+    }
+  }
+
   // the player's car left a ramp: remember where (jump distance, stunt jumps, records)
   private jumpStart: { x: number; y: number; ramp: number } | null = null;
 
   private land(c: Car, gh: number) {
     const impact = -c.vz;
-    c.z = gh; c.air = false;
+    c.z = gh; c.air = false; c.boostAir = false;
     if (c.kind === "player" && !this.onFoot && this.rules.city && this.state === "playing") {
       const js = this.jumpStart;
       this.jumpStart = null;

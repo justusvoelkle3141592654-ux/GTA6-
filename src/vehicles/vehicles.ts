@@ -106,6 +106,8 @@ export class Car {
   wetT = 0;       // seconds a car has been in the water (it sinks)
   rotor = 0;      // helicopter rotor angle
   onRamp = -1;    // ramp the car drives on (entered over its low edge), -1: none
+  boostT = 0;     // seconds left of a boost pad push
+  boostAir = false; // launched off a ramp with a boost: floats further (less gravity) until it lands
   croad = -1; cp = 0; cdir = 1; // highway traffic: road id, point index, direction (1 away from the city)
   route2: Float32Array | null = null; routeN = 0; routeT = 0; // police: street route to the target
   dead = false; deadT = 0; wrecked = false; wreckT = 0; parked = false;

@@ -42,13 +42,14 @@ export function steerTo(c: Car, tx: number, ty: number) {
   return diff;
 }
 // walls and the bay are in the way of cars
-const blocked = (w: World, x: number, y: number) => w.isSolid(x, y, 6) || isWater(x, y);
+const blocked = (w: World, x: number, y: number) => w.isSolid(x, y, 6) || (isWater(x, y) && !w.roads.bridgeAt(x, y));
 export function avoid(c: Car, w: World) {
   const look = 46 + Math.abs(c.vF) * 0.28;
   if (blocked(w, c.x + Math.cos(c.a) * look, c.y + Math.sin(c.a) * look)) {
     const l = blocked(w, c.x + Math.cos(c.a - 0.75) * look * 0.85, c.y + Math.sin(c.a - 0.75) * look * 0.85);
     const r = blocked(w, c.x + Math.cos(c.a + 0.75) * look * 0.85, c.y + Math.sin(c.a + 0.75) * look * 0.85);
-    if (isWater(c.x + Math.cos(c.a) * look, c.y + Math.sin(c.a) * look) && Math.abs(c.vF) > 120) c.throttle = -1; // brake at the shore
+    const ax = c.x + Math.cos(c.a) * look, ay = c.y + Math.sin(c.a) * look;
+    if (isWater(ax, ay) && !w.roads.bridgeAt(ax, ay) && Math.abs(c.vF) > 120) c.throttle = -1; // brake at the shore
     if (l && !r) c.steer = 1; else if (r && !l) c.steer = -1;
     if (Math.abs(c.vF) > 260) c.throttle = Math.min(c.throttle, 0.2);
   }

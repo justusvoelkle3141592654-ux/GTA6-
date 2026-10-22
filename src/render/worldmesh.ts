@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import {
   World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_SIZE, MAP_MAX, WATER_Y, COAST, EDGE_LAND, TUNNEL, STUNT_PARK, H_SCALE,
-  terrainH, terrainGrad, coast, cityDist, edgeDist, tunnelAt, tunnelFloor, isWater, mulberry32, roofOf, type Ramp, type Building,
+  terrainH, terrainGrad, coast, cityDist, edgeDist, tunnelAt, tunnelFloor, isWater, mulberry32, roofOf, PAD_S0, PAD_S1, type Ramp, type Building,
 } from "../world/world";
 import { canvasTex, withColor, C, box, cyl, clamp } from "./meshutil";
 import { TrafficLights } from "../ai/traffic";
@@ -229,10 +229,25 @@ function rampTex(kind: "wood" | "steel" | "concrete") {
   return t;
 }
 
+// boost pad: glowing chevrons (the texture scrolls, see Renderer3D)
+function padTex() {
+  const t = canvasTex(128, 128, (g) => {
+    g.fillStyle = "#16091f"; g.fillRect(0, 0, 128, 128);
+    g.lineWidth = 14; g.lineJoin = "miter"; g.lineCap = "butt";
+    for (const [y, col] of [[18, "#ff3cac"], [82, "#2bf0ff"]] as const) {
+      g.strokeStyle = col; g.shadowColor = col; g.shadowBlur = 10;
+      g.beginPath(); g.moveTo(14, y + 34); g.lineTo(64, y); g.lineTo(114, y + 34); g.stroke();
+    }
+    g.shadowBlur = 0; g.fillStyle = "#ffd23f"; g.fillRect(0, 0, 6, 128); g.fillRect(122, 0, 6, 128);
+  });
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
 export function rampsMesh(world: World): THREE.Group {
   const grp = new THREE.Group();
   const byKind: Record<string, G[]> = { wood: [], steel: [], concrete: [] };
-  const D: G[] = [], E: G[] = [], SH: G[] = [];
+  const D: G[] = [], E: G[] = [], SH: G[] = [], PD: G[] = [];
   // quad with uv in ramp space (u across, v along the slope)
   const quad = (out: G[], p: number[][], uv: number[][]) => {
     const g = new THREE.BufferGeometry();
@@ -268,17 +283,27 @@ export function rampsMesh(world: World): THREE.Group {
       D.push(beam(w - 6, 1.6, 1.6, pm[0], base + top(l * 0.45), pm[2], a + Math.PI / 2, col));
     }
     // warning stripes on the steel lip, curb edge on concrete
-    if (kind === "steel") for (let k = 0; k < 8; k++) { const p = P(l - 2, h + 0.15, (k + 0.5) * (w / 8)); D.push(beam(4, 0.4, w / 8 - 0.3, p[0], p[1], p[2], a, k % 2 ? "#15161b" : "#ffd23f")); }
+    if (rp.jump) for (let k = 0; k < 8; k++) { const p = P(l - 2, h + 0.15, (k + 0.5) * (w / 8)); D.push(beam(4, 0.4, w / 8 - 0.3, p[0], p[1], p[2], a, k % 2 ? "#15161b" : "#ffd23f")); }
     if (kind === "concrete" && rp.bld) for (const v of [0, w]) {
       // garage ramp: low walls on both sides
       for (let s = 0; s < l; s += 20) { const p = P(s + 10, 0, v); D.push(beam(20.4, 7, 2.5, p[0], base + top(s + 10) + 3.5, p[2], a, "#bdb8ae", Math.atan2(h, l) * (rp.rising > 0 ? 1 : -1) * (rp.alongX ? 1 : -1))); }
     }
     // arrow on the ground in front, reflector posts at the low corners, a soft shadow
     if (rp.jump) {
-      const pa = P(-26, 0, w / 2);
-      const g = new THREE.ShapeGeometry(new THREE.Shape([new THREE.Vector2(-9, -5), new THREE.Vector2(3, -5), new THREE.Vector2(3, -10), new THREE.Vector2(13, 0), new THREE.Vector2(3, 10), new THREE.Vector2(3, 5), new THREE.Vector2(-9, 5)]));
-      g.rotateX(-Math.PI / 2); g.rotateY(-a); g.translate(pa[0], terrainH(pa[0], pa[2]) + 0.5, pa[2]);
-      E.push(withColor(g, C("#f4f4f6"), 1.2));
+      // yellow and black edges along both sides of the slope, a white stripe in the middle
+      const pitch = Math.atan2(h, l), len = Math.hypot(l, h);
+      for (const [v, col, d] of [[1.6, "#ffd23f", 3], [w - 1.6, "#ffd23f", 3], [w / 2, "#f4f4f6", 1.6]] as const) {
+        const pm = P(l / 2, h / 2 + 0.25, v);
+        D.push(beam(len, 0.3, d, pm[0], pm[1], pm[2], a, col, pitch));
+      }
+      // boost pad on the ground in front of the low edge
+      const pad = new THREE.BufferGeometry(), gz = (s: number, v: number) => { const q = P(s, 0, v); return terrainH(q[0], q[2]) + 0.6; };
+      const c0 = P(PAD_S0, 0, 2), c1 = P(PAD_S1, 0, 2), c2 = P(PAD_S1, 0, w - 2), c3 = P(PAD_S0, 0, w - 2);
+      c0[1] = gz(PAD_S0, 2); c1[1] = gz(PAD_S1, 2); c2[1] = gz(PAD_S1, w - 2); c3[1] = gz(PAD_S0, w - 2);
+      const rep = (PAD_S1 - PAD_S0) / (w - 4);
+      pad.setAttribute("position", new THREE.Float32BufferAttribute([...c0, ...c1, ...c2, ...c0, ...c2, ...c3], 3));
+      pad.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 0, rep, 1, rep, 0, 0, 1, rep, 1, 0], 2));
+      PD.push(pad);
       for (const v of [-3, w + 3]) {
         const p = P(-2, 0, v);
         D.push(box(1.5, 10, 1.5, p[0], base + 5, p[2], "#f4f4f6"));
@@ -298,6 +323,11 @@ export function rampsMesh(world: World): THREE.Group {
   }
   if (D.length) { const m = new THREE.Mesh(merge(D), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.2 })); m.castShadow = true; m.userData.cast = true; grp.add(m); }
   if (E.length) grp.add(new THREE.Mesh(merge(E), new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false })));
+  if (PD.length) {
+    const pm = new THREE.MeshBasicMaterial({ map: padTex(), toneMapped: false, side: THREE.DoubleSide });
+    grp.add(new THREE.Mesh(mergeGeometries(PD)!, pm));
+    grp.userData.pad = pm;
+  }
   if (SH.length) {
     const shadow = canvasTex(64, 64, (g) => { const gr = g.createRadialGradient(32, 32, 4, 32, 32, 32); gr.addColorStop(0, "rgba(0,0,0,0.5)"); gr.addColorStop(1, "rgba(0,0,0,0)"); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); });
     const m = new THREE.Mesh(merge(SH), new THREE.MeshBasicMaterial({ map: shadow, transparent: true, depthWrite: false }));

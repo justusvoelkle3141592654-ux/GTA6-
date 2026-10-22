@@ -23,7 +23,8 @@ export interface Ramp {
   kind: RampKind;
   jump: boolean;          // launch ramp (stunt jumps, records)
 }
-export const RAMP_MAX_JUMP = 22, RAMP_MAX_ROOF = 12; // steepest slopes in degrees
+export const RAMP_MAX_JUMP = 28, RAMP_MAX_ROOF = 12; // steepest slopes in degrees
+export const PAD_S0 = -100, PAD_S1 = -30; // boost pad in front of every launch ramp (ramp space: s before the low edge)
 
 export interface Building {
   x: number; y: number; w: number; h: number; height: number;
@@ -174,7 +175,7 @@ export class World {
 
   // launch ramp with a free run-up and a free landing zone
   private tryJump(sx: number, sy: number, dir: number, kind: RampKind, r: () => number): boolean {
-    const deg = 15 + r() * 7, L = 95 + Math.floor(r() * 3) * 10, w = 56;
+    const deg = 21 + r() * 7, L = 120 + Math.floor(r() * 4) * 10, w = 56;
     const h = L * Math.tan((deg * Math.PI) / 180);
     const dx = dir === 0 ? 1 : dir === 1 ? -1 : 0, dy = dir === 2 ? 1 : dir === 3 ? -1 : 0;
     const base = terrainH(sx, sy);

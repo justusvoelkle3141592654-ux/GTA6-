@@ -65,7 +65,7 @@ export class Police {
 
   spawnCop() {
     const g = this.g, fx = g.fx, fy = g.fy;
-    if (g.rules.city && isWater(fx, fy)) { this.spawnBoat(); return; }
+    if (g.rules.city && isWater(fx, fy) && !g.onDeck(fx, fy, g.fz)) { this.spawnBoat(); return; }
     const outside = !inCity(fx, fy);
     for (let tries = 0; tries < 40; tries++) {
       let x: number, y: number;
@@ -134,7 +134,7 @@ export class Police {
     // straight at the target only when nothing (buildings, water) is in the way; otherwise along the streets, bridges and the tunnel
     const wetBetween = (x0: number, y0: number, x1: number, y1: number) => {
       const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 60);
-      for (let k = 1; k <= n; k++) if (isWater(x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n)) return true;
+      for (let k = 1; k <= n; k++) { const x = x0 + ((x1 - x0) * k) / n, y = y0 + ((y1 - y0) * k) / n; if (isWater(x, y) && !w.roads.bridgeAt(x, y)) return true; }
       return false;
     };
     const outside = !inCity(c.x, c.y) && !inCity(fx, fy);
