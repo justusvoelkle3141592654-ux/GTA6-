@@ -111,3 +111,4 @@ Getestet wurde automatisiert in einem Headless-Chromium mit Software-Rendering (
   - Schnellreise zu Läden, Stadtteilen und Orten (Klinik, Polizei, Stunt-Park, Bootssteg, Heliport, eigener Wegpunkt): „Fliegen“ als kurzer Flug durch die Luft, „Sofort“ als Teleport. Bei Läden landet man direkt im Laden.
   - Schnellreise und Fahrzeug holen sind während Missionen und des Versteckspiels gesperrt.
 - Geprüft im Browser (Playwright, niedrige Grafikstufe): Teleport und Flug in Läden, Fliegen zu Fuß und im Auto, Landen ohne Schaden, Menü-Reiter. Nicht auf einem echten Handy getestet.
+- Kamera nah/weit: Neue Einstellung (Standard: nah), HUD-Knopf NAH/WEIT, Taste X, Gamepad Steuerkreuz links. Nah halbiert zu Fuß ungefähr den Kameraabstand (Figur etwa doppelt so groß im Bild), im Auto 60 % Abstand, Vogelperspektive 60 % Höhe. Geprüft per Screenshot in einem flachen Handy-Format (860 x 400), nicht auf einem echten Handy.
