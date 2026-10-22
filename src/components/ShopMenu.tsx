@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Game, ShopView } from "../game/engine";
 import type { Place } from "../game/places";
-import { FOOD, OUTFITS, ARMOR_PRICE, PAINT_PRICE, type ShopAction } from "../game/economy";
+import { FOOD, OUTFITS, ARMOR_PRICE, PAINT_PRICE, MARKET, HAIR_STYLES, BEARDS, TATTOOS, type ShopAction } from "../game/economy";
 import { WEAPON_DEFS } from "../game/weapons";
 import { MAX_TUNE, PAINTS, TUNE_DEFS, TUNE_PARTS } from "../game/garage";
 import { fmt } from "./ui";
@@ -9,6 +9,7 @@ import { fmt } from "./ui";
 const TITLE: Record<Place["kind"], string> = {
   hospital: "Klinik", police: "Wache", gunshop: "Waffenladen", workshop: "Werkstatt & Lackiererei", clothes: "Kleidung",
   food: "Imbiss", safehouse: "Safehouse", contact: "", dock: "Bootssteg", heliport: "Heliport", park: "Park", job: "Job",
+  market: "Supermarkt", cardealer: "Autohaus", barber: "Friseur & Tattoo", mall: "Foodcourt",
 };
 
 function Row({ children }: { children: React.ReactNode }) {
@@ -71,7 +72,38 @@ export default function ShopMenu({ game, place, onClose }: { game: Game; place: 
             </Row>
           </>}
 
-          {place.kind === "food" && <>
+          {place.kind === "market" && <>
+            <div className="text-white/60">Gesundheit {Math.round(view.hp)}/{view.maxHp}{view.energy > 0 && <span className="ml-2 text-cyan-300">Energie noch {view.energy} s</span>}</div>
+            {MARKET.map((m, i) => (
+              <Row key={m.name}><div><b>{m.name}</b> <span className="text-white/50">{m.energy ? `${m.energy} s schneller rennen` : `+${m.heal} Gesundheit`}</span></div><Buy label="Kaufen" price={m.price} onClick={() => act({ t: "market", i })} disabled={view.cash < m.price || (!m.energy && view.hp >= view.maxHp)} /></Row>
+            ))}
+            {robBtn}
+          </>}
+
+          {place.kind === "cardealer" && <>
+            <div className="text-white/60">Gekaufte Autos stehen in deiner Garage am Safehouse ({view.garage.length}/{view.slots} belegt).</div>
+            {view.dealer.map((c, i) => (
+              <Row key={c.name}><div><b>{c.name}</b></div><Buy label="Kaufen" price={c.price} onClick={() => act({ t: "buyCar", i })} disabled={view.cash < c.price || view.garage.length >= view.slots} /></Row>
+            ))}
+          </>}
+
+          {place.kind === "barber" && <>
+            <div className="pt-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/50">Frisur</div>
+            {HAIR_STYLES.map((h, i) => (
+              <Row key={h.hair}><div><b>{h.name}</b></div>{view.style.hair === h.hair ? <span className="text-xs text-green-300">aktuell</span> : <Buy label="Schneiden" price={h.price} onClick={() => act({ t: "hair", i })} disabled={view.cash < h.price} />}</Row>
+            ))}
+            <div className="pt-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/50">Bart</div>
+            {BEARDS.map((b, i) => (
+              <Row key={b.name}><div><b>{b.name}</b></div>{view.style.beard === i ? <span className="text-xs text-green-300">aktuell</span> : <Buy label="Wählen" price={b.price} onClick={() => act({ t: "beard", i })} disabled={view.cash < b.price} />}</Row>
+            ))}
+            <div className="pt-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/50">Tattoo (Arme)</div>
+            {TATTOOS.map((t, i) => (
+              <Row key={t.name}><div><b>{t.name}</b></div>{view.style.tattoo === i ? <span className="text-xs text-green-300">aktuell</span> : <Buy label={i ? "Stechen" : "Entfernen"} price={t.price} onClick={() => act({ t: "tattoo", i })} disabled={view.cash < t.price} />}</Row>
+            ))}
+            <div className="text-[11px] text-white/45">Mützen und Kappen eines Outfits verdecken die Frisur. Tattoos sieht man nur bei kurzen Ärmeln.</div>
+          </>}
+
+          {(place.kind === "food" || place.kind === "mall") && <>
             <div className="text-white/60">Gesundheit {Math.round(view.hp)}/{view.maxHp}</div>
             {FOOD.map((f, i) => (
               <Row key={f.name}><div><b>{f.name}</b> <span className="text-white/50">+{f.heal} Gesundheit</span></div><Buy label="Essen" price={f.price} onClick={() => act({ t: "food", i })} disabled={view.cash < f.price || view.hp >= view.maxHp} /></Row>
@@ -111,6 +143,7 @@ export default function ShopMenu({ game, place, onClose }: { game: Game; place: 
 
           {place.kind === "safehouse" && <>
             <Row><div><b>Ausruhen & speichern</b><div className="text-[11px] text-white/50">Volle Gesundheit, nur ohne Sterne</div></div><Buy label="Speichern" onClick={() => act({ t: "save" })} /></Row>
+            <Row><div><b>Schlafen</b><div className="text-[11px] text-white/50">Bis zum Morgen (höchstens 8 Stunden), dann speichern</div></div><Buy label="Schlafen" onClick={() => act({ t: "sleep" })} /></Row>
             <div className="rounded-xl border border-white/10 bg-white/5 p-3">
               <div className="mb-2 flex justify-between"><b>Bankkonto</b><span className="font-display text-xl text-green-300">${fmt(view.bank)}</span></div>
               <div className="mb-2 text-[11px] text-white/50">Geld auf dem Konto verlierst du nicht in der Klinik oder bei der Kaution.</div>

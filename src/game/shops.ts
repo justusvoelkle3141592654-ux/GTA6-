@@ -3,7 +3,7 @@ import { Car, MODEL_NAME, MODEL_STATS, isCraft, repairBody } from "./vehicles";
 import { WEAPON_DEFS } from "./weapons";
 import { terrainH } from "./world";
 import { MAX_TUNE, PAINTS, TUNE_DEFS, tuneHp } from "./garage";
-import { AMMO_FOR_SALE, ARMOR_PRICE, FOOD, GUNS_FOR_SALE, OUTFITS, PAINT_PRICE, REPAIR_PER_HP, ROB_COOLDOWN, ROB_HEAT, ROB_REWARD, TYRE_PRICE, type ShopAction } from "./economy";
+import { AMMO_FOR_SALE, ARMOR_PRICE, BEARDS, DEALER_CARS, FOOD, GUNS_FOR_SALE, HAIR_STYLES, MARKET, OUTFITS, PAINT_PRICE, REPAIR_PER_HP, ROB_COOLDOWN, ROB_HEAT, ROB_REWARD, TATTOOS, TYRE_PRICE, type ShopAction } from "./economy";
 import { MAX_ARMOR, newPed, type Game, type ShopView } from "./engine";
 
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
@@ -29,6 +29,8 @@ export class Shops {
       slots: g.garageSlots,
       bank: g.bank,
       robWait: pl ? Math.max(0, Math.ceil(ROB_COOLDOWN - (g.time - (this.robbedAt.get(pl.id) ?? -1e9)))) : 0,
+      style: { ...g.style }, energy: Math.ceil(g.energyT),
+      dealer: DEALER_CARS.map((m) => ({ name: MODEL_NAME[m], price: MODEL_STATS[m].price })),
     };
   }
 
@@ -161,19 +163,77 @@ export class Shops {
       }
       case "rob": {
         if (!pl?.robbable) return "";
-        const last = this.robbedAt.get(pl.id) ?? -1e9;
-        if (g.time - last < ROB_COOLDOWN) return "Die Kasse ist noch leer";
-        const v = Math.round(rnd(ROB_REWARD[0], ROB_REWARD[1]));
-        this.robbedAt.set(pl.id, g.time);
+        const v = this.robValue(pl.id);
+        if (v <= 0) return "Die Kasse ist noch leer";
         g.cash += v; g.stats.earned += v;
-        g.wanted.heat = Math.max(g.wanted.heat, ROB_HEAT);
-        g.wanted.lostT = 0;
-        g.peds.alarm(pl.x, pl.y, 500, "shot");
+        this.robAlarm(pl.x, pl.y);
         sfx.cashier();
         g.closeModal();
         g.banner("ÜBERFALL", `+$${v.toLocaleString("de-DE")} – die Polizei ist alarmiert`, "#ff9f43", 2);
         return "";
       }
+      case "sleep": {
+        // sleep until the next morning (or 8 hours), then save
+        if (g.wanted.stars > 0) return "Mit Fahndung findest du keinen Schlaf";
+        const h = g.clock < 8 ? 8 - g.clock : 8;
+        g.clock = (g.clock + h) % 24; pd.hp = pd.maxHp;
+        const r = g.saveGame();
+        return `${Math.round(h)} Stunden geschlafen` + (r === "saved" ? " – gespeichert" : "");
+      }
+      case "market": {
+        const m = MARKET[a.i];
+        if (!m) return "";
+        if (!m.energy && pd.hp >= pd.maxHp) return "Du bist satt";
+        if (!this.pay(m.price)) return broke;
+        pd.hp = Math.min(pd.maxHp, pd.hp + m.heal);
+        if (m.energy) { g.energyT = Math.max(g.energyT, m.energy); return `${m.name}: ${m.energy} s schneller rennen`; }
+        return `${m.name} (+${m.heal})`;
+      }
+      case "buyCar": {
+        const model = DEALER_CARS[a.i];
+        if (!model) return "";
+        if (g.garage.length >= g.garageSlots) return "Die Garage ist voll – verkauf erst ein Auto im Safehouse";
+        const st = MODEL_STATS[model];
+        if (!this.pay(st.price)) return broke;
+        g.garage.push({ model, color: "#c0392b", hp: st.hp, maxHp: st.hp, mass: st.mass, tune: { engine: 0, tires: 0, armor: 0 } as never });
+        return `${MODEL_NAME[model]} gekauft – steht in der Garage am Safehouse`;
+      }
+      case "hair": {
+        const h = HAIR_STYLES[a.i];
+        if (!h || g.style.hair === h.hair) return "";
+        if (!this.pay(h.price)) return broke;
+        g.style = { ...g.style, hair: h.hair };
+        return `Neue Frisur: ${h.name}`;
+      }
+      case "beard": {
+        const b = BEARDS[a.i];
+        if (!b || g.style.beard === a.i) return "";
+        if (!this.pay(b.price)) return broke;
+        g.style = { ...g.style, beard: a.i };
+        return b.name;
+      }
+      case "tattoo": {
+        const t = TATTOOS[a.i];
+        if (!t || g.style.tattoo === a.i) return "";
+        if (!this.pay(t.price)) return broke;
+        g.style = { ...g.style, tattoo: a.i };
+        return a.i ? `Tattoo „${t.name}“ gestochen – sichtbar mit kurzen Ärmeln` : "Tattoo entfernt";
+      }
     }
+    return "";
+  }
+
+  // a robbery: money from the till (0 if it was robbed shortly before)
+  robValue(id: string) {
+    const g = this.g, last = this.robbedAt.get(id) ?? -1e9;
+    if (g.time - last < ROB_COOLDOWN) return 0;
+    this.robbedAt.set(id, g.time);
+    return Math.round(rnd(ROB_REWARD[0], ROB_REWARD[1]));
+  }
+  robAlarm(x: number, y: number) {
+    const g = this.g;
+    g.wanted.heat = Math.max(g.wanted.heat, ROB_HEAT);
+    g.wanted.lostT = 0;
+    g.peds.alarm(x, y, 500, "shot");
   }
 }

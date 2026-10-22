@@ -64,7 +64,8 @@ export function buildHideFields(world: World): HideField[] {
   // 4 mall (inside, see the shop interiors)
   const mc = blockC(MALL_BLOCK[0], MALL_BLOCK[1]);
   const mf: HideField = { id: "mall", name: "Einkaufszentrum", x: mc.x, y: mc.y, r: 200, spots: [], desc: "Zwei Etagen, Rolltreppen, Läden" };
-  for (const [dx, dy] of [[-120, -110], [120, -110], [-120, 110], [120, 110], [0, -140], [0, 140], [-140, 0], [140, 0]]) mf.spots.push({ x: mc.x + dx, y: mc.y + dy, kind: "wardrobe", range: SPOT_RANGE.wardrobe });
+  // inside the mall walls (inner half size about 130), clear of the escalators and the food court
+  for (const [dx, dy, k] of [[-115, -60, "wardrobe"], [115, -60, "wardrobe"], [-115, 60, "wardrobe"], [115, 60, "wardrobe"], [-100, 118, "bin"], [100, 118, "bin"], [0, -118, "wardrobe"], [-70, -20, "bin"], [70, -20, "bin"]] as [number, number, SpotKind][]) mf.spots.push({ x: mc.x + dx, y: mc.y + dy, kind: k, range: SPOT_RANGE[k] });
   fields.push(mf);
   // 5 beach at night: beach chairs, boats, dunes
   const bf: HideField = { id: "beach", name: "Strand bei Nacht", x: -130, y: 2600, r: 330, night: true, spots: [], desc: "Strandkörbe, Boote, Dunkelheit" };

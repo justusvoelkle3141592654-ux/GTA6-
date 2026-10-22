@@ -17,9 +17,11 @@ import { buildHideFields } from "./hide";
 const inStuntPark = (x: number, y: number) => x > STUNT_PARK.x0 - 60 && x < STUNT_PARK.x1 + 60 && y > STUNT_PARK.y0 - 60 && y < STUNT_PARK.y1 + 60;
 import { isCraft, isBoat, isHeli, isTwoWheel } from "./vehicles";
 import { CarRig, carMaterials, hasRig, topAt, type CarMats } from "./carmodel";
-import { JETTY, HELI_SPOT, type Place } from "./places";
+import { JETTY, HELI_SPOT, WALKABLE, type Place } from "./places";
+import type { Interior } from "./interiors";
 import { CrowdRenderer } from "./crowd3d";
 import { PlayerFigure, CrowdFigures } from "./people3d";
+import { InteriorsRenderer } from "./interiors3d";
 import { DISTRICTS, blockDistrict } from "./districts";
 import { MAX_PEDS } from "./peds";
 import type { Game, Car, Pickup, CameraMode, Quality, CarModel, Proj, Bomb, PickupType } from "./engine";
@@ -486,13 +488,16 @@ export class Renderer3D {
   private skidGeo = new THREE.BufferGeometry(); private skidPos = new Float32Array(MAX_SKIDS * 18); private skidSeen = 0;
   private arrow!: THREE.Mesh;
   private ped!: PlayerFigure;
+  private rooms!: InteriorsRenderer;
   private people!: CrowdFigures;
   private crowd!: CrowdRenderer;
   private camPos = new THREE.Vector3(); private camLook = new THREE.Vector3(); private camInit = false; private orbit = 0; private fov = 62;
   private tmpV = new THREE.Vector3();
   private copRed = C("#ff1a3a"); private copBlue = C("#2a5bff");
 
-  constructor(canvas: HTMLCanvasElement, world: World, places: Place[], quality: Quality, camMode: CameraMode) {
+  private interiorList: Interior[];
+  constructor(canvas: HTMLCanvasElement, world: World, places: Place[], quality: Quality, camMode: CameraMode, interiors: Interior[] = []) {
+    this.interiorList = interiors;
     this.world = world; this.quality = quality; this.camMode = camMode;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: quality === "high" || quality === "ultra", powerPreference: "high-performance" });
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -751,6 +756,7 @@ export class Renderer3D {
         L.prop.push(cyl(48, 48, 1, mx, 2.8, mz, "#8f8b84", 24));
       } else L.ground.push(box(size - 24, 0.4, size - 24, mx, 2.3, mz, "#a8a49a"));
       for (const b of blk.buildings) {
+        if (b.shell) continue; // walkable shops: interiors3d
         if (b.garage) {
           // parking garage: concrete decks with open bands
           const H = b.height * H_SCALE + 14, cx = b.x + b.w / 2, cz = b.y + b.h / 2;
@@ -904,34 +910,36 @@ export class Renderer3D {
         do { g.font = `bold ${fs}px 'Bebas Neue', Impact, sans-serif`; fs -= 2; } while (fs > 20 && g.measureText(pl.name.toUpperCase()).width > 340);
         g.fillText(pl.name.toUpperCase(), 150, 68);
       });
-      const b = pl.bld;
-      if (!b) { this.buildSpot(pl, sign); continue; }
-      const H = b.height * H_SCALE + 14;
-      const w = Math.min(b.h - 10, 84);
-      const panel = new THREE.Mesh(new THREE.PlaneGeometry(w, w / 4), new THREE.MeshBasicMaterial({ map: sign, toneMapped: false }));
-      panel.rotation.y = -Math.PI / 2;
-      panel.position.set(b.x - 0.8, Math.min(H - w / 8 - 4, 46), pl.y);
-      this.scene.add(panel);
-      // roof symbol
+      const b = pl.bld, walk = WALKABLE.has(pl.id); // walkable shops: sign and door by interiors3d, the ring at the counter
+      if (!b && !walk) { this.buildSpot(pl, sign); continue; }
       const col = new THREE.Color(pl.color).multiplyScalar(1.6);
-      const symMat = new THREE.MeshBasicMaterial({ color: col, toneMapped: false });
-      const cx = b.x + b.w / 2, cz = b.y + b.h / 2;
-      const sym = pl.kind === "hospital"
-        ? mergeGeometries([new THREE.BoxGeometry(10, 44, 10), new THREE.BoxGeometry(10, 10, 44).translate(0, 8, 0)])!
-        : new THREE.CylinderGeometry(20, 20, 6, 5);
-      const symMesh = new THREE.Mesh(sym, symMat);
-      symMesh.position.set(cx, H + (pl.kind === "hospital" ? 22 : 4), cz);
-      this.scene.add(symMesh);
+      if (b && !walk) {
+        const H = b.height * H_SCALE + 14;
+        const w = Math.min(b.h - 10, 84);
+        const panel = new THREE.Mesh(new THREE.PlaneGeometry(w, w / 4), new THREE.MeshBasicMaterial({ map: sign, toneMapped: false }));
+        panel.rotation.y = -Math.PI / 2;
+        panel.position.set(b.x - 0.8, Math.min(H - w / 8 - 4, 46), pl.y);
+        this.scene.add(panel);
+        // roof symbol
+        const symMat = new THREE.MeshBasicMaterial({ color: col, toneMapped: false });
+        const cx = b.x + b.w / 2, cz = b.y + b.h / 2;
+        const sym = pl.kind === "hospital"
+          ? mergeGeometries([new THREE.BoxGeometry(10, 44, 10), new THREE.BoxGeometry(10, 10, 44).translate(0, 8, 0)])!
+          : new THREE.CylinderGeometry(20, 20, 6, 5);
+        const symMesh = new THREE.Mesh(sym, symMat);
+        symMesh.position.set(cx, H + (pl.kind === "hospital" ? 22 : 4), cz);
+        this.scene.add(symMesh);
+      } else sign.dispose();
       // entrance ring on the sidewalk, a big one on the street for places you drive into
       const ringMat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8, depthWrite: false, toneMapped: false });
       if (pl.access === "foot" || pl.access === "both" || pl.access === "none") {
         const ring = new THREE.Mesh(new THREE.RingGeometry(9, 12, 32).rotateX(-Math.PI / 2), ringMat);
-        ring.position.set(pl.x, 0.5, pl.y); ring.renderOrder = 1;
+        ring.position.set(pl.x, walk ? 3.1 : 0.5, pl.y); ring.renderOrder = 1;
         this.scene.add(ring);
       }
       if (pl.access === "car" || pl.access === "both") {
         const ring = new THREE.Mesh(new THREE.RingGeometry(36, 42, 40).rotateX(-Math.PI / 2), ringMat);
-        ring.position.set(pl.cx, 0.6, pl.cy); ring.renderOrder = 1;
+        ring.position.set(pl.cx, walk ? 3.2 : 0.6, pl.cy); ring.renderOrder = 1;
         this.scene.add(ring);
       }
     }
@@ -1045,6 +1053,12 @@ export class Renderer3D {
 
     // player character and the people close to the camera: skinned and animated (people3d.ts)
     this.ped = new PlayerFigure(this.scene, this.shadowGeo, this.shadowMat);
+    this.rooms = new InteriorsRenderer(this.scene, this.interiorList, (model, color) => {
+      if (!hasRig(model as CarModel)) return null;
+      const rig = new CarRig(model as CarModel, color, this.carMats ??= carMaterials(), "SB · NEU");
+      rig.root.rotation.y = 0.6;
+      return rig.root;
+    }, (o) => this.atm.setupMaterials(o));
     this.people = new CrowdFigures(this.scene, CROWD_RIGS[this.quality], this.quality !== "low", (o) => this.atm.setupMaterials(o));
     this.crowd = new CrowdRenderer(this.scene, MAX_PEDS, this.quality === "high", this.shadowGeo, this.shadowMat);
   }
@@ -1173,7 +1187,7 @@ export class Renderer3D {
       let o = this.carObjs.get(c);
       if (o && (o.model !== c.model || o.color !== c.color || (o.wreck && !c.dead) || c.dents.length < o.dentN * 3 || (o.bumpers & ~c.bumpers) !== 0)) { this.disposeCar(o); o = undefined; }
       if (!o) { o = this.makeCar(c); this.carObjs.set(c, o); }
-      o.group.position.set(c.x, c.z, c.y);
+      o.group.position.set(c.x, c.z + (c === g.player && !g.onFoot ? this.rooms.liftY : 0), c.y);
       // terrain tilt
       let tp = 0, tr = 0;
       if (!inCity(c.x, c.y) && !isCraft(c.model)) {
@@ -1669,9 +1683,13 @@ export class Renderer3D {
         const pd = g.ped;
         if (Math.hypot(pd.vx, pd.vy) > 30) this.camYaw += wrapA(Math.atan2(pd.vy, pd.vx) - this.camYaw) * (1 - Math.exp(-dt * 2.5));
         const cx = Math.cos(this.camYaw), cy = Math.sin(this.camYaw);
-        let dist = 95;
-        for (let s = 0.15; s <= 1.0001; s += 0.1) if (this.world.isSolid(fx - cx * 95 * s, fy - cy * 95 * s, 6)) { dist = Math.max(28, 95 * s - 10); break; }
-        tgt.set(fx - cx * dist, fz + 48, fy - cy * dist);
+        // inside a shop: closer, the walls on the camera side become see-through (interiors3d)
+        const it = g.inside, far = it ? 50 : 95;
+        let dist = far;
+        if (!it) for (let s = 0.15; s <= 1.0001; s += 0.1) if (this.world.isSolid(fx - cx * 95 * s, fy - cy * 95 * s, 6)) { dist = Math.max(28, 95 * s - 10); break; }
+        tgt.set(fx - cx * dist, fz + (it ? 58 : 48), fy - cy * dist);
+        // the camera stays inside the room (from above, the roof is hidden)
+        if (it) { tgt.x = clamp(tgt.x, it.x0 + 6, it.x1 - 6); tgt.z = clamp(tgt.z, it.y0 + 6, it.y1 - 6); }
         lx = fx + cx * 30; ly = fz + 16; lz = fy + cy * 30; fov = 60; kp = 9;
       } else {
         let desired = p.a;
@@ -1729,6 +1747,7 @@ export class Renderer3D {
     this.syncMarkers(g);
     this.syncHeli(g);
     this.syncSpikes(g);
+    this.rooms.update(g, dt, this.camPos);
     this.ped.update(g, dt, this.seatOf(g), this.camMode === "fp");
     this.people.update(g.peds.list, g.state !== "menu", this.camPos.x, this.camPos.z, g.fx, g.fy, dt);
     this.crowd.update(g.peds.list, g.state !== "menu", g.fx, g.fy, this.people.drawn);

@@ -2,7 +2,7 @@
 // people further away stay instanced simple figures (crowd3d.ts, the far detail level)
 import * as THREE from "three";
 import { HumanRig, kaiLook, lookFromSeed, weaponGeo, type Look } from "./human";
-import { OUTFITS } from "./economy";
+import { OUTFITS, type Style } from "./economy";
 import { WEAPONS, WEAPON_DEFS, type Weapon } from "./weapons";
 import type { Game } from "./engine";
 import type { Civilian } from "./peds";
@@ -11,9 +11,9 @@ const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 const wrapA = (a: number) => { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; };
 const HIPS = 9.5; // hip height of the male rest pose (human.ts); female: 9.5 * 0.94
 
-export function outfitLook(i: number): Look {
+export function outfitLook(i: number, style?: Style): Look {
   const o = OUTFITS[i] ?? OUTFITS[0];
-  return kaiLook({ top: o.top, topCol: o.shirt, top2Col: o.top2, bottom: o.bottom, bottomCol: o.pants, shoes: o.shoes, shoeCol: o.shoeCol, accent: o.accent, hair: o.hair, hatCol: o.hatCol });
+  return kaiLook({ top: o.top, topCol: o.shirt, top2Col: o.top2, bottom: o.bottom, bottomCol: o.pants, shoes: o.shoes, shoeCol: o.shoeCol, accent: o.accent, hair: o.hair, hatCol: o.hatCol }, style);
 }
 
 // walking, running, sprinting by speed (the step rate follows the speed within limits)
@@ -42,10 +42,9 @@ export class PlayerFigure {
   rig: HumanRig;
   shadow: THREE.Mesh;
   private guns = {} as Record<Weapon, THREE.Mesh | null>;
-  private outfit = -1; private lastShoot = 0; private lastHit = 0; private actKey = ""; private wasAir = false;
+  private lookKey = ""; private lastShoot = 0; private lastHit = 0; private actKey = ""; private wasAir = false;
   constructor(private scene: THREE.Scene, shadowGeo: THREE.BufferGeometry, shadowMat: THREE.Material) {
     this.rig = new HumanRig(outfitLook(0), 0);
-    this.outfit = 0;
     const hand = this.rig.bone("handR");
     for (const w of WEAPONS) {
       const g = weaponGeo(w);
@@ -63,7 +62,8 @@ export class PlayerFigure {
   // car: where the figure sits when driving (host: the car's body group, seat: hip position in it)
   update(g: Game, dt: number, car: { host: THREE.Object3D; seat: [number, number, number]; ride: boolean; steer: number } | null, fp: boolean) {
     const r = this.rig, root = r.root, pd = g.ped;
-    if (this.outfit !== g.outfit) { this.outfit = g.outfit; r.setLook(outfitLook(g.outfit), 0); }
+    const sk = g.outfit + ":" + g.style.hair + g.style.beard + g.style.tattoo;
+    if (this.lookKey !== sk) { this.lookKey = sk; r.setLook(outfitLook(g.outfit, g.style), 0); }
     r.setVest(pd.armor > 0);
     const hidden = g.state === "menu" || !!g.hide.hiddenIn;
     if (car && !g.onFoot) {
@@ -99,6 +99,8 @@ export class PlayerFigure {
     } else if (act && !pd.swim) {
       const key = act.kind + act.id;
       if (key !== this.actKey) { this.actKey = key; r.play(ACT_CLIP[act.kind], 0.12, 1, true); }
+    } else if (g.seat) {
+      r.play("bench", 0.3);
     } else if (pd.swim) {
       if (sp > 20) r.play("swim", 0.3, clamp(sp / 60, 0.6, 1.6)); else r.play("tread", 0.3);
     } else if (pd.air && pd.vz < -150) {

@@ -1,6 +1,7 @@
 import type { Weapon } from "./weapons";
 import type { TunePart } from "./garage";
 import type { Top, Bottom, Shoes, Hair } from "./human";
+import type { CarModel } from "./vehicles";
 
 // everything that can be bought, eaten or robbed (data only)
 export interface FoodItem { name: string; price: number; heal: number; }
@@ -31,6 +32,26 @@ export const OUTFITS: Outfit[] = [
   { name: "Tanktop & Shorts", shirt: "#f2f2f2", pants: "#2c3e57", price: 60, top: "tank", top2: "#f2f2f2", bottom: "shorts", shoes: "sandal", shoeCol: "#1b1b1f", hair: "cap", hatCol: "#c0392b" },
 ];
 
+// supermarket: snacks heal, energy drinks make you run faster for a while
+export interface MarketItem { name: string; price: number; heal: number; energy: number; }
+export const MARKET: MarketItem[] = [
+  { name: "Schokoriegel", price: 4, heal: 10, energy: 0 },
+  { name: "Sandwich", price: 9, heal: 30, energy: 0 },
+  { name: "Obstschale", price: 7, heal: 20, energy: 0 },
+  { name: "Energydrink", price: 12, heal: 5, energy: 60 },
+];
+// car dealer: these are for sale (they go into the garage)
+export const DEALER_CARS: CarModel[] = ["compact", "sedan", "wagon", "suv", "pickup", "offroad", "roadster", "sport", "muscle", "super"];
+// barber and tattoo studio
+export const HAIR_STYLES: { hair: Hair; name: string; price: number }[] = [
+  { hair: "short", name: "Kurz", price: 30 }, { hair: "buzz", name: "Raspel", price: 25 }, { hair: "curls", name: "Locken", price: 45 },
+  { hair: "long", name: "Lang", price: 60 }, { hair: "ponytail", name: "Zopf", price: 50 }, { hair: "bald", name: "Glatze", price: 20 },
+];
+export const BEARDS = [{ name: "Glatt rasiert", price: 15 }, { name: "Dreitagebart", price: 15 }, { name: "Vollbart", price: 35 }];
+export const TATTOOS = [{ name: "Keins (entfernen)", price: 200 }, { name: "Tribal", price: 150 }, { name: "Wellen", price: 180 }, { name: "Sterne", price: 160 }];
+export interface Style { hair: Hair; beard: number; tattoo: number; }
+export const DEFAULT_STYLE: Style = { hair: "short", beard: 1, tattoo: 0 };
+
 export const ARMOR_PRICE = 500;       // full vest
 export const REPAIR_PER_HP = 4;       // workshop: price per missing car hit point
 export const PAINT_PRICE = 200;
@@ -47,5 +68,6 @@ export type ShopAction =
   | { t: "food"; i: number } | { t: "outfit"; i: number }
   | { t: "repair" } | { t: "paint"; color: string } | { t: "tune"; part: TunePart }
   | { t: "save" } | { t: "store" } | { t: "takeCar"; i: number } | { t: "sellCar"; i: number }
-  | { t: "rob" }
+  | { t: "rob" } | { t: "sleep" }
+  | { t: "market"; i: number } | { t: "buyCar"; i: number } | { t: "hair"; i: number } | { t: "beard"; i: number } | { t: "tattoo"; i: number }
   | { t: "deposit"; amount: number } | { t: "withdraw"; amount: number }; // amount -1: everything

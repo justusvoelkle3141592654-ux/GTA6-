@@ -32,9 +32,10 @@ export interface Building {
   base?: number;          // ground height (buildings outside the flat city)
   garage?: boolean;       // parking garage (its roof is reached over a ramp)
   low?: boolean;          // fences, rails, containers: cars stop, but it is no building to enter
+  shell?: boolean;        // wall or furniture of a walkable shop (drawn by interiors3d, not as a city building)
 }
 export interface Tree { x: number; y: number; r: number; rot: number; kind?: number; }
-export type BlockKind = "city" | "park" | "plaza" | "site" | "lot" | "garage" | "skate" | "townhall" | "stadium";
+export type BlockKind = "city" | "park" | "plaza" | "site" | "lot" | "garage" | "skate" | "townhall" | "stadium" | "mall";
 export interface Block { bx: number; by: number; kind: BlockKind; district: DistrictId; buildings: Building[]; trees: Tree[]; }
 
 export function isHighway(x: number, y: number) {
@@ -55,7 +56,7 @@ const NEONS = ["#ff3cac", "#2bf0ff", "#ffd23f", "#9d4dff", "#3dff8b", "#ff6b3d"]
 const SPECIAL: Record<string, BlockKind> = {
   "7,2": "garage", "12,8": "garage", "3,12": "garage", "9,13": "garage", "14,4": "garage",
   "6,14": "site", "11,11": "site", "2,14": "site", "13,2": "site", "4,1": "site", "10,3": "site",
-  "10,15": "lot", "5,12": "lot", "12,13": "lot", "15,3": "lot", "8,15": "skate", "7,7": "townhall", "12,14": "stadium",
+  "10,15": "lot", "5,12": "lot", "12,13": "lot", "15,3": "lot", "8,15": "skate", "7,7": "townhall", "12,14": "stadium", "9,9": "mall",
 };
 const M = 18; // inset of buildings from the block edge
 

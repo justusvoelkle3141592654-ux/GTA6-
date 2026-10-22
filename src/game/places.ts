@@ -3,7 +3,7 @@ import type { EndReason } from "./engine";
 import type { JobKind } from "./jobs";
 import { STUNT_PARK } from "./terrain";
 
-export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport" | "park" | "job";
+export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport" | "park" | "job" | "market" | "cardealer" | "barber" | "mall";
 export type PlaceAccess = "foot" | "car" | "both" | "none";
 
 export interface PlaceDef {
@@ -32,6 +32,11 @@ export const PLACE_DEFS: PlaceDef[] = [
   { id: "clothes", kind: "clothes", name: "Bay Boutique", color: "#ff3cac", icon: "K", near: [3, 7], access: "foot", robbable: true },
   { id: "food", kind: "food", name: "Taco Loco", color: "#ffd23f", icon: "I", near: [7, 12], access: "foot", robbable: true },
   { id: "food2", kind: "food", name: "Burger Bucht", color: "#ffd23f", icon: "I", near: [12, 10], access: "foot", robbable: true },
+  // new walkable shops (see interiors.ts); the mall fills its own block
+  { id: "market", kind: "market", name: "Supermarkt Frischbucht", color: "#3dd68c", icon: "$", near: [5, 8], access: "foot", robbable: true },
+  { id: "cardealer", kind: "cardealer", name: "Autohaus Solara Motors", color: "#2bb3ff", icon: "#", near: [10, 7], access: "foot" },
+  { id: "barber", kind: "barber", name: "Friseur & Tattoo Ink Bay", color: "#c86bff", icon: "&", near: [2, 9], access: "foot" },
+  { id: "mall", kind: "mall", name: "Einkaufszentrum Bay Plaza", color: "#ff8a1f", icon: "@", near: [9, 9], access: "foot", at: [9 * BLOCK + ROAD + 10, 9 * BLOCK + ROAD + (BLOCK - ROAD) / 2, Math.PI] },
   // mission contacts (story)
   { id: "lou", kind: "contact", name: "Lous Werkstatt", color: "#ff5ad1", icon: "L", near: [4, 4], access: "foot" },
   { id: "marisol", kind: "contact", name: "Café Marisol", color: "#ff5ad1", icon: "M", near: [1, 10], access: "foot" },
@@ -68,6 +73,8 @@ export interface Place extends PlaceDef {
 }
 
 export const PLACE_RADIUS = { foot: 22, car: 46 };
+// shops with a room you walk into (door symbol on the maps)
+export const WALKABLE = new Set(["gunshop", "clothes", "food", "food2", "workshop", "safehouse", "market", "cardealer", "barber", "mall"]);
 
 // what you lose when you are taken to a place after a run ends (open world)
 export interface RespawnRule { place: PlaceKind; cashPct: number; cashMin: number; title: string; sub: string; }

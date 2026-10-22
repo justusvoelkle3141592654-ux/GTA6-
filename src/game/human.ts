@@ -11,7 +11,7 @@ export type Shoes = "sneaker" | "leather" | "sandal" | "boot";
 export type Hair = "short" | "buzz" | "long" | "ponytail" | "curls" | "bald" | "beanie" | "cap" | "policecap" | "helmet";
 export interface Look {
   sex: Sex; height: number; build: number; age: 0 | 1 | 2; // size factor, girth factor (0.9 slim .. 1.15 strong), young/middle/old
-  skin: string; hairCol: string; hair: Hair; stubble: boolean;
+  skin: string; hairCol: string; hair: Hair; stubble: boolean; beard?: number; tattoo?: number; // beard 2: full beard; tattoo 1..3 on bare arms
   top: Top; topCol: string; top2Col: string; bottom: Bottom; bottomCol: string; shoes: Shoes; shoeCol: string; accent: string; hatCol: string;
 }
 
@@ -32,12 +32,13 @@ export function lookFromSeed(seed: number, role = "civ", shirt = "", pants = "")
     sex, height: sex === "m" ? 0.96 + r() * 0.1 : 0.92 + r() * 0.09, build: 0.9 + r() * 0.25, age,
     skin: pick(SKINS), hairCol: age === 2 ? pick(["#8a8a8a", "#c8c8c8", "#a8a8a8"]) : pick(HAIRS),
     hair: sex === "m" ? pick(["short", "short", "buzz", "curls", "bald", "cap", "beanie"] as Hair[]) : pick(["long", "long", "ponytail", "curls", "short", "beanie"] as Hair[]),
-    stubble: sex === "m" && r() < 0.35,
+    stubble: sex === "m" && r() < 0.35, beard: 0, tattoo: r() < 0.12 ? 1 + Math.floor(r() * 3) : 0,
     top: sex === "m" ? pick(["tshirt", "tshirt", "shirt", "polo", "hoodie", "jacket", "tank", "suit"] as Top[]) : pick(["tshirt", "shirt", "dress", "hoodie", "jacket", "tank", "polo"] as Top[]),
     topCol: pick(TOPS), top2Col: pick(["#f2f0ea", "#e8e8ee", "#1d1d22", "#c9c3b5"]),
     bottom: sex === "m" ? pick(["jeans", "jeans", "pants", "shorts"] as Bottom[]) : pick(["jeans", "skirt", "shorts", "pants"] as Bottom[]),
     bottomCol: pick(BOTTOMS), shoes: pick(["sneaker", "sneaker", "leather", "sandal"] as Shoes[]), shoeCol: pick(SHOE), accent: pick(["#c0392b", "#1d4e89", "#d4a017", "#1b1b1f"]), hatCol: pick(["#1b1b1f", "#c0392b", "#1d4e89", "#3a5a2a", "#e8e8ec"]),
   };
+  if (L.sex === "m" && !L.stubble && r() < 0.15) L.beard = 2;
   if (L.top === "suit") { L.bottom = "pants"; L.bottomCol = L.topCol = pick(["#1d1d22", "#2b3242", "#4a4a52", "#6b5a45"]); L.shoes = "leather"; L.shoeCol = "#1b1b1f"; L.top2Col = "#f2f0ea"; }
   if (L.top === "dress") L.bottom = "skirt";
   if (role === "cop") Object.assign(L, { top: "police", topCol: "#1f3a6e", top2Col: "#1f3a6e", bottom: "pants", bottomCol: "#1b2436", shoes: "boot", shoeCol: "#111", hair: "policecap", hatCol: "#1b2436", accent: "#d4a017" });
@@ -78,8 +79,8 @@ export const BONE_COUNT = skeletonDefs("m").length; // 54
 
 // ----------------------------------------------------------------------------------------------- mesh builder
 // palette zones (colour per person, see the material)
-const Z = { skin: 0, top: 1, top2: 2, bottom: 3, shoes: 4, hair: 5, dark: 6, white: 7, lips: 8, accent: 9, hat: 10, stubble: 11, vest: 12, sole: 13 } as const;
-const ZONES = 14;
+const Z = { skin: 0, top: 1, top2: 2, bottom: 3, shoes: 4, hair: 5, dark: 6, white: 7, lips: 8, accent: 9, hat: 10, stubble: 11, vest: 12, sole: 13, arm: 14 } as const;
+const ZONES = 15;
 
 class Builder {
   pos: number[] = []; uv: number[] = []; zone: number[] = []; si: number[] = []; sw: number[] = []; idx: number[] = [];
@@ -203,7 +204,7 @@ function buildBody(L: Look, detail: 0 | 1, vestOnly = false): THREE.BufferGeomet
     ];
     const armLen = wr.distanceTo(sho);
     b.tube(A.map((a) => ({ c: sho.clone().addScaledVector(dir, a.t * armLen), rs: a.r * Math.min(1.15, g) * (f ? 0.88 : 1), rf: a.r * Math.min(1.15, g) * (f ? 0.88 : 1), w: a.w,
-      zone: (phi: number) => (a.t < sleeve ? (top === "track" && Math.abs(Math.sin(phi)) > 0.94 ? Z.accent : Z.top) : Z.skin), v: a.t })), side, FRONT, nl, [false, false]);
+      zone: (phi: number) => (a.t < sleeve ? (top === "track" && Math.abs(Math.sin(phi)) > 0.94 ? Z.accent : Z.top) : Z.arm), v: a.t })), side, FRONT, nl, [false, false]);
     // palm and fingers (pointing down along the arm)
     const hand = P(`hand${S}`);
     const palm = [0, 0.45, 0.9].map((t, i) => ({ c: hand.clone().add(V(0.02, -t, 0)), rs: [0.2, 0.17, 0.15][i] * (f ? 0.9 : 1), rf: [0.36, 0.42, 0.4][i] * (f ? 0.9 : 1), w: [[`hand${S}`, 1]] as [string, number][], zone: () => Z.skin, v: t, sq: 2.6 }));
@@ -287,7 +288,7 @@ function head(b: Builder, L: Look, hc: THREE.Vector3, detail: 0 | 1) {
     const th = (i / rows) * Math.PI, ph = (j / cols) * Math.PI * 2, p = shape(th, ph);
     const front = Math.sin(ph), y = p.y - c0.y;
     let z: number = Z.skin;
-    if (L.stubble && y < -0.25 && front > 0.25) z = Z.stubble;
+    if ((L.stubble || (L.beard ?? 0) >= 1) && y < -0.25 && front > 0.25) z = Z.stubble;
     b.vert(p.add(hc), y < -0.85 ? [["head", 0.8], ["neck", 0.2]] : [["head", 1]], z, 0.97, 0.5);
   }
   for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
@@ -305,6 +306,10 @@ function head(b: Builder, L: Look, hc: THREE.Vector3, detail: 0 | 1) {
   }
   H(new THREE.ConeGeometry(0.16, 0.55, 4).rotateZ(-1.35).rotateX(Math.PI / 4).scale(1, 1, 0.9).translate(1.08 + c0.x - 0.12, 0.62, 0), Z.skin);
   H(new THREE.SphereGeometry(0.2, 8, 4).scale(0.35, 0.28, 1.2).translate(0.68, 0.65, 0), Z.lips, "jaw");
+  if (L.beard === 2) {
+    // full beard: a shell around the chin and the jaw line
+    b.geo(new THREE.SphereGeometry(1.0, 14, 8, -Math.PI * 0.5, Math.PI, Math.PI * 0.55, Math.PI * 0.4).scale(1.06, 1.22, 0.86).translate(c0.x + 0.02, c0.y - 0.02, 0), "head", Z.hair);
+  }
   hair(b, L, hc, c0);
 }
 
@@ -350,16 +355,16 @@ const noiseTex = (() => {
   const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
 })();
 
-export function personMaterial(): THREE.MeshStandardMaterial & { userData: { pal: THREE.Color[]; pattern: { value: number }; ownCompile: THREE.Material["onBeforeCompile"] } } {
+export function personMaterial(): THREE.MeshStandardMaterial & { userData: { pal: THREE.Color[]; pattern: { value: number }; tattoo: { value: number }; ownCompile: THREE.Material["onBeforeCompile"] } } {
   const pal = Array.from({ length: ZONES }, () => new THREE.Color(1, 1, 1));
-  const pattern = { value: 0 };
+  const pattern = { value: 0 }, tattoo = { value: 0 };
   const m = new THREE.MeshStandardMaterial({ roughness: 0.78, metalness: 0, normalMap: noiseTex, normalScale: new THREE.Vector2(0.6, 0.6) });
   m.onBeforeCompile = (sh) => {
-    sh.uniforms.uPal = { value: pal }; sh.uniforms.uPattern = pattern;
-    sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nattribute float zone; flat varying float vZone; varying vec2 vPuv;")
-      .replace("#include <uv_vertex>", "#include <uv_vertex>\nvZone = zone; vPuv = uv;");
+    sh.uniforms.uPal = { value: pal }; sh.uniforms.uPattern = pattern; sh.uniforms.uTattoo = tattoo;
+    sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nattribute float zone; flat varying float vZone; varying vec2 vPuv; varying vec3 vBind;")
+      .replace("#include <uv_vertex>", "#include <uv_vertex>\nvZone = zone; vPuv = uv; vBind = position;");
     sh.fragmentShader = sh.fragmentShader.replace("#include <common>", `#include <common>
-uniform vec3 uPal[${ZONES}]; uniform float uPattern; flat varying float vZone; varying vec2 vPuv;
+uniform vec3 uPal[${ZONES}]; uniform float uPattern; uniform float uTattoo; flat varying float vZone; varying vec2 vPuv; varying vec3 vBind;
 float h21(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
 float n21(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(h21(i), h21(i+vec2(1,0)), f.x), mix(h21(i+vec2(0,1)), h21(i+vec2(1,1)), f.x), f.y); }`)
       .replace("#include <color_fragment>", `#include <color_fragment>
@@ -369,12 +374,20 @@ for (int k = 0; k < ${ZONES}; k++) if (k == zi) zc = uPal[k];
 // patterns: 1 flowers on the shirt (Hawaii), 2 camouflage on shirt and trousers
 if (uPattern > 0.5 && uPattern < 1.5 && zi == 1) { vec2 q = vPuv * vec2(9.0, 7.0); float d = length(fract(q) - 0.5); float pet = 0.5 + 0.5 * sin(atan(fract(q).y - 0.5, fract(q).x - 0.5) * 5.0); zc = mix(zc, vec3(1.0, 0.92, 0.55), step(d, 0.18 + 0.12 * pet) * step(0.5, h21(floor(q)))); zc = mix(zc, vec3(0.1, 0.45, 0.25), step(0.75, n21(q * 1.7)) * 0.7); }
 if (uPattern > 1.5 && (zi == 1 || zi == 3)) { float c = n21(vPuv * vec2(10.0, 8.0)) + 0.5 * n21(vPuv * vec2(23.0, 19.0)); zc *= c > 1.0 ? 0.55 : c > 0.7 ? 0.8 : c < 0.45 ? 1.25 : 1.0; }
+// tattoos on the bare arms (ink drawn from the rest-pose position on the skin)
+if (zi == 14 && uTattoo > 0.5) {
+  float ink = 0.0; vec3 q = vBind;
+  if (uTattoo < 1.5) ink = step(0.75, sin(q.y * 9.0 + sin(q.x * 8.0 + q.z * 6.0) * 2.0)) * step(10.5, q.y);
+  else if (uTattoo < 2.5) ink = step(0.82, sin(q.y * 6.0 + sin(atan(q.x, q.z) * 3.0) * 1.5)) * step(9.5, q.y) * step(q.y, 13.5);
+  else { vec2 g = fract(vec2(atan(q.x, abs(q.z) - 2.0) * 1.6, q.y * 1.4)) - 0.5; ink = step(length(g), 0.18) * step(10.0, q.y); }
+  zc = mix(zc, vec3(0.08, 0.1, 0.16), ink * 0.85);
+}
 diffuseColor.rgb *= zc;`)
       .replace("#include <roughnessmap_fragment>", `#include <roughnessmap_fragment>
 if (zi == 0 || zi == 8 || zi == 11) roughnessFactor = 0.55; if (zi == 7) roughnessFactor = 0.2; if (zi == 4 || zi == 13) roughnessFactor = 0.45;`);
   };
-  m.customProgramCacheKey = () => "person-v1";
-  m.userData = { pal, pattern, ownCompile: m.onBeforeCompile };
+  m.customProgramCacheKey = () => "person-v2";
+  m.userData = { pal, pattern, tattoo, ownCompile: m.onBeforeCompile };
   return m as ReturnType<typeof personMaterial>;
 }
 export function paintPerson(m: ReturnType<typeof personMaterial>, L: Look) {
@@ -385,11 +398,13 @@ export function paintPerson(m: ReturnType<typeof personMaterial>, L: Look) {
   p[Z.stubble].copy(skin).lerp(new THREE.Color(L.hairCol), 0.35); p[Z.vest].set(L.top === "army" ? "#4a5236" : "#2a2d33"); p[Z.sole].set(L.shoes === "leather" ? "#1b1410" : "#d8d8d8");
   if (L.shoes === "boot" || L.shoes === "leather") p[Z.sole].set("#121212");
   m.userData.pattern.value = L.top === "hawaii" ? 1 : L.top === "army" ? 2 : 0;
+  m.userData.tattoo.value = L.tattoo ?? 0;
+  p[Z.arm].copy(skin);
 }
 
 // geometry cache: same body and clothes cut = same geometry (colours are in the material)
 const geoCache = new Map<string, THREE.BufferGeometry>();
-function bodyKey(L: Look, detail: number) { return [L.sex, L.build.toFixed(2), L.top, L.bottom, L.shoes, L.hair, L.stubble ? 1 : 0, detail].join(); }
+function bodyKey(L: Look, detail: number) { return [L.sex, L.build.toFixed(2), L.top, L.bottom, L.shoes, L.hair, L.stubble ? 1 : 0, L.beard ?? 0, detail].join(); }
 export function bodyGeo(L: Look, detail: 0 | 1) {
   const L2 = { ...L, build: Math.round(L.build * 10) / 10 }; // a few builds only, so geometries are shared
   const k = bodyKey(L2, detail);
@@ -473,6 +488,7 @@ const CLIPS: Record<string, ClipDef> = {
   phone: { dur: 3, keys: [[0, P(relaxed, arm("R", 0.35, 0.35, 2.35, 0.3, 0.3), fist("R", 0.6), headP(0.05, 0, 0.15))], [1.5, P(relaxed, arm("R", 0.35, 0.38, 2.35, 0.3, 0.3), fist("R", 0.6), headP(0.1, 0.2, 0.15), arm("L", 0.15, 0.25, 0.6))], [3, P(relaxed, arm("R", 0.35, 0.35, 2.35, 0.3, 0.3), fist("R", 0.6), headP(0.05, 0, 0.15))]] },
   smoke: { dur: 4, keys: [[0, P(relaxed, arm("R", 0.2, 0.15, 1.2, 0, 0.3))], [1.2, P(relaxed, arm("R", 0.5, 0.1, 2.45, 0.3, 0.2), headP(-0.1))], [1.8, P(relaxed, arm("R", 0.5, 0.1, 2.45, 0.3, 0.2), headP(-0.1))], [2.6, P(relaxed, arm("R", 0.2, 0.15, 1.2, 0, 0.3), headP(-0.15))], [4, P(relaxed, arm("R", 0.2, 0.15, 1.2, 0, 0.3))]] },
   talk: { dur: 3, keys: [[0, P(relaxed, arm("R", 0.5, 0.2, 1.2, 0.3))], [0.7, P(relaxed, arm("R", 0.7, 0.35, 1.0, 0.5), headP(0.1, 0.1))], [1.4, P(relaxed, arm("L", 0.6, 0.3, 1.1, 0.4), arm("R", 0.3, 0.2, 0.9), headP(-0.05, -0.1))], [2.2, P(relaxed, arm("R", 0.55, 0.25, 1.3, 0.3), headP(0.12))], [3, P(relaxed, arm("R", 0.5, 0.2, 1.2, 0.3))]] },
+  handsUp: { dur: 1.2, keys: [[0, P(arm("L", 2.6, 0.45, 0.6, 0, -0.3), arm("R", 2.6, 0.45, 0.6, 0, -0.3), spine(-0.08), headP(-0.1))], [0.6, P(arm("L", 2.65, 0.5, 0.55, 0, -0.3), arm("R", 2.55, 0.42, 0.65, 0, -0.3), spine(-0.1), headP(-0.05, 0.15))], [1.2, P(arm("L", 2.6, 0.45, 0.6, 0, -0.3), arm("R", 2.6, 0.45, 0.6, 0, -0.3), spine(-0.08), headP(-0.1))]] },
   lookAround: { dur: 3.2, keys: [[0, P(relaxed, headP(0, 0.8))], [1.2, P(relaxed, headP(0.05, -0.8), spine(0, -0.2))], [2.2, P(relaxed, headP(-0.1, 0.2))], [3.2, P(relaxed, headP(0, 0.8))]] },
   // getting into a car (stands at the driver's door, the car is on the right of the person)
   openDoor: { dur: 0.6, keys: [[0, P(relaxed)], [0.25, P(relaxed, arm("R", 0.9, 0.5, 0.7, 0.2), spine(0.1, 0.3))], [0.6, P(relaxed, arm("R", 0.8, -0.2, 0.9, 0.2), spine(0.05, -0.1), leg("R", 0.2, 0.3))]] },
@@ -485,7 +501,7 @@ const CLIPS: Record<string, ClipDef> = {
   roll: { dur: 0.9, keys: [0, 0.2, 0.4, 0.6, 0.9].map((t, i) => [t, P(turn(0, 0, [0, -1.6, -3.14, -4.7, -6.28][i]), drop([0, 6, 7.5, 6, 0][i], [0, 1, 1.5, 1, 0][i]), sit(i && i < 4 ? 2.0 : 0.3, i && i < 4 ? 2.3 : 0.3, 0), spine(i && i < 4 ? 0.9 : 0.1), arm("L", 1.5, 0.4, 1.6), arm("R", 1.5, 0.4, 1.6), headP(0.7))] as [number, Pose]) },
   climb: { dur: 0.8, keys: [[0, P(relaxed)], [0.3, P(arm("L", 2.2, 0.2, 0.4), arm("R", 2.2, 0.2, 0.4), leg("R", 1.5, 1.8), spine(0.3), drop(-2))], [0.6, P(arm("L", 0.8, 0.3, 0.2), arm("R", 0.8, 0.3, 0.2), leg("L", 1.2, 1.6), leg("R", 0.3, 0.3), spine(0.4), drop(-4))], [0.8, P(relaxed)]] },
 };
-const DEFAULT_LOOP = new Set(["idle", "walk", "run", "sprint", "panic", "fall", "swim", "tread", "drive", "ride", "bench", "aimPistol", "aimRifle", "lying", "ragdoll", "cower", "crouch", "phone", "smoke", "talk", "lookAround"]);
+const DEFAULT_LOOP = new Set(["handsUp", "idle", "walk", "run", "sprint", "panic", "fall", "swim", "tread", "drive", "ride", "bench", "aimPistol", "aimRifle", "lying", "ragdoll", "cower", "crouch", "phone", "smoke", "talk", "lookAround"]);
 export type Anim = keyof typeof CLIPS;
 
 const clipCache = new Map<string, THREE.AnimationClip>();
@@ -651,8 +667,11 @@ const _q = new THREE.Quaternion(), _e = new THREE.Euler();
 // ----------------------------------------------------------------------------------------------- the player
 export interface OutfitLook { top: Top; topCol: string; top2Col: string; bottom: Bottom; bottomCol: string; shoes: Shoes; shoeCol: string; accent?: string; hair?: Hair; hatCol?: string; }
 // Kai Romero: mid thirties, short dark hair, stubble
-export function kaiLook(o: OutfitLook): Look {
-  return { sex: "m", height: 1.02, build: 1.05, age: 1, skin: "#c99572", hairCol: "#1e1510", hair: o.hair ?? "short", stubble: true, accent: o.accent ?? "#c0392b", hatCol: o.hatCol ?? "#1b1b1f", ...o };
+// style: hair, beard and tattoo from the barber (a hat of the outfit wins over the hair style)
+export function kaiLook(o: OutfitLook, style?: { hair: Hair; beard: number; tattoo: number }): Look {
+  const hat = o.hair === "cap" || o.hair === "beanie" || o.hair === "helmet" || o.hair === "policecap";
+  const beard = style?.beard ?? 1;
+  return { sex: "m", height: 1.02, build: 1.05, age: 1, skin: "#c99572", hairCol: "#1e1510", stubble: beard === 1, beard, tattoo: style?.tattoo ?? 0, accent: o.accent ?? "#c0392b", hatCol: o.hatCol ?? "#1b1b1f", ...o, hair: hat ? o.hair! : style?.hair ?? o.hair ?? "short" };
 }
 
 // weapons in the right hand: grip in the palm, barrel along the fingers (local -y)

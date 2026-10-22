@@ -8,13 +8,14 @@ import { PedSystem, PED_LIMIT, isPolice, type Civilian, type Team } from "./peds
 import { Car, CARS, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, hitCar, copyBody, repairBody, type CarDef, type FactionId } from "./vehicles";
 import { Inventory, WEAPONS, WEAPON_DEFS, type Weapon } from "./weapons";
 import { SHAPES, hasRig } from "./carmodel";
+import { buildInteriors, interiorAt, interiorFloor, type Interior, type Seat } from "./interiors";
 import type { ActKind } from "./people3d";
 import { AUTOSAVE_EVERY, SAVE_VERSION, emptyProgress, emptyStats, writeSave, type Progress, type SaveData, type SaveResult, type SaveStats } from "./save";
 import { Traffic, PARKED_LIMIT } from "./traffic";
 import { DISTRICTS, districtAt, type DistrictId } from "./districts";
 import { Radio } from "./radio";
 import { GARAGE_SLOTS, tuneAcc, tuneDamage, tuneGrip, tuneSpeed, type OwnedCar, type TunePart } from "./garage";
-import type { ShopAction } from "./economy";
+import { DEFAULT_STYLE, type ShopAction, type Style } from "./economy";
 import { PLACE_RADIUS } from "./places";
 import { Bindings } from "./input";
 import { Missions } from "./missions";
@@ -49,6 +50,8 @@ export interface ShopView {
   slots: number;
   bank: number;     // money on the account (safehouse), not lost on death or arrest
   robWait: number; // seconds until the shop can be robbed again
+  style: Style; energy: number;
+  dealer: { name: string; price: number }[];
 }
 export type { Mode } from "./modes";
 export { Car, CARS, LEGACY_CAR_IDS } from "./vehicles";
@@ -135,6 +138,8 @@ export class Game {
   overlay: HTMLCanvasElement; ctx: CanvasRenderingContext2D; r3d: Renderer3D; cb: Callbacks; config: GameConfig;
   world = new World(4242);
   places: Place[] = buildPlaces(this.world);
+  // the 10 walkable shops (their walls go into the world, so this comes before everything that uses the buildings)
+  interiors: Interior[] = buildInteriors(this.world, this.places);
   wanted = new Wanted(MODE_RULES.chase);
   peds = new PedSystem(this.world);
   traffic = new Traffic(this.world);
@@ -203,6 +208,13 @@ export class Game {
   }
   declineCall() { this.callOffer = null; this.closeModal(); }
   outfit = 0;
+  style: Style = { ...DEFAULT_STYLE }; // hair, beard, tattoo (barber)
+  energyT = 0;                          // energy drink: runs faster for this many seconds
+  // inside a walkable shop: sitting, the shooting range, a robbery at gunpoint, police coming in
+  inside: Interior | null = null; private insideT = 0; private copsIn = 0; private copT = 0;
+  seat: Seat | null = null;
+  range: { it: Interior; t: number; score: number; tgt: number; tT: number } | null = null;
+  robbery: { it: Interior; t: number; paid: boolean } | null = null;
   garage: OwnedCar[] = [];
   district: DistrictId = "downtown"; districtT = 0; // name is shown big for a moment after entering
   nearPlace: Place | null = null;
@@ -228,7 +240,7 @@ export class Game {
     this.config = { ...config };
     this.mobile = window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
     this.minimap = this.world.renderMinimap(720);
-    this.r3d = new Renderer3D(glCanvas, this.world, this.places, this.config.quality, this.config.camera);
+    this.r3d = new Renderer3D(glCanvas, this.world, this.places, this.config.quality, this.config.camera, this.interiors);
     this.resize();
     window.addEventListener("resize", this.resize);
     window.addEventListener("keydown", this.onKeyDown);
@@ -389,7 +401,7 @@ export class Game {
     // open world: fists and a pistol; arcade modes: endless pistol, rockets and sticky bombs
     if (rules.respawn) this.inv.reset(["pistol"], { pistol: 48 });
     else this.inv.reset(["pistol", "rocket", "bomb"], { rocket: 30, bomb: 30 }, ["pistol"], false);
-    this.outfit = 0; this.garage = []; this.shops.reset(); this.gangs.reset(); this.placeLatch = "";
+    this.outfit = 0; this.style = { ...DEFAULT_STYLE }; this.energyT = 0; this.seat = null; this.range = null; this.robbery = null; this.garage = []; this.shops.reset(); this.gangs.reset(); this.placeLatch = "";
     this.district = districtAt(this.player.x, this.player.y);
     this.copSpawnT = this.diff.firstCop;
     const p = this.player;
@@ -974,6 +986,7 @@ export class Game {
         continue;
       }
       let remove = false;
+      if (q.kind === "bullet" && this.range && this.rangeHit(q.x, q.y)) { this.dropProj(i); continue; }
       // police helicopter (shots aimed at it count by ground position)
       if ((q.kind === "bullet" || q.kind === "rocket") && this.police.hitHeli(q.x, q.y, q.kind === "rocket" ? 400 : q.dmg)) {
         const h = this.police.heli;
@@ -1105,6 +1118,18 @@ export class Game {
   interact(): boolean {
     if (this.hide.interact()) return true;
     if (this.jobs.interact()) return true;
+    if (this.onFoot && this.inside) {
+      const it = this.inside, pd = this.ped;
+      if (this.seat) { this.seat = null; return true; }
+      const s = it.seats.find((q) => Math.hypot(q.x - pd.x, q.y - pd.y) < 14);
+      if (s) { this.seat = s; pd.x = s.x; pd.y = s.y; pd.a = s.a; pd.vx = pd.vy = 0; return true; }
+      if (it.range && !this.range && Math.hypot(it.range.stand.x - pd.x, it.range.stand.y - pd.y) < 20) {
+        if (WEAPON_DEFS[this.weapon].kind !== "gun") { this.setHint("Erst eine Schusswaffe wählen", 1.5); return true; }
+        this.range = { it, t: 30, score: 0, tgt: -1, tT: 1 };
+        this.banner("ZIELÜBUNG", "30 Sekunden – triff die Scheiben", "#ff9f43", 1.4);
+        return true;
+      }
+    }
     const pl = this.nearPlace;
     if (!pl || !this.onFoot) return false;
     if (pl.kind === "contact") return this.onContact?.(pl) ?? false;
@@ -1424,8 +1449,78 @@ export class Game {
     if (sp) return `Verstecken: ${SPOT_NAME[sp.kind]}`;
     const a = this.jobs.active;
     if (a?.kind === "trash" && this.onFoot && !a.carrying && a.bins.some((b) => !b.done && Math.hypot(b.x - this.fx, b.y - this.fy) < 26)) return "Mülltonne nehmen";
+    if (this.onFoot && this.inside) {
+      const it = this.inside, pd = this.ped;
+      if (this.seat) return "Aufstehen";
+      if (it.seats.some((q) => Math.hypot(q.x - pd.x, q.y - pd.y) < 14)) return "Hinsetzen";
+      if (it.range && !this.range && Math.hypot(it.range.stand.x - pd.x, it.range.stand.y - pd.y) < 20) return "Zielübung starten";
+    }
     const pl = this.nearPlace;
     return pl && pl.kind !== "contact" ? pl.name : pl ? this.contactLabel(pl) : "";
+  }
+
+  // ---------- inside the walkable shops ----------
+  private updateInside(dt: number) {
+    const pd = this.ped;
+    this.energyT = Math.max(0, this.energyT - dt);
+    const x = this.onFoot ? pd.x : this.player.x, y = this.onFoot ? pd.y : this.player.y;
+    const it = interiorAt(this.interiors, x, y);
+    if (it !== this.inside) {
+      this.inside = it; this.insideT = 0; this.copsIn = 0; this.copT = 3;
+      if (it && it.kind !== "safehouse" && this.state === "playing") this.setHint(`„Willkommen bei ${it.name}!“`, 2);
+    }
+    if (!it) { this.seat = null; this.range = null; return; }
+    this.insideT += dt;
+    // wanted: the police come in through the door
+    if (this.wanted.stars > 0 && this.rules.city && this.onFoot) {
+      this.copT -= dt;
+      if (this.copT <= 0 && this.copsIn < 1 + this.wanted.stars) {
+        this.copT = 6;
+        const c = this.peds.spawnRole(this.wanted.stars >= 4 ? "swat" : "cop", it.door.x + 12, it.door.y + (Math.random() - 0.5) * 6);
+        if (c) { this.copsIn++; c.a = 0; }
+      }
+    }
+    // a robbery: aim a gun at the clerk, the money lands on the counter, the alarm goes off
+    const pl = this.places.find((p) => p.id === it.id);
+    if (!this.robbery && pl?.robbable && this.onFoot && WEAPON_DEFS[this.weapon].kind === "gun" && pd.shootT > 0 && Math.hypot(it.clerk.x - pd.x, it.clerk.y - pd.y) < 110) {
+      this.robbery = { it, t: 0, paid: false };
+      this.setHint("„Nicht schießen! Nehmen Sie das Geld!“", 2);
+    }
+    if (this.robbery) {
+      const r = this.robbery;
+      r.t += dt;
+      if (!r.paid && r.t > 1.5) {
+        r.paid = true;
+        const v = this.shops.robValue(r.it.id);
+        if (v > 0) {
+          this.pickups.push({ x: r.it.counter.x + 4, y: r.it.counter.y, type: "cash", t: 0, value: v });
+          this.shops.robAlarm(r.it.counter.x, r.it.counter.y);
+          this.banner("ÜBERFALL", `$${v.toLocaleString("de-DE")} liegen auf der Theke – der Alarm läuft`, "#ff9f43", 2);
+        } else this.setHint("„Die Kasse ist leer, wirklich!“", 2);
+      }
+      if (r.t > 8 || r.it !== it) this.robbery = null;
+    }
+    // shooting range: a target pops up, hit it before it drops
+    if (this.range) {
+      const g = this.range;
+      g.t -= dt; g.tT -= dt;
+      if (g.tT <= 0) { g.tgt = Math.floor(Math.random() * (g.it.range?.targets.length ?? 1)); g.tT = 1.3; }
+      if (g.t <= 0 || g.it !== it) {
+        const rec = this.progress.records;
+        const best = g.score > (rec.range ?? 0);
+        if (best) rec.range = g.score;
+        this.banner("ZIELÜBUNG", `${g.score} Treffer${best ? " – neuer Rekord" : ""}`, "#ff9f43", 2);
+        this.range = null;
+      }
+    }
+  }
+  // a bullet of the player at the shooting range (true: it hit the target that is up)
+  private rangeHit(x: number, y: number) {
+    const g = this.range, T = g && g.tgt >= 0 ? g.it.range?.targets[g.tgt] : null;
+    if (!g || !T || Math.hypot(x - T.x, y - T.y) > 7) return false;
+    g.score++; g.tgt = -1; g.tT = 0.35;
+    this.text(T.x, T.y, "+1", "#ffd23f", 18); sfx.beep();
+    return true;
   }
   // mission system sets these
   objective = ""; objTimer = -1;
@@ -1512,8 +1607,9 @@ export class Game {
       }
     }
     if ((this.act || this.approach) && this.steerAct(dt, m > 0.15)) return;
+    if (this.seat) { if (m > 0.15) this.seat = null; else { pd.vx = pd.vy = 0; pd.moving = false; pd.x = this.seat.x; pd.y = this.seat.y; pd.a = this.seat.a; return; } }
     const L = Math.hypot(dx, dy);
-    const spd = pd.swim ? 75 : pd.sprint ? 250 : 165;
+    const spd = (pd.swim ? 75 : pd.sprint ? 250 : 165) * (this.energyT > 0 && !pd.swim ? 1.15 : 1);
     const tvx = L > 0 ? (dx / L) * spd * Math.min(1, m / 0.8) : 0, tvy = L > 0 ? (dy / L) * spd * Math.min(1, m / 0.8) : 0;
     const kk = Math.min(1, dt * 10);
     pd.vx += (tvx - pd.vx) * kk; pd.vy += (tvy - pd.vy) * kk;
@@ -1541,7 +1637,7 @@ export class Game {
     const wet = !jetty && isWater(pd.x, pd.y);
     // ground: water surface, jetty, bridge deck / tunnel floor / terrain, roofs (only the one you stand on), ramps
     let ground = wet ? WATER_Y - 13 : jetty ? 2.5 : this.groundH(pd.x, pd.y, pd.z + 4);
-    if (!wet) ground = Math.max(ground, w.rampH(pd.x, pd.y));
+    if (!wet) ground = Math.max(ground, w.rampH(pd.x, pd.y), interiorFloor(this.interiors, pd.x, pd.y, pd.z));
     if (pd.air) {
       pd.vz -= GRAV * dt; pd.z += pd.vz * dt;
       if (pd.z <= ground) {
@@ -1665,6 +1761,7 @@ export class Game {
     this.inv.update(dt);
 
     if (playing && !this.ending) {
+      this.updateInside(dt);
       this.time += dt;
       const hours = (dt * 24) / (Math.max(1, currentSettings.dayMinutes) * 60);
       this.clock = (this.clock + hours) % 24;
