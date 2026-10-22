@@ -19,6 +19,19 @@ function beam(len: number, h: number, d: number, x: number, z: number, y: number
   return withColor(g, typeof col === "string" ? C(col) : col);
 }
 
+// the bored parts of the tunnel as [y start, y end] (between them the road runs in a cut)
+function tunnelBores(): [number, number][] {
+  let inside = false, start = 0;
+  const bore: [number, number][] = [];
+  for (let y = TUNNEL.yA; y >= TUNNEL.yB; y -= 10) {
+    const on = !isNaN(tunnelAt(TUNNEL.x, y));
+    if (on && !inside) { inside = true; start = y; }
+    if (!on && inside) { inside = false; bore.push([start, y + 10]); }
+  }
+  if (inside) bore.push([start, TUNNEL.yB]);
+  return bore;
+}
+
 // ---------------------------------------------------------------- terrain
 export function terrainMesh(quality: "low" | "medium" | "high" | "ultra"): THREE.Mesh {
   const SEG = quality === "ultra" ? 640 : quality === "high" ? 520 : quality === "medium" ? 440 : 360;
@@ -50,18 +63,20 @@ export function terrainMesh(quality: "low" | "medium" | "high" | "ultra"): THREE
     cols[i * 3] = tmp.r; cols[i * 3 + 1] = tmp.g; cols[i * 3 + 2] = tmp.b;
   }
   geo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
-  // open the hill where the road goes into the tunnel (the portals cover the edges)
+  // open the hill only right at the portals, where the road goes in (the portal walls cover the edges)
+  const portals = tunnelBores().flat();
   const idx = geo.index!;
   const keep: number[] = [];
   for (let t = 0; t < idx.count; t += 3) {
     const a = idx.getX(t), b = idx.getX(t + 1), c = idx.getX(t + 2);
-    let inBand = false, lo = Infinity, hi = -Infinity;
+    let near = false, lo = Infinity, hi = -Infinity, z0 = Infinity, z1 = -Infinity;
     for (const v of [a, b, c]) {
       const x = pos.getX(v), z = pos.getZ(v), y = pos.getY(v);
-      if (Math.abs(x - TUNNEL.x) < TUNNEL.hw + 30 && z < TUNNEL.yA + 40 && z > TUNNEL.yB - 40) inBand = true;
-      lo = Math.min(lo, y); hi = Math.max(hi, y);
+      if (Math.abs(x - TUNNEL.x) < ROAD / 2 + 60) near = true;
+      lo = Math.min(lo, y); hi = Math.max(hi, y); z0 = Math.min(z0, z); z1 = Math.max(z1, z);
     }
-    if (inBand && hi - lo > 26) continue;
+    // only the triangles across the portal line would hang in front of the opening
+    if (near && hi - lo > 26 && portals.some((yp) => z0 < yp + 6 && z1 > yp - 6)) continue;
     keep.push(a, b, c);
   }
   geo.setIndex(keep);
@@ -163,14 +178,7 @@ export function roadsMesh(world: World): THREE.Group {
   }
   // the tunnel: walls, ceiling and portals over the bored part
   const T: G[] = [];
-  let inside = false, start = 0;
-  const bore: [number, number][] = [];
-  for (let y = TUNNEL.yA; y >= TUNNEL.yB; y -= 10) {
-    const on = !isNaN(tunnelAt(TUNNEL.x, y));
-    if (on && !inside) { inside = true; start = y; }
-    if (!on && inside) { inside = false; bore.push([start, y + 10]); }
-  }
-  if (inside) bore.push([start, TUNNEL.yB]);
+  const bore = tunnelBores();
   const half = ROAD / 2 + 6;
   for (const [ya, yb] of bore) {
     for (let y = ya; y > yb; y -= 20) {
@@ -182,10 +190,35 @@ export function roadsMesh(world: World): THREE.Group {
     }
     for (const yp of [ya, yb]) {
       const f = tunnelFloor(yp), top = Math.max(f + TUNNEL.clear + 20, terrainH(TUNNEL.x, yp + (yp === ya ? -40 : 40)) + 10);
-      const hgt = top - f, side = 70;
+      const hgt = top - f, side = 95;
       T.push(box(side, hgt, 8, TUNNEL.x - half - side / 2, f + hgt / 2, yp, "#b8b2a6"), box(side, hgt, 8, TUNNEL.x + half + side / 2, f + hgt / 2, yp, "#b8b2a6"));
       T.push(box(half * 2, hgt - TUNNEL.clear, 8, TUNNEL.x, f + TUNNEL.clear + (hgt - TUNNEL.clear) / 2, yp, "#b8b2a6"));
       T.push(box(half * 2 + side * 2 + 4, 3, 10, TUNNEL.x, top, yp, "#8f897d"), box(half * 2, 2, 9, TUNNEL.x, f + TUNNEL.clear + 1, yp, "#d9b23a"));
+    }
+  }
+  // hillside patch behind each portal: closes the gap the terrain leaves open at the portal (any terrain quality)
+  {
+    const V: number[] = [], Cl: number[] = [], I: number[] = [];
+    const cell = MAP_SIZE / 360, W = ROAD / 2 + 60 + cell, nx = 24, ny = 8;
+    const lo = C("#667a3c"), hi = C("#9a9158"), rk = C("#6e665c"), tc = new THREE.Color();
+    for (const [ya, yb] of bore) for (const [yp, dir] of [[ya, -1], [yb, 1]] as const) {
+      const f = tunnelFloor(yp), top = Math.max(f + TUNNEL.clear + 20, terrainH(TUNNEL.x, yp - dir * 40) + 10);
+      const base = V.length / 3;
+      for (let j = 0; j <= ny; j++) for (let i = 0; i <= nx; i++) {
+        const x = TUNNEL.x - W + (2 * W * i) / nx, y = yp + dir * (4 + (2.6 * cell * j) / ny);
+        const h = j === 0 ? Math.min(top - 1, terrainH(x, y + dir * cell)) : terrainH(x, y) + 0.3;
+        V.push(x, h, y);
+        const gr = terrainGrad(x, y, 14);
+        tc.copy(lo).lerp(hi, clamp(h / 350, 0, 1)).lerp(rk, clamp((Math.hypot(gr.x, gr.y) - 0.25) * 2.2, 0, 1));
+        Cl.push(tc.r, tc.g, tc.b);
+        if (i < nx && j < ny) { const a = base + j * (nx + 1) + i, b = a + nx + 1; I.push(a, b, a + 1, b, b + 1, a + 1); }
+      }
+    }
+    if (V.length) {
+      const pg = new THREE.BufferGeometry();
+      pg.setAttribute("position", new THREE.Float32BufferAttribute(V, 3)); pg.setAttribute("color", new THREE.Float32BufferAttribute(Cl, 3)); pg.setIndex(I); pg.computeVertexNormals();
+      const pm = new THREE.Mesh(pg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, envMapIntensity: 0.25, side: THREE.DoubleSide }));
+      pm.receiveShadow = true; grp.add(pm);
     }
   }
   if (T.length) { const tm = new THREE.Mesh(merge(T), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 })); tm.receiveShadow = true; grp.add(tm); }

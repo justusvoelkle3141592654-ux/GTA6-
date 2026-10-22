@@ -132,18 +132,27 @@ export function tunnelFloor(y: number): number {
   const t = Math.max(0, Math.min(1, (TUNNEL.yA - y) / (TUNNEL.yA - TUNNEL.yB)));
   return tunFloor[0] + (tunFloor[1] - tunFloor[0]) * t;
 }
+const CUT_HW = TUNNEL.hw + 70; // the cut with its embankments
 const inTunnelBand = (x: number, y: number) => Math.abs(x - TUNNEL.x) < TUNNEL.hw && y < TUNNEL.yA && y > TUNNEL.yB;
 // floor height inside the bored part of the tunnel, NaN elsewhere
 export function tunnelAt(x: number, y: number): number {
   if (!inTunnelBand(x, y)) return NaN;
   const f = tunnelFloor(y);
-  return baseH(x, y) - f >= TUNNEL.bore ? f : NaN;
+  return baseH(TUNNEL.x, y) - f >= TUNNEL.bore ? f : NaN; // the centre line decides (the same as for the cut)
 }
 
 // ---------------- height
 export function terrainH(x: number, y: number): number {
   const h = baseH(x, y);
-  if (inTunnelBand(x, y)) { const f = tunnelFloor(y); if (h - f < TUNNEL.bore) return f; } // road cut in front of the portals
+  // road cut in front of the portals: flat under the road, then sloped embankments up (or down) to the hill
+  const dx = Math.abs(x - TUNNEL.x);
+  if (dx < CUT_HW && y < TUNNEL.yA + 60 && y > TUNNEL.yB - 60) {
+    const yc = Math.max(TUNNEL.yB, Math.min(TUNNEL.yA, y)), f = tunnelFloor(yc);
+    if (baseH(TUNNEL.x, yc) - f < TUNNEL.bore) {
+      const k = Math.max(0, dx - (ROAD / 2 + 10)) * 1.25 + Math.max(0, Math.abs(y - yc)) * 1.25;
+      return h > f ? Math.min(h, f + k) : Math.max(h, f - k);
+    }
+  }
   return h;
 }
 function baseH(x: number, y: number): number {

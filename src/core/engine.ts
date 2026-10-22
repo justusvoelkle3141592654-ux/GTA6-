@@ -1678,6 +1678,9 @@ export class Game {
     const pd = this.ped;
     const deck = this.onDeck(pd.x, pd.y, pd.z) ? w.roads.bridgeAt(pd.x, pd.y, 4) : null;
     if (deck) { const b = deck.b, s = b.alongX ? x : y, v = b.alongX ? y : x; if (s > b.s0 && s < b.s1 && Math.abs(v - b.c) > b.hw - 4) return true; }
+    // tunnel walls: inside the bore you stay between them
+    const tf = tunnelAt(TUNNEL.x, y);
+    if (!isNaN(tf) && pd.z < tf + TUNNEL.clear && Math.abs(x - TUNNEL.x) > ROAD / 2 - 1 && Math.abs(x - TUNNEL.x) < TUNNEL.hw + 40) return true;
     if (!w.isSolid(x, y, 7)) return false;
     return !(this.ped.z > 30 && w.roofAt(x, y) <= this.ped.z + 4);
   }
@@ -2614,7 +2617,7 @@ export class Game {
       if (impact > 300 && !this.onFoot) this.hitStop = Math.max(this.hitStop, 0.04);
     } else {
       if (a.kind === "cop" && b.kind === "cop") { this.damageCar(a, impact * 0.12); this.damageCar(b, impact * 0.12); }
-      else {
+      else if (impact > 90) { // traffic touching bumpers in a queue is no accident
         if (a.kind === "civ") this.damageCar(a, impact * 0.08 + 4);
         if (b.kind === "civ") this.damageCar(b, impact * 0.08 + 4);
         if (a.kind === "cop") this.damageCar(a, impact * 0.04);

@@ -19,7 +19,7 @@ const PARKED_MODELS: CarModel[] = ["sedan", "sedan", "sedan", "suv", "van", "mus
 const GANG_COLORS: Record<FactionId, string> = { halcones: "#c0392b", kings: "#7d3c98" };
 
 // braking for obstacles: look ahead, keep this gap, assumed comfortable deceleration
-const LOOK_CAR = 110, LOOK_PED = 120, GAP_CAR = 40, GAP_PED = 26, BRAKE_DECEL = 650;
+const LOOK_CAR = 120, LOOK_PED = 120, GAP_CAR = 16, GAP_PED = 26, BRAKE_DECEL = 650; // GAP_CAR: bumper to bumper
 const safeSpeed = (dist: number, gap: number) => Math.sqrt(2 * BRAKE_DECEL * Math.max(0, dist - gap));
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
@@ -289,8 +289,9 @@ export class Traffic {
     for (const o of h.cars) {
       if (o === c) continue;
       const ox = o.x - c.x, oy = o.y - c.y;
-      const fwd = ox * ca + oy * sa;
-      if (fwd > 0 && fwd < LOOK_CAR && Math.abs(-ox * sa + oy * ca) < 22) vSafe = Math.min(vSafe, safeSpeed(fwd, GAP_CAR) + Math.max(0, o.vx * ca + o.vy * sa));
+      // distance bumper to bumper (long vehicles need more room), only cars on the same level (not on a bridge above)
+      const fwd = ox * ca + oy * sa, free = fwd - c.hl - o.hl;
+      if (fwd > 0 && free < LOOK_CAR && Math.abs(-ox * sa + oy * ca) < c.hw + o.hw + 4 && Math.abs(o.z - c.z) < 22) vSafe = Math.min(vSafe, safeSpeed(free, GAP_CAR) + Math.max(0, o.vx * ca + o.vy * sa));
     }
     if (h.onFoot) {
       const ox = h.ped.x - c.x, oy = h.ped.y - c.y;

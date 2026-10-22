@@ -1293,7 +1293,9 @@ export class Renderer3D {
       // terrain tilt
       let tp = 0, tr = 0;
       if (!inCity(c.x, c.y) && !isCraft(c.model)) {
-        const gr = terrainGrad(c.x, c.y, 10);
+        // slope of the surface the car drives on (in the tunnel and on bridges not the hill or sea floor around it)
+        const zq = c.z + 6, G = (x: number, y: number) => g.groundH(x, y, zq);
+        const gr = { x: clamp((G(c.x + 10, c.y) - G(c.x - 10, c.y)) / 20, -0.6, 0.6), y: clamp((G(c.x, c.y + 10) - G(c.x, c.y - 10)) / 20, -0.6, 0.6) };
         const ca = Math.cos(c.a), sa = Math.sin(c.a);
         tp = Math.atan(gr.x * ca + gr.y * sa);
         tr = -Math.atan(-gr.x * sa + gr.y * ca);
