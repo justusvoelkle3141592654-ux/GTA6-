@@ -11,7 +11,7 @@ import Icon from "./icons";
 const TITLE: Record<Place["kind"], string> = {
   hospital: "Klinik", police: "Wache", gunshop: "Waffenladen", workshop: "Werkstatt & Lackiererei", clothes: "Kleidung",
   food: "Imbiss", safehouse: "Safehouse", contact: "", dock: "Bootssteg", heliport: "Heliport", park: "Park", job: "Job",
-  market: "Supermarkt", cardealer: "Autohaus", barber: "Friseur & Tattoo", mall: "Foodcourt",
+  market: "Supermarkt", cardealer: "Autohaus", barber: "Friseur & Tattoo", mall: "Foodcourt", club: "Nachtclub", home: "Wohnung",
 };
 
 function Row({ children }: { children: React.ReactNode }) {

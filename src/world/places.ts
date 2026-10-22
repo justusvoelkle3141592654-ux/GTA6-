@@ -3,7 +3,7 @@ import type { EndReason } from "../core/engine";
 import type { JobKind } from "../gameplay/jobs";
 import { STUNT_PARK } from "./terrain";
 
-export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport" | "park" | "job" | "market" | "cardealer" | "barber" | "mall";
+export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport" | "park" | "job" | "market" | "cardealer" | "barber" | "mall" | "club" | "home";
 export type PlaceAccess = "foot" | "car" | "both" | "none";
 
 export interface PlaceDef {
@@ -36,6 +36,9 @@ export const PLACE_DEFS: PlaceDef[] = [
   { id: "market", kind: "market", name: "Supermarkt Frischbucht", color: "#3dd68c", icon: "$", near: [5, 8], access: "foot", robbable: true },
   { id: "cardealer", kind: "cardealer", name: "Autohaus Solara Motors", color: "#2bb3ff", icon: "#", near: [10, 7], access: "foot" },
   { id: "barber", kind: "barber", name: "Friseur & Tattoo Ink Bay", color: "#c86bff", icon: "&", near: [2, 9], access: "foot" },
+  { id: "club", kind: "club", name: "Nachtclub Neon Tide", color: "#ff3cac", icon: "N", near: [6, 8], access: "none" },
+  { id: "loft", kind: "home", name: "Loft am Hafen", color: "#ffb347", icon: "H", near: [2, 12], access: "none" },
+  { id: "tower", kind: "home", name: "Wohnturm Bayview", color: "#ffb347", icon: "H", near: [11, 11], access: "none" },
   { id: "mall", kind: "mall", name: "Einkaufszentrum Bay Plaza", color: "#ff8a1f", icon: "@", near: [9, 9], access: "foot", at: [9 * BLOCK + ROAD + 10, 9 * BLOCK + ROAD + (BLOCK - ROAD) / 2, Math.PI] },
   // mission contacts (story)
   { id: "lou", kind: "contact", name: "Lous Werkstatt", color: "#ff5ad1", icon: "L", near: [4, 4], access: "foot" },
@@ -74,7 +77,8 @@ export interface Place extends PlaceDef {
 
 export const PLACE_RADIUS = { foot: 22, car: 46 };
 // shops with a room you walk into (door symbol on the maps)
-export const WALKABLE = new Set(["gunshop", "clothes", "food", "food2", "workshop", "safehouse", "market", "cardealer", "barber", "mall"]);
+export const WALKABLE = new Set(["gunshop", "clothes", "food", "food2", "workshop", "safehouse", "market", "cardealer", "barber", "mall",
+  "hospital", "police", "lou", "marisol", "dock", "ines", "ruiz", "club", "loft", "tower"]);
 
 // a place on a map: coloured circle with its letter; walkable shops get a door in the circle
 export function drawPlaceIcon(g: CanvasRenderingContext2D, pl: { id: string; color: string; icon: string }, x: number, y: number, r: number) {

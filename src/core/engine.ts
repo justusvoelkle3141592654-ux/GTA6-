@@ -8,7 +8,7 @@ import { PedSystem, PED_LIMIT, isPolice, type Civilian, type Team } from "../ai/
 import { Car, CARS, VEH_SCALE, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, isJet, isAircraft, isTwoWheel, hitCar, copyBody, repairBody, type CarDef, type FactionId } from "../vehicles/vehicles";
 import { Inventory, WEAPONS, WEAPON_DEFS, type Weapon } from "../gameplay/weapons";
 import { SHAPES, hasRig } from "../vehicles/carmodel";
-import { buildInteriors, interiorAt, interiorFloor, type Interior, type Seat } from "../world/interiors";
+import { buildInteriors, interiorAt, interiorFloor, type Home, type Interior, type Seat } from "../world/interiors";
 import type { ActKind } from "../render/people3d";
 import { AUTOSAVE_EVERY, SAVE_VERSION, emptyProgress, emptyStats, writeSave, type Progress, type SaveData, type SaveResult, type SaveStats } from "./save";
 import { Traffic, PARKED_LIMIT } from "../ai/traffic";
@@ -1281,6 +1281,8 @@ export class Game {
       if (this.seat) { this.seat = null; return true; }
       const s = it.seats.find((q) => Math.hypot(q.x - pd.x, q.y - pd.y) < 14);
       if (s) { this.seat = s; pd.x = s.x; pd.y = s.y; pd.a = s.a; pd.vx = pd.vy = 0; return true; }
+      const home = this.homeAt();
+      if (home) { this.useHome(home); return true; }
       if (it.range && !this.range && Math.hypot(it.range.stand.x - pd.x, it.range.stand.y - pd.y) < 20) {
         if (WEAPON_DEFS[this.weapon].kind !== "gun") { this.setHint("Erst eine Schusswaffe wählen", 1.5); return true; }
         this.range = { it, t: 30, score: 0, tgt: -1, tT: 1 };
@@ -1297,6 +1299,33 @@ export class Game {
     return true;
   }
   onContact: ((pl: Place) => boolean) | null = null; // missions decide what a contact says
+
+  // ---------- homes: the safehouse, the loft and the flats in the tower ----------
+  ownsHome(id: string) { return id === "safehouse" || this.progress.unlocks.includes("home:" + id); }
+  // the bed of a home right next to you (on foot, inside)
+  private homeAt(): Home | null {
+    const it = this.inside, pd = this.ped;
+    if (!it?.homes || !this.onFoot) return null;
+    return it.homes.find((h) => Math.hypot(h.bed.x - pd.x, h.bed.y - pd.y) < 20) ?? null;
+  }
+  // buy it, or sleep in it (until the morning, full health, then the game is saved)
+  private useHome(h: Home) {
+    const pd = this.ped;
+    if (!this.ownsHome(h.id)) {
+      if (this.cash < h.price) { this.setHint(`${h.name} kostet $${h.price.toLocaleString("de-DE")} – dir fehlen $${(h.price - this.cash).toLocaleString("de-DE")}`, 2.4); sfx.empty(); return; }
+      this.cash -= h.price;
+      this.progress.unlocks.push("home:" + h.id);
+      sfx.checkpoint();
+      this.banner("GEKAUFT", `${h.name} gehört jetzt dir – im Bett schlafen speichert das Spiel`, "#ffb347", 3);
+      return;
+    }
+    if (this.wanted.stars > 0) { this.setHint("Mit Fahndung findest du keinen Schlaf", 2); return; }
+    const hrs = this.clock < 8 ? 8 - this.clock : 8;
+    this.clock = (this.clock + hrs) % 24;
+    pd.hp = pd.maxHp; this.player.hp = Math.max(this.player.hp, this.player.maxHp * 0.5);
+    const r = this.saveGame();
+    this.banner("AUSGESCHLAFEN", `${Math.round(hrs)} Stunden geschlafen${r === "saved" ? " · gespeichert" : ""}`, "#ffb347", 2.6);
+  }
 
   // the player's own car was put into the garage (it is not in the car list until you drive another one)
   playerCarStored = false;
@@ -1622,6 +1651,8 @@ export class Game {
       if (this.seat) return "Aufstehen";
       if (it.seats.some((q) => Math.hypot(q.x - pd.x, q.y - pd.y) < 14)) return "Hinsetzen";
       if (it.range && !this.range && Math.hypot(it.range.stand.x - pd.x, it.range.stand.y - pd.y) < 20) return "Zielübung starten";
+      const home = this.homeAt();
+      if (home) return this.ownsHome(home.id) ? "Schlafen & speichern" : `${home.name} kaufen – $${home.price.toLocaleString("de-DE")}`;
     }
     const pl = this.nearPlace;
     return pl && pl.kind !== "contact" ? pl.name : pl ? this.contactLabel(pl) : "";
@@ -1640,6 +1671,11 @@ export class Game {
     }
     if (!it) { this.seat = null; this.range = null; return; }
     this.insideT += dt;
+    // the clinic patches you up while you are inside
+    if (it.heal && this.onFoot && pd.hp < pd.maxHp && !pd.dead) {
+      pd.hp = Math.min(pd.maxHp, pd.hp + 25 * dt);
+      if (this.hintT <= 0) this.setHint("Die Klinik versorgt deine Wunden", 1.5);
+    }
     // wanted: the police come in through the door
     if (this.wanted.stars > 0 && this.rules.city && this.onFoot) {
       this.copT -= dt;
