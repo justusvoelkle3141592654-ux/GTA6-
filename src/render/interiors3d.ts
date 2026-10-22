@@ -189,7 +189,7 @@ export class InteriorsRenderer {
     this.setup(group);
     const lum = (hex: string) => { const c = new THREE.Color(hex); return 0.3 * c.r + 0.59 * c.g + 0.11 * c.b; };
     const bright = Math.max(lum(fc), lum(wc));
-    const lightK = 1 - 0.8 * Math.max(0, Math.min(1, (bright - 0.35) / 0.5));
+    const lightK = 1 - 0.85 * Math.max(0, Math.min(1, (bright - 0.3) / 0.5));
     return { it, group, roof, walls, tower, lightK, doors, doorOpen: 0, gate, people: null, clerk: null, targets, mirror, lift, liftH: 0, tables, steps, inner, lamps, upperMat };
   }
 

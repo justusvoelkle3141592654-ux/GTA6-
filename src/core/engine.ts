@@ -2030,6 +2030,7 @@ export class Game {
 
     const def = this.carDef;
     for (const c of this.cars) {
+      c.ox = c.x; c.oy = c.y; // where it was before this step (walls push it back to the side it came from)
       const grass = this.onGrass(c.x, c.y);
       if (isJet(c.model) && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.jet(c, dt, mine ? this.lift : -1, mine); if (!c.air) this.collideWorld(c); continue; }
       if (isHeli(c.model) && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.fly(c, dt, mine ? this.lift : -1, mine, mine ? currentSettings.vehSpeed : 1); this.collideWorld(c); continue; }
@@ -2415,6 +2416,8 @@ export class Game {
     let g = w.roads.surface(x, y, z, t);
     const roof = w.roofAt(x, y);
     if (roof > g && z >= roof - 25) g = roof;
+    // the roof over a walkable room: whatever comes down from above lands on it
+    if (z > 30) { const it = interiorAt(this.interiors, x, y); if (it && z >= it.H - 6) g = Math.max(g, it.H + 2); }
     return g;
   }
   // standing / driving on a bridge deck (not under it)
@@ -2504,6 +2507,23 @@ export class Game {
     return best;
   }
 
+  // a fast car must never come out on the far side of a (thin) wall: when it was outside before this step,
+  // it is pushed back out on the side it came from, not on the side that happens to be closer now
+  private entrySide(c: Car, x0: number, y0: number, x1: number, y1: number, pen: number): number {
+    if (isNaN(c.ox)) return pen;
+    const ca = Math.cos(c.a), sa = Math.sin(c.a);
+    const ex = Math.abs(ca) * c.hl + Math.abs(sa) * c.hw, ey = Math.abs(sa) * c.hl + Math.abs(ca) * c.hw;
+    let nx = 0, ny = 0, d = 0;
+    if (c.ox <= x0 - ex + 0.5) { nx = -1; d = c.x - (x0 - ex); }
+    else if (c.ox >= x1 + ex - 0.5) { nx = 1; d = x1 + ex - c.x; }
+    else if (c.oy <= y0 - ey + 0.5) { ny = -1; d = c.y - (y0 - ey); }
+    else if (c.oy >= y1 + ey - 0.5) { ny = 1; d = y1 + ey - c.y; }
+    else return pen;
+    if (this.hitN.x * nx + this.hitN.y * ny > 0.5) return pen; // already pushed back that way
+    this.hitN.x = nx; this.hitN.y = ny;
+    return Math.max(0, d);
+  }
+
   private collideWorld(c: Car) {
     let maxImpact = 0, hx = 0, hy = 0, hnx = 0, hny = 0;
     const inertia = (c.hl * c.hl + c.hw * c.hw) / 3;
@@ -2525,7 +2545,7 @@ export class Game {
     for (const b of bs) {
       if (c.z >= roofOf(b) - 25) continue; // car is up on/above the roof: no wall
       const pen = this.boxRect(c, b.x, b.y, b.x + b.w, b.y + b.h);
-      if (pen > 0) resolve(pen);
+      if (pen > 0) resolve(this.entrySide(c, b.x, b.y, b.x + b.w, b.y + b.h, pen));
     }
     // ramps are walls from the sides and the back (the lowest part is left out so you can roll onto it)
     const ids = w.rampsAt(c.x, c.y);

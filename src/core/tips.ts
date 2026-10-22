@@ -2,7 +2,7 @@ import type { Game } from "./engine";
 import { currentSettings } from "./settings";
 
 // tutorial hints: each one is shown once (remembered in localStorage), only in the open world
-type TipId = "story" | "enter" | "nitro" | "radio" | "job" | "star" | "place" | "map" | "weapon" | "swim" | "bank" | "hide" | "chapter2" | "army" | "craft" | "spawn";
+type TipId = "story" | "enter" | "nitro" | "radio" | "job" | "star" | "place" | "map" | "weapon" | "swim" | "bank" | "hide" | "chapter2" | "army" | "craft" | "spawn" | "home" | "jets";
 interface Tip { id: TipId; when: (g: Game) => boolean; text: (g: Game, touch: boolean) => string; }
 
 const TIPS: Tip[] = [
@@ -21,6 +21,8 @@ const TIPS: Tip[] = [
   { id: "chapter2", when: (g) => g.progress.missions.includes("m10"), text: () => "Neue Aufträge: Ines im Hafenamt (A) und Kommissarin Ruiz (R)" },
   { id: "army", when: (g) => g.wanted.stars >= 6, text: () => "6 Sterne: Das Militär rückt an. Weg von der Straße – oder ab aufs Wasser" },
   { id: "craft", when: (g) => g.time > 150, text: () => "Am Bootssteg (B) wartet ein Speedboot, am Heliport (F) ein Hubschrauber" },
+  { id: "home", when: (g) => g.time > 240, text: () => "Wohnen: Im Wohnturm Bayview und im Loft am Hafen kannst du Wohnungen kaufen – im eigenen Bett schlafen speichert" },
+  { id: "jets", when: (g) => g.police.jets.length > 0, text: () => `Kampfjets! Versteck dich im Tunnel oder in einem Gebäude – oder hol dir selbst einen Jet (Pause → Flug)` },
   { id: "map", when: (g) => g.time > 90, text: (g, t) => t ? "In der Pause: Karte antippen, um einen Wegpunkt zu setzen" : `${g.bind.label("map")}: Karte – klick, um einen Wegpunkt zu setzen` },
 ];
 const KEY = "solarabay.tips.v1";

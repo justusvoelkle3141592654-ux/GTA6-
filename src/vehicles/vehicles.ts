@@ -103,6 +103,7 @@ export type FactionId = "halcones" | "kings";
 
 export class Car {
   x = 0; y = 0; z = 0; vx = 0; vy = 0; vz = 0; a = 0; av = 0;
+  ox = NaN; oy = NaN; // position before the current physics step
   air = false; airT = 0;
   vF = 0; vR = 0;
   hp = 100; maxHp = 100; mass = 1;

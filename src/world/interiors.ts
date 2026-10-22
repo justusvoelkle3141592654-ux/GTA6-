@@ -304,8 +304,8 @@ function furnish(it: Interior) {
     }
     case "garage": {
       // Lou's garage: a car up on the lift, tool wall, workbench, old sofa
-      F("lift", cx - 4, cy, 34, 54, WEST, "#c0392b", { solid: true });
-      F("carprop", cx - 4, cy, 22, 46, WEST, "#ff5ad1", { z: 12 });
+      F("lift", cx - 4, cy, 34, 54, WEST, "#8a2a22", { solid: true });
+      F("carprop", cx - 4, cy, 22, 46, WEST, "#a83a7c", { z: 12 });
       F("toolwall", x1 - 3, cy, 56, 4, WEST, "#c9b07a");
       F("workbench", x1 - 30, y0 + 8, 30, 12, SOUTH, "#6a4a32", { solid: true });
       it.counter = { x: x1 - 30, y: y0 + 30 }; it.clerk = { x: x1 - 30, y: y0 + 19, a: Math.PI / 2 };
@@ -331,7 +331,7 @@ function furnish(it: Interior) {
       it.guests.push({ x: x0 + 14, y: y0 + 24, a: 0, anim: "bench" }, { x: x0 + 72, y: y0 + 24, a: Math.PI, anim: "talk" });
       F("palm", x0 + 10, y1 - 10, 14, 14); F("plant", x1 - 10, y1 - 10, 12, 12);
       onN("art", cx, 26, "#ff5ad1", "sun"); onS("neon", cx - 10, 44, "#ff5ad1", "CAFÉ MARISOL", 28);
-      it.floor = ["checker", "#efe8da"]; it.wallTex = ["paint", "#f2d9b8"];
+      it.floor = ["checker", "#d6cdbd"]; it.wallTex = ["paint", "#dcbf98"];
       break;
     }
     case "office": {
