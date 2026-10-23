@@ -1,9 +1,9 @@
 import { BLOCK, ROAD, GRID, HELIPAD, type Building, type World } from "./world";
 import type { EndReason } from "../core/engine";
 import type { JobKind } from "../gameplay/jobs";
-import { STUNT_PARK } from "./terrain";
+import { STUNT_PARK, PRISON } from "./terrain";
 
-export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport" | "park" | "job" | "market" | "cardealer" | "barber" | "mall" | "club" | "home";
+export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport" | "park" | "job" | "market" | "cardealer" | "barber" | "mall" | "club" | "home" | "prison";
 export type PlaceAccess = "foot" | "car" | "both" | "none";
 
 export interface PlaceDef {
@@ -65,6 +65,7 @@ export const PLACE_DEFS: PlaceDef[] = [
   { id: "stuntpark", kind: "job", job: "stunt", name: "Stunt-Park", color: "#ffd23f", icon: "2", near: [14, 0], access: "both", at: [STUNT_PARK.x0 - 130, (STUNT_PARK.y0 + STUNT_PARK.y1) / 2 + 60, Math.PI] },
   // hide and seek in the park
   { id: "hide", kind: "park", name: "Versteckspiel im Park", color: "#3dff8b", icon: "V", near: [9, 10], access: "foot", inPark: true },
+  { id: "prison", kind: "prison", name: "Haftanstalt Solara Bay", color: "#8a9098", icon: "!", near: [8, 0], access: "none", at: [PRISON.x1 + 70, (PRISON.y0 + PRISON.y1) / 2 + 30, 0] },
   { id: "jetty", kind: "dock", name: "Bootssteg", color: "#2bb3ff", icon: "B", near: [0, 9], access: "none", at: [-196, 3455, Math.PI] },
   { id: "helipad", kind: "heliport", name: "Heliport", color: "#ffd23f", icon: "F", near: [15, 4], access: "none", at: [HELIPAD.x - 120, HELIPAD.y + 60, Math.PI] },
 ];

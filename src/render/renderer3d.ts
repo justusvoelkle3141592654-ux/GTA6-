@@ -7,15 +7,20 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { wrapA, clamp, canvasTex, radialTex, withColor, C, box, flat, cyl, sph } from "./meshutil";
-import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_SIZE, H_SCALE, EDGE_LAND, STUNT_PARK, terrainH, terrainGrad, cityDist, inCity, coast, edgeDist, mulberry32, type Building, tunnelAt, TUNNEL } from "../world/world";
+import { World, BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_SIZE, H_SCALE, EDGE_LAND, STUNT_PARK, PRISON, GAS_STATION, terrainH, terrainGrad, cityDist, inCity, coast, edgeDist, mulberry32, type Building, tunnelAt, TUNNEL } from "../world/world";
 import { PropMeshes } from "./props3d";
 import { terrainMesh, backdropMesh, roadsMesh, rampsMesh, coastMesh, extrasMesh, furnitureMesh, LightsMesh } from "./worldmesh";
 import { TrafficLights } from "../ai/traffic";
 import { Atmosphere } from "./atmosphere";
+import { MAX_JETS } from "../ai/police";
+import { loadModels, whenModels, model, hasModel, type ModelId } from "./models";
 import { currentSettings } from "../core/settings";
 import { WaterSurface } from "./water";
 import { buildHideFields } from "../gameplay/hide";
-const inStuntPark = (x: number, y: number) => x > STUNT_PARK.x0 - 60 && x < STUNT_PARK.x1 + 60 && y > STUNT_PARK.y0 - 60 && y < STUNT_PARK.y1 + 60;
+// flat places without trees and rocks: the stunt park, the prison and the gas station
+const inStuntPark = (x: number, y: number) => (x > STUNT_PARK.x0 - 60 && x < STUNT_PARK.x1 + 60 && y > STUNT_PARK.y0 - 60 && y < STUNT_PARK.y1 + 60)
+  || (x > PRISON.x0 - 80 && x < PRISON.x1 + 80 && y > PRISON.y0 - 80 && y < PRISON.y1 + 80)
+  || Math.abs(x - GAS_STATION.x) < GAS_STATION.w / 2 + 70 && Math.abs(y - GAS_STATION.y) < GAS_STATION.h / 2 + 70;
 import { isCraft, isBoat, isHeli, isJet, isAircraft, isTwoWheel, VEH_SCALE } from "../vehicles/vehicles";
 import { CarRig, carMaterials, hasRig, topAt, type CarMats } from "../vehicles/carmodel";
 import { JETTY, HELI_SPOT, WALKABLE, type Place } from "../world/places";
@@ -250,6 +255,10 @@ function heliGeo(color: string, police = false): CarGeo {
   return res;
 }
 
+// vehicles drawn from a Blender model (render/models.ts) once it is loaded
+const glbIdFor = (c: { model: CarModel; kind: string }): ModelId | null =>
+  c.model === "armor" ? "armor" : c.model === "jet" ? (c.kind === "cop" ? "jet_police" : "jet") : c.model === "heli" ? "heli" : c.model === "policeheli" ? "heli_police" : null;
+
 interface CarWheel { x: number; z: number; r: number; wd: number; front: boolean; }
 interface CarGeo { body: THREE.BufferGeometry; glass: THREE.BufferGeometry; lights: THREE.BufferGeometry; wheels: CarWheel[]; roofY: number; }
 const carGeoCache = new Map<string, CarGeo>();
@@ -430,10 +439,11 @@ function getCarGeo(model: CarModel, color: string): CarGeo {
 }
 
 interface CarObj {
-  group: THREE.Group; tilt: THREE.Group; body: THREE.Mesh; glass: THREE.Mesh; lights: THREE.Mesh; pool: THREE.Mesh; glow?: THREE.Mesh; rotor?: THREE.Mesh;
+  group: THREE.Group; tilt: THREE.Group; body: THREE.Mesh; glass: THREE.Mesh; lights: THREE.Mesh; pool: THREE.Mesh; glow?: THREE.Mesh; rotor?: THREE.Object3D;
   wheels: { pivot: THREE.Object3D; spin: THREE.Object3D; front: boolean; r: number; y: number }[];
   bar?: { reds: THREE.MeshBasicMaterial; blues: THREE.MeshBasicMaterial; white: THREE.MeshBasicMaterial };
   burner?: THREE.Mesh;
+  glb?: THREE.Object3D; tailRotor?: THREE.Object3D; gear?: THREE.Object3D; turret?: THREE.Object3D; turretA?: number; // Blender models
   model: CarModel; color: string; wreck: boolean; pitch: number; roll: number; spinA: number; steerA: number;
   rig?: CarRig; gangDriver?: boolean; dentN: number; glassV: number; bumpers: number; doorsOff: number; lonV: number; prevV: number; brakeT: number; wipe: number; bounce: number; bounceV: number;
 }
@@ -576,6 +586,8 @@ export class Renderer3D {
     this.atm = new Atmosphere(this.scene, this.camera, quality);
     this.water = new WaterSurface(this.scene, world, quality);
     this.buildLights(); this.buildGround(); this.buildTerrain(); this.buildCity(); this.buildRamps(); this.buildLamps(); this.buildShared(); this.buildPlaces(places); this.buildMarkers(); this.buildHeli(); this.buildPoliceJets(); this.buildSpikes();
+    // Blender models: parsed in the background, then the police aircraft and the prison / gas station use them
+    loadModels(); whenModels(() => this.useModels());
     this.setQuality(quality);
     this.atm.setupMaterials(this.scene);
   }
@@ -1226,7 +1238,38 @@ export class Renderer3D {
     return obj;
   }
 
+  // a vehicle from a Blender model: wheels, rotors, landing gear and the turret are nodes in the file
+  private glbCar(c: Car): CarObj | null {
+    const id = glbIdFor(c), m = id ? model(id) : null;
+    if (!m) return null;
+    const group = new THREE.Group();
+    group.rotation.order = "YXZ"; group.scale.setScalar(VEH_SCALE);
+    const tilt = new THREE.Group();
+    group.add(tilt); tilt.add(m);
+    const wheels: CarObj["wheels"] = [];
+    for (const n of [...m.children]) if (n.name.startsWith("wheel_")) {
+      const pivot = new THREE.Group(); pivot.position.copy(n.position); m.add(pivot);
+      n.position.set(0, 0, 0); pivot.add(n);
+      wheels.push({ pivot, spin: n, front: pivot.position.x > 10, r: 6, y: pivot.position.y });
+    }
+    const dummy = new THREE.Mesh();
+    const shadow = new THREE.Mesh(this.shadowGeo, this.shadowMat); shadow.renderOrder = 1;
+    const pool = new THREE.Mesh(this.poolGeo, c.kind === "player" ? this.poolMatP : this.poolMat); pool.renderOrder = 2;
+    group.add(shadow, pool);
+    const obj: CarObj = { group, tilt, body: dummy, glass: dummy, lights: dummy, pool, wheels, model: c.model, color: c.color, wreck: false, pitch: 0, roll: 0, spinA: 0, steerA: 0, dentN: 0, glassV: 0, bumpers: 0, doorsOff: 0, lonV: 0, prevV: 0, brakeT: 0, wipe: 0, bounce: 0, bounceV: 0,
+      glb: m, rotor: m.getObjectByName("rotor") ?? undefined, tailRotor: m.getObjectByName("tailrotor") ?? undefined, gear: m.getObjectByName("gear") ?? undefined, turret: m.getObjectByName("turret") ?? undefined, turretA: 0 };
+    if (c.kind === "player") { obj.glow = new THREE.Mesh(this.glowGeo, this.glowMat); obj.glow.renderOrder = 2; group.add(obj.glow); }
+    if (isHeli(c.model)) shadow.visible = false;
+    if (isJet(c.model)) { obj.burner = new THREE.Mesh(this.burnerGeo, this.burnerMat); obj.burner.position.set(-35.5, 10, 0); tilt.add(obj.burner); shadow.scale.set(1.3, 1, 1.4); }
+    if (c.model === "armor") shadow.scale.set(1.4, 1, 1.2);
+    this.scene.add(group);
+    this.atm.setupMaterials(group);
+    return obj;
+  }
+
   private makeCar(c: Car): CarObj {
+    const gm = this.glbCar(c);
+    if (gm) return gm;
     if (hasRig(c.model)) return this.makeRigCar(c);
     const geo = getCarGeo(c.model, c.color);
     const group = new THREE.Group();
@@ -1328,6 +1371,7 @@ export class Renderer3D {
     for (const c of g.cars) {
       seen.add(c);
       let o = this.carObjs.get(c);
+      if (o && !o.glb && !c.dead) { const id = glbIdFor(c); if (id && hasModel(id)) { this.disposeCar(o); o = undefined; } }
       if (o && (o.model !== c.model || o.color !== c.color || (o.wreck && !c.dead) || c.dents.length < o.dentN * 3 || (o.bumpers & ~c.bumpers) !== 0 || (o.doorsOff & ~c.doorsOff) !== 0)) { this.disposeCar(o); o = undefined; }
       if (!o) { o = this.makeCar(c); this.carObjs.set(c, o); }
       o.group.position.set(c.x, c.z + (c === g.player && !g.onFoot ? this.rooms.liftY : 0), c.y);
@@ -1365,11 +1409,13 @@ export class Renderer3D {
         o.tilt.rotation.x = c.air ? clamp(-c.av * 0.45, -0.9, 0.9) : 0;
         o.group.rotation.x = 0; o.group.rotation.z = 0;
         if (o.burner) { const kb = c.dead ? 0 : c.rotor; o.burner.visible = kb > 0.05; o.burner.scale.set(0.6 + kb * 1.4, 0.8 + kb * 0.4, 0.8 + kb * 0.4); }
+        if (o.gear) o.gear.visible = !c.air;
       } else if (isHeli(c.model)) {
         // nose down when flying forward, bank into turns, spinning rotor
         o.tilt.rotation.z = clamp(-c.vF / 1400, -0.3, 0.2);
         o.tilt.rotation.x = clamp(-c.av * 0.12, -0.3, 0.3);
         if (o.rotor) o.rotor.rotation.y = c.rotor;
+        if (o.tailRotor) o.tailRotor.rotation.z = c.rotor * 1.7;
       } else if (isBoat(c.model)) {
         o.tilt.rotation.z = clamp(c.vF / 2600, -0.05, 0.16) + Math.sin(t * 2.1 + c.x * 0.01) * 0.02; // bow up when fast
         o.tilt.rotation.x = clamp(-c.av * 0.06, -0.15, 0.15) + Math.sin(t * 1.7 + c.y * 0.01) * 0.02;
@@ -1380,8 +1426,15 @@ export class Renderer3D {
       } else o.tilt.rotation.x = clamp(-c.vR / 900, -0.09, 0.09);
       if (!isCraft(c.model)) o.tilt.rotation.z = c.dead ? 0 : c.throttle > 0 ? 0.025 * c.throttle : c.throttle < 0 && c.vF > 50 ? -0.04 : 0;
       o.pool.visible = !c.air && !c.dead && !isBoat(c.model);
+      // the armoured car's turret turns towards you when the police drive it
+      if (o.turret) {
+        const want = c.kind === "cop" && !c.dead && !c.calm ? wrapA(Math.atan2(g.fy - c.y, g.fx - c.x) - c.a) : 0;
+        o.turretA = (o.turretA ?? 0) + wrapA(want - (o.turretA ?? 0)) * Math.min(1, dt * 2.5);
+        o.turret.rotation.y = -o.turretA;
+      }
       if (o.rig) this.updateRig(g, c, o, dt);
       else if (c.dead && !o.wreck) {
+        if (o.glb) o.glb.traverse((n) => { if ((n as THREE.Mesh).isMesh) (n as THREE.Mesh).material = this.wreckMat; });
         o.wreck = true; o.body.material = this.wreckMat; o.glass.material = this.wreckMat; o.lights.visible = false; o.pool.visible = false;
         if (o.glow) o.glow.visible = false;
         if (o.bar) { o.bar.reds.color.setScalar(0.1); o.bar.blues.color.setScalar(0.1); o.bar.white.color.setScalar(0.1); }
@@ -1499,9 +1552,11 @@ export class Renderer3D {
       let o = this.pickObjs.get(pk);
       if (!o) {
         o = new THREE.Group();
-        const m = new THREE.Mesh(this.pickGeo[pk.type]!, this.pickMat[pk.type]!);
         const s = pk.type === "cash" ? (pk.value >= 500 ? 1.5 : pk.value >= 250 ? 1.2 : 1) : 1;
-        m.scale.setScalar(s);
+        // cash: the bundle of notes from Blender (a fallback box until it is loaded)
+        const cash = pk.type === "cash" ? model("cash") : null;
+        const m: THREE.Object3D = cash ?? new THREE.Mesh(this.pickGeo[pk.type]!, this.pickMat[pk.type]!);
+        m.scale.setScalar(s * (cash ? 3.4 : 1));
         const beam = new THREE.Mesh(this.beamGeo, this.beamMat[pk.type]!);
         beam.renderOrder = 3;
         o.add(m, beam);
@@ -1735,12 +1790,39 @@ export class Renderer3D {
   }
 
   // police helicopter with spotlight cone on the ground
-  private heliG: THREE.Group | null = null; private heliRotor: THREE.Mesh | null = null; private heliSpot: THREE.Mesh | null = null;
+  private heliG: THREE.Group | null = null; private heliRotor: THREE.Object3D | null = null; private heliSpot: THREE.Mesh | null = null;
+  // ---------------------------------------------------------- Blender models
+  private useModels() {
+    const hm = model("heli_police");
+    if (hm && this.heliG) {
+      for (const ch of [...this.heliG.children]) this.heliG.remove(ch);
+      hm.position.y = -14; hm.scale.setScalar(VEH_SCALE); this.heliG.add(hm);
+      this.heliRotor = hm.getObjectByName("rotor") ?? null;
+      this.atm.setupMaterials(hm);
+    }
+    for (const o of this.jetObjs) {
+      const jm = model("jet_police"), tilt = o.g.children[0];
+      if (!jm || !tilt) break;
+      for (const ch of [...tilt.children]) if (ch !== o.burner) tilt.remove(ch);
+      const gear = jm.getObjectByName("gear"); if (gear) gear.visible = false;
+      o.burner.position.x = -35.5;
+      tilt.add(jm); this.atm.setupMaterials(jm);
+    }
+    // the prison north-west of the city and the gas station at the northern highway
+    for (const sp of this.world.modelSpots) {
+      const m = model(sp.id as ModelId);
+      if (!m) continue;
+      m.position.set(sp.x, terrainH(sp.x, sp.y), sp.y); m.rotation.y = -sp.a;
+      if (sp.sx) m.scale.x = sp.sx;
+      this.scene.add(m); this.atm.setupMaterials(m);
+    }
+  }
+
   // ---------------------------------------------------------- police fighter jets
   private jetObjs: { g: THREE.Group; burner: THREE.Mesh }[] = [];
   private buildPoliceJets() {
     const geo = jetGeo("#22355e", true);
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < MAX_JETS; i++) {
       const g = new THREE.Group(); g.rotation.order = "YXZ"; g.scale.setScalar(VEH_SCALE);
       const tilt = new THREE.Group();
       tilt.add(new THREE.Mesh(geo.body, this.bodyMat), new THREE.Mesh(geo.glass, this.glassMat), new THREE.Mesh(geo.lights, this.lightMat));
@@ -1892,12 +1974,12 @@ export class Renderer3D {
         const cx = Math.cos(this.camYaw + this.lookYaw), cy = Math.sin(this.camYaw + this.lookYaw);
         // inside a shop: closer, the walls on the camera side become see-through (interiors3d)
         // "near" (setting / zoom button): about half the distance, people look twice as big
-        const it = g.inside, near = currentSettings.camNear, far = it ? 56 : near ? 54 : 108, chk = near ? 48 : 95;
+        const it = g.inside, near = currentSettings.camNear, far = it ? 46 : near ? 54 : 108, chk = near ? 48 : 95;
         let dist = far;
         if (!it) for (let s = 0.15; s <= 1.0001; s += 0.1) if (this.world.isSolid(fx - cx * chk * s, fy - cy * chk * s, 6)) { dist = Math.max(24, chk * s - 8); break; }
-        tgt.set(fx - cx * dist * Math.cos(this.lookPitch * 0.6), fz + (it ? 62 : near ? 30 : 54) + this.lookPitch * (near ? 40 : 60), fy - cy * dist * Math.cos(this.lookPitch * 0.6));
-        // the camera stays inside the room (from above, the roof is hidden)
-        if (it) { tgt.x = clamp(tgt.x, it.x0 + 6, it.x1 - 6); tgt.z = clamp(tgt.z, it.y0 + 6, it.y1 - 6); }
+        tgt.set(fx - cx * dist * Math.cos(this.lookPitch * 0.6), fz + (it ? 32 : near ? 30 : 54) + this.lookPitch * (near ? 40 : 60), fy - cy * dist * Math.cos(this.lookPitch * 0.6));
+        // inside a room the camera stays in it, under the ceiling (the walls between it and you fade out)
+        if (it) { tgt.x = clamp(tgt.x, it.x0 + 6, it.x1 - 6); tgt.z = clamp(tgt.z, it.y0 + 6, it.y1 - 6); tgt.y = Math.min(tgt.y, it.H - 7); }
         lx = fx + cx * 30; ly = fz + 16; lz = fy + cy * 30; fov = 60; kp = 9;
       } else {
         let desired = p.a;

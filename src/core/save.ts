@@ -3,8 +3,8 @@ import { WEAPONS, WEAPON_DEFS, type InventorySave, type Weapon } from "../gamepl
 import { MAX_TUNE, TUNE_PARTS, noTune, type OwnedCar, type Tune } from "../vehicles/garage";
 import { STATIONS } from "../audio/radio";
 
-export type SaveDifficulty = "easy" | "normal" | "hard";
-const DIFFICULTIES: SaveDifficulty[] = ["easy", "normal", "hard"];
+export type SaveDifficulty = "easy" | "normal" | "hard" | "hardcore";
+const DIFFICULTIES: SaveDifficulty[] = ["easy", "normal", "hard", "hardcore"];
 
 export const SAVE_KEY = "solarabay.save.v4";
 const LEGACY_KEYS = ["solarabay.save.v3", "solarabay.save.v2", "solarabay.save.v1"]; // older versions: read and converted

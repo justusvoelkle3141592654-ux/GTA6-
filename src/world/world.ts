@@ -1,5 +1,5 @@
 import {
-  BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_SIZE, EXT, HIGHWAYS, WATER_Y, COAST, ISLAND, HELIPAD, STUNT_PARK, VILLA_HILL, MASK_N,
+  BLOCK, ROAD, GRID, WORLD, MAP_MIN, MAP_SIZE, EXT, HIGHWAYS, WATER_Y, COAST, ISLAND, HELIPAD, STUNT_PARK, VILLA_HILL, MASK_N, PRISON, GAS_STATION,
   mulberry32, terrainH, terrainGrad, isWater, inCity, cityDist, lineC, waterMask, edgeDist, EDGE_LAND,
 } from "./terrain";
 import { RoadNet } from "./roads";
@@ -104,6 +104,15 @@ export class World {
         const k = World.key(cx, cy); let l = this.rampCells.get(k); if (!l) { l = []; this.rampCells.set(k, l); } l.push(i);
       }
     }
+  }
+  // solid boxes added later (walls of the prison's cell block)
+  addExtras(list: Building[]) {
+    const from = this.extras.length;
+    this.extras.push(...list);
+    for (const e of list) for (let cy = World.cell(e.y); cy <= World.cell(e.y + e.h); cy++) for (let cx = World.cell(e.x); cx <= World.cell(e.x + e.w); cx++) {
+      const k = World.key(cx, cy); let l = this.extraCells.get(k); if (!l) { l = []; this.extraCells.set(k, l); } l.push(e);
+    }
+    return from;
   }
   rampsAt(x: number, y: number): number[] | undefined { return this.rampCells.get(World.key(World.cell(x), World.cell(y))); }
   private extrasAt(x: number, y: number): Building[] | undefined { return this.extraCells.get(World.key(World.cell(x), World.cell(y))); }
@@ -237,7 +246,55 @@ export class World {
     this.extras.push(b);
     return b;
   }
+  // the prison and the gas station: drawn from Blender models (render/models3d.ts), solid boxes here (type 40)
+  modelSpots: { id: string; x: number; y: number; a: number; sx?: number }[] = [];
+  static PRISON_GATE = { x: PRISON.x1, y: (PRISON.y0 + PRISON.y1) / 2 };
+  private generateModelSites() {
+    const M = { type: 40 }, hgt = (h: number) => (h - 14) / H_SCALE;
+    const P = PRISON, gy = World.PRISON_GATE.y, n = Math.round((P.x1 - P.x0) / 100);
+    // walls (100 long segments) on all four sides, the gate in the middle of the east wall
+    for (let k = 0; k < n; k++) {
+      const x = P.x0 + 50 + k * 100;
+      this.modelSpots.push({ id: "prison_wall", x, y: P.y0 + 3, a: 0 }, { id: "prison_wall", x, y: P.y1 - 3, a: 0 });
+      this.modelSpots.push({ id: "prison_wall", x: P.x0 + 3, y: P.y0 + 50 + k * 100, a: Math.PI / 2 });
+      const y = P.y0 + 50 + k * 100;
+      if (Math.abs(y - gy) >= 100) this.modelSpots.push({ id: "prison_wall", x: P.x1 - 3, y, a: Math.PI / 2 });
+    }
+    // short pieces between the gate and the next full segments
+    for (const s of [-1, 1]) {
+      let edge = gy + s * 54, far = gy + s * 54;
+      for (let k = 0; k < n; k++) { const y = P.y0 + 50 + k * 100; if (Math.abs(y - gy) >= 100) { const near = y - s * 50; if (s > 0 ? near >= edge && (far === edge || near < far) : near <= edge && (far === edge || near > far)) far = near; } }
+      const len = Math.abs(far - edge);
+      if (len > 2) this.modelSpots.push({ id: "prison_wall", x: P.x1 - 3, y: (edge + far) / 2, a: Math.PI / 2, sx: len / 100 });
+    }
+    this.modelSpots.push({ id: "prison_gate", x: P.x1, y: gy, a: -Math.PI / 2 }); // the sign looks east, to the highway
+    this.extra(P.x0, P.y0, P.x1 - P.x0, 6, hgt(62), "#a39d92", M); this.extra(P.x0, P.y1 - 6, P.x1 - P.x0, 6, hgt(62), "#a39d92", M);
+    this.extra(P.x0, P.y0, 6, P.y1 - P.y0, hgt(62), "#a39d92", M);
+    this.extra(P.x1 - 6, P.y0, 6, gy - 54 - P.y0, hgt(62), "#a39d92", M); this.extra(P.x1 - 6, gy + 54, 6, P.y1 - gy - 54, hgt(62), "#a39d92", M);
+    this.extra(P.x1 - 8, gy - 54, 14, 16, hgt(82), "#8c867c", M); this.extra(P.x1 - 8, gy + 38, 14, 16, hgt(82), "#8c867c", M); // gate piers
+    this.extra(P.x1 - 2, gy - 38, 4, 76, hgt(56), "#5c6168", M);                                                                 // the closed gate
+    this.extra(P.x1 - 23, gy - 77, 18, 22, hgt(32), "#a39d92", M);                                                              // guard booth (inside)
+    // watch towers in the corners, two cell blocks in the yard
+    for (const [x, y] of [[P.x0 + 30, P.y0 + 30], [P.x1 - 30, P.y0 + 30], [P.x0 + 30, P.y1 - 30], [P.x1 - 30, P.y1 - 30]]) {
+      this.modelSpots.push({ id: "prison_tower", x, y, a: 0 });
+      this.extra(x - 15, y - 15, 30, 30, hgt(118), "#8c867c", M);
+    }
+    for (const y of [P.y0 + 130, P.y1 - 130]) {
+      this.modelSpots.push({ id: "prison_block", x: P.x0 + 230, y, a: y < gy ? 0 : Math.PI }); // the doors look into the yard
+      this.extra(P.x0 + 150, y - 30, 160, 60, hgt(100), "#a39d92", M);
+    }
+    // gas station by the northern highway: shop, canopy columns, pumps, price sign
+    const G = GAS_STATION;
+    this.modelSpots.push({ id: "gas_station", x: G.x, y: G.y, a: 0 });
+    this.extra(G.x + 32, G.y - 25, 40, 50, hgt(33), "#f2f2ee", M);
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+      this.extra(G.x - 10 + sx * 30 - 2, G.y + sy * 18 - 2, 4, 4, hgt(54), "#9aa0a8", M);
+      this.extra(G.x - 10 + sx * 15 - 3, G.y + sy * 18 - 2.5, 6, 5, hgt(22), "#f2f2ee", M);
+    }
+    this.extra(G.x - 71, G.y + 39, 3, 3, hgt(70), "#9aa0a8", M);
+  }
   private generateExtras(seed: number) {
+    this.generateModelSites();
     const r = mulberry32(seed);
     const COLS = ["#c0392b", "#1d4e89", "#e67e22", "#3c6e47", "#7d3c98", "#c9a227", "#9aa3ad"];
     const freeY = (y: number, h: number) => HIGHWAYS.every((i) => Math.abs(y + h / 2 - lineC(i)) > ROAD / 2 + h / 2 + 40);

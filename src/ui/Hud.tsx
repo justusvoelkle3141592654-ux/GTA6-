@@ -33,6 +33,14 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onZoo
   const mm = (isTouch ? 104 : 150) * currentSettings.hudScale; // the minimap is drawn by the game in the top right
   return (
     <div className="pointer-events-none absolute inset-0 z-10 select-none font-sans">
+      {/* WASTED / BUSTED: the picture turns grey, big letters like in the old crime games */}
+      {hud.ending && (
+        <div className="pointer-events-none fixed inset-0 z-40 flex flex-col items-center justify-center" style={{ backdropFilter: `grayscale(${Math.min(1, hud.endT * 1.5)}) brightness(${1 - Math.min(0.35, hud.endT * 0.3)})`, WebkitBackdropFilter: `grayscale(${Math.min(1, hud.endT * 1.5)})` }}>
+          <div className="font-display tracking-[0.12em] drop-shadow-[0_4px_0_rgba(0,0,0,0.85)]" style={{ fontSize: "min(22vw, 170px)", color: hud.ending === "dead" ? "#c8102e" : "#2f7bff", opacity: Math.min(1, hud.endT * 2), transform: `scale(${1.25 - Math.min(0.25, hud.endT * 0.5)})` }}>
+            {hud.ending === "dead" ? "WASTED" : "BUSTED"}
+          </div>
+        </div>
+      )}
       {/* top left: money (or score) and wanted level */}
       <Zone at="tl">
         {rules.respawn ? (

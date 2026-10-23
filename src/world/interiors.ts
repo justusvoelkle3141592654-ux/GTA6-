@@ -2,11 +2,11 @@
 // A room sits inside its place's building (its walls are thin buildings, so people and cars collide with them
 // like with any building), a door to the street, a counter where you buy, furniture per room.
 // The mall and the apartment tower fill a whole block (mall: upper floor with escalators; tower: six flats).
-import { BLOCK, ROAD, H_SCALE, type Building, type World } from "./world";
+import { BLOCK, ROAD, H_SCALE, PRISON, World, type Building } from "./world";
 import type { Place } from "./places";
 
 export type InteriorKind = "gun" | "boutique" | "taco" | "burger" | "workshop" | "safehouse" | "market" | "cardealer" | "barber" | "mall"
-  | "hospital" | "police" | "garage" | "cafe" | "office" | "harbor" | "precinct" | "club" | "loft" | "tower";
+  | "hospital" | "police" | "garage" | "cafe" | "office" | "harbor" | "precinct" | "club" | "loft" | "tower" | "jail";
 // k "f:<kind>": a piece from the furniture library (render/furniture.ts); w, d are its size before turning by a
 // (a = 0: the front looks south (+y), PI/2 west, PI north, -PI/2 east)
 export interface Prop { k: string; x: number; y: number; w: number; d: number; h: number; a?: number; z?: number; c?: string; c2?: string; solid?: boolean }
@@ -31,6 +31,7 @@ export interface Interior {
   show?: { x: number; y: number; model: string; color: string }[];
   bed?: { x: number; y: number };
   homes?: Home[];
+  cell?: { x0: number; y0: number; x1: number; y1: number; spawn: { x: number; y: number }; bunk: { x: number; y: number } }; // the prison cell you sit in
   heal?: boolean;                                 // clinic: you are patched up while you are inside
   floor?: [string, string]; wallTex?: [string, string]; // floor and wall look (texture style, colour)
   // mall: upper floor (gallery around the open middle) and escalators
@@ -104,7 +105,44 @@ export function buildInteriors(world: World, places: Place[]): Interior[] {
     if (pl.kind === "contact") it.clerk.a = Math.PI; // the contact waits behind the counter
     out.push(it);
   }
+  out.push(buildJail(world));
   return out;
+}
+
+// the cell block in the prison yard: guard desk at the door, three cells behind bars along the east wall
+function buildJail(world: World): Interior {
+  const gy = (PRISON.y0 + PRISON.y1) / 2, x0 = PRISON.x1 - 330, x1 = PRISON.x1 - 70, y0 = gy - 95, y1 = gy + 95, cy = gy;
+  const H = 46, dw = 22;
+  const it: Interior = {
+    id: "jail", kind: "jail", name: "Zellentrakt", color: "#8a9098", x0: x0 + T, y0: y0 + T, x1: x1 - T, y1: y1 - T, H,
+    door: { x: x0, y: cy, w: dw }, counter: { x: x0 + 50, y: y0 + 40 }, clerk: { x: x0 + 50, y: y0 + 20, a: Math.PI / 2 }, props: [], seats: [], guests: [], walls: [],
+    floor: ["concrete", "#7a7a76"], wallTex: ["concrete", "#9a958c"],
+  };
+  const w = (x: number, y: number, ww: number, hh: number) => it.walls.push(wallB(x, y, ww, hh, H));
+  w(x0, y0, T, cy - dw / 2 - y0); w(x0, cy + dw / 2, T, y1 - cy - dw / 2); w(x1 - T, y0, T, y1 - y0); w(x0, y0, x1 - x0, T); w(x0, y1 - T, x1 - x0, T);
+  const ix0 = it.x0, ix1 = it.x1, iy0 = it.y0, iy1 = it.y1, L = iy1 - iy0;
+  const F = (k: string, x: number, y: number, ww: number, d: number, a = 0, c = "#8a8a8a", o: FOpt = {}) => addF(it, k, x, y, ww, d, a, c, o);
+  // guard post: desk with a screen, lockers, notice board, a bench for visitors
+  F("desk", ix0 + 50, iy0 + 14, 30, 14, 0, "#5a5e66", { solid: true }); F("pc", ix0 + 50, iy0 + 12, 18, 9, 0, "#222", { z: 13 });
+  F("locker", ix0 + 20, iy1 - 6, 30, 9, Math.PI, "#5a6a7a", { solid: true });
+  F("bench", ix0 + 70, iy1 - 6, 30, 8, Math.PI, "#3a3d45");
+  F("board", ix0 + 110, iy0 + 0.6, 30, 1, 0, "#f4f4f4", { z: 16, c2: "HAUSORDNUNG" });
+  it.guests.push({ x: ix0 + 30, y: cy + 30, a: 0, anim: "idle" });
+  // three cells behind bars (the middle one is yours)
+  const bx = ix1 - 74, cw = L / 3;
+  F("bars", bx, cy, 2, L, 0, "#5a5d66", { solid: true });
+  for (let k = 0; k < 3; k++) {
+    const c0 = iy0 + k * cw, ccy = c0 + cw / 2;
+    if (k > 0) w(bx, c0 - 1.5, ix1 - bx, 3);
+    F("bunk", ix1 - 14, ccy - cw / 2 + 20, 18, 30, Math.PI / 2, "#5a5d66", { solid: true });
+    F("toilet", ix1 - 8, ccy + cw / 2 - 10, 9, 10, Math.PI / 2, "#e8e8e8"); F("basin", ix1 - 4, ccy + 8, 10, 7, Math.PI / 2, "#e8e8e8");
+    if (k !== 1) it.guests.push({ x: ix1 - 40, y: ccy, a: Math.PI, anim: k === 0 ? "lookAround" : "smoke" });
+  }
+  const my0 = iy0 + cw, my1 = iy0 + 2 * cw;
+  it.cell = { x0: bx + 2, y0: my0 + 2, x1: ix1, y1: my1 - 2, spawn: { x: ix1 - 44, y: (my0 + my1) / 2 + 6 }, bunk: { x: ix1 - 32, y: my0 + 20 } };
+  solidProps(it);
+  world.addExtras(it.walls);
+  return it;
 }
 
 // furniture per room (x: from the door into the room, y: along the street)

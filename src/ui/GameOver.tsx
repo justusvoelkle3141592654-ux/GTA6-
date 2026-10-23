@@ -2,7 +2,7 @@ import { END_LABEL, type Difficulty, type GameOverData } from "../core/engine";
 import type { ScoreEntry } from "../core/scores";
 import { Btn, ScoreTable, Stat, fmt, fmtTime } from "./ui";
 
-export const DIFF_LABEL: Record<Difficulty, string> = { easy: "Leicht", normal: "Normal", hard: "Schwer" };
+export const DIFF_LABEL: Record<Difficulty, string> = { easy: "Leicht", normal: "Normal", hard: "Schwer", hardcore: "Hardcore" };
 
 export default function GameOver({ data, scores, rank, onRestart, onMenu, isTouch }: { data: GameOverData; scores: ScoreEntry[]; rank: number; onRestart: () => void; onMenu: () => void; isTouch: boolean }) {
   const title = data.reason === "finished" ? "FAHRT BEENDET" : END_LABEL[data.reason];

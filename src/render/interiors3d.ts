@@ -17,7 +17,7 @@ const FLOORS: Record<string, string> = { gun: "#5a5a60", boutique: "#d8cbb8", ta
 const WALLS: Record<string, string> = { gun: "#3a3d45", boutique: "#f2e6ee", taco: "#f2c14e", burger: "#e8e8ec", workshop: "#8f8b84", safehouse: "#d8d0c4", market: "#f4f4f0", cardealer: "#f4f6f8", barber: "#3a2a3a", mall: "#ece6dc" };
 
 interface Room {
-  it: Interior; group: THREE.Group; roof: THREE.Mesh; walls: { m: THREE.Mesh; mat: THREE.MeshStandardMaterial; b: Building }[]; tower: THREE.Mesh | null;
+  it: Interior; group: THREE.Group; roof: THREE.Mesh; ceiling: THREE.Mesh; walls: { m: THREE.Mesh; mat: THREE.MeshStandardMaterial; b: Building }[]; tower: THREE.Mesh | null;
   doors: THREE.Mesh[]; doorOpen: number; gate?: THREE.Mesh;
   people: { rig: HumanRig; anim: string }[] | null; clerk: HumanRig | null;
   targets: THREE.Mesh[]; mirror: Reflector | null; lift: THREE.Mesh | null; liftH: number;
@@ -87,6 +87,15 @@ export class InteriorsRenderer {
     }
     const roof = new THREE.Mesh(new THREE.BoxGeometry(W + 10, 2, L + 10).translate(cx, it.H + 1, cy), new THREE.MeshStandardMaterial({ color: "#6a6a70", roughness: 0.9 }));
     roof.castShadow = true; group.add(roof);
+    // the ceiling seen from inside: panels with a fine grid (dark in the club and the cells, raw in the garages)
+    const ceilCol = it.kind === "club" ? "#1c1826" : it.kind === "jail" ? "#6e6c66" : it.kind === "workshop" || it.kind === "garage" ? "#5c5c60" : "#b8b3aa";
+    const ct = canvasTex(128, 128, (cg) => {
+      cg.fillStyle = ceilCol; cg.fillRect(0, 0, 128, 128);
+      cg.strokeStyle = "rgba(0,0,0,0.18)"; cg.lineWidth = 2; for (let k = 0; k <= 128; k += 32) { cg.beginPath(); cg.moveTo(k, 0); cg.lineTo(k, 128); cg.moveTo(0, k); cg.lineTo(128, k); cg.stroke(); }
+    });
+    ct.wrapS = ct.wrapT = THREE.RepeatWrapping; ct.repeat.set(W / 60, L / 60);
+    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W + 8, L + 8).rotateX(Math.PI / 2).translate(cx, it.H - 0.2, cy), new THREE.MeshStandardMaterial({ map: ct, roughness: 0.9 }));
+    ceiling.visible = false; ceiling.castShadow = true; group.add(ceiling); // keeps the sun out while the roof is hidden
     // the apartment tower: the storeys above the ground floor (seen from outside)
     let tower: THREE.Mesh | null = null;
     if (it.kind === "tower") {
@@ -190,7 +199,7 @@ export class InteriorsRenderer {
     const lum = (hex: string) => { const c = new THREE.Color(hex); return 0.3 * c.r + 0.59 * c.g + 0.11 * c.b; };
     const bright = Math.max(lum(fc), lum(wc));
     const lightK = 1 - 0.85 * Math.max(0, Math.min(1, (bright - 0.3) / 0.5));
-    return { it, group, roof, walls, tower, lightK, doors, doorOpen: 0, gate, people: null, clerk: null, targets, mirror, lift, liftH: 0, tables, steps, inner, lamps, upperMat };
+    return { it, group, roof, ceiling, walls, tower, lightK, doors, doorOpen: 0, gate, people: null, clerk: null, targets, mirror, lift, liftH: 0, tables, steps, inner, lamps, upperMat };
   }
 
   private targetTex() {
@@ -304,9 +313,14 @@ export class InteriorsRenderer {
       for (const m of room.doors) m.position.z = it.door.y + (m.userData.s as number) * (it.door.w / 4 + room.doorOpen * it.door.w * 0.45);
       if (room.gate) { room.gate.scale.y = 1 - room.doorOpen * 0.9; room.gate.position.y = ((it.H - 6) * (1 - room.doorOpen * 0.9)) / 2 + room.doorOpen * (it.H - 6) * 0.9; }
       // inside: no roof, walls between the camera and you see-through
-      room.roof.visible = !inside; room.lamps.visible = !inside;
+      // inside: the roof gives way to the ceiling with its lamps (only the bird's eye view looks in from above)
+      const top = g.config.camera === "top";
+      room.roof.visible = !inside; room.ceiling.visible = inside && !top; room.lamps.visible = !inside || !top;
       if (room.tower) room.tower.visible = !inside;
-      if (room.upperMat) { const o = inside && (g.onFoot ? pd.z : 0) < 20 ? 0.22 : 1; room.upperMat.opacity += (o - room.upperMat.opacity) * Math.min(1, dt * 8); room.upperMat.depthWrite = room.upperMat.opacity > 0.9; }
+      if (room.upperMat) {
+        // from below the gallery is see-through; with the camera right under it, it is left out (no milky haze)
+        const gb = it.gallery!, under = cam.y < gb.y && (cam.x < it.x0 + gb.band || cam.x > it.x1 - gb.band || cam.z < it.y0 + gb.band || cam.z > it.y1 - gb.band);
+        const o = inside && under ? 0 : inside && (g.onFoot ? pd.z : 0) < 20 ? 0.22 : 1; room.upperMat.opacity += (o - room.upperMat.opacity) * Math.min(1, dt * 8); room.upperMat.depthWrite = room.upperMat.opacity > 0.9; }
       // only the walls between the camera and you (or right at the camera) fade out
       for (const w of room.walls) {
         const b = w.b, fade = inside && (segHitsRect(cam.x, cam.z, px, py, b.x - 3, b.y - 3, b.x + b.w + 3, b.y + b.h + 3) || (cam.x > b.x - 10 && cam.x < b.x + b.w + 10 && cam.z > b.y - 10 && cam.z < b.y + b.h + 10)) ? 0.15 : 1;
@@ -335,8 +349,9 @@ export class InteriorsRenderer {
     if (lit) {
       // big blocks (mall, tower): the light follows you, so the room you are in is lit and nothing glares
       const it = lit.it, big = it.x1 - it.x0 > 220 && g.inside === it;
-      this.light.position.set(big ? px : (it.x0 + it.x1) / 2, it.H - 6, big ? py : (it.y0 + it.y1) / 2);
-      this.light.intensity = 2200 * lit.lightK * (big ? 0.7 : 1); this.light.distance = big ? 260 : Math.max(it.x1 - it.x0, it.y1 - it.y0) * 1.4;
+      // below the ceiling (not right under it: the ceiling would glare)
+      this.light.position.set(big ? px : (it.x0 + it.x1) / 2, Math.min(it.H - 16, 30) + (g.onFoot && big ? Math.max(0, pd.z) : 0), big ? py : (it.y0 + it.y1) / 2);
+      this.light.intensity = 1700 * lit.lightK * (big ? 0.7 : 1); this.light.distance = big ? 260 : Math.max(it.x1 - it.x0, it.y1 - it.y0) * 1.4;
     }
     else this.light.intensity = 0;
   }

@@ -415,7 +415,7 @@ export function extrasMesh(world: World): THREE.Group {
   const signs: G[] = [];
   for (const e of world.extras as Building[]) {
     const b = e.base ?? 0, cx = e.x + e.w / 2, cy = e.y + e.h / 2, H = roofOf(e) - b;
-    if (e.type === 28 || e.type === 30) continue; // ferris wheel, roundabout: landmarks3d
+    if (e.type === 28 || e.type === 30 || e.type === 40) continue; // ferris wheel, roundabout: landmarks3d; 40: Blender models (models3d)
     if (e.type === 23) { // fence: posts and mesh
       P.push(box(e.w, H, e.h, cx, b + H / 2, cy, "#9aa3ad"));
       const L = Math.max(e.w, e.h);

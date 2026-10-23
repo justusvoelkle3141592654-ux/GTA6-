@@ -10,6 +10,7 @@ import type { Game } from "../core/engine";
 // police beyond the patrol cars: sight / last known position, cops on foot, roadblocks, helicopter, SWAT
 export const HELI_STARS = 4, ROADBLOCK_STARS = 3, SWAT_STARS = 5, ARMY_STARS = 6, SPIKE_STARS = 4;
 export const INTERCEPTOR_STARS = 2, POLSUV_STARS = 3, JET_STARS = 5, JET_AIR_STARS = 3; // fighter jets: from 5 stars, from 3 when you fly
+export const MAX_JETS = 6;
 const JET_HP = 320, JET_SPEED = 820, JET_BOOST = 1200, JET_TURN = 1.15, JET_GUN_RANGE = 900, JET_BURST = 6, JET_MISSILE_EVERY = 5;
 const SHELL_EVERY: [number, number] = [3.2, 4.5], SHELL_RANGE = 750; // armoured car: time between shots, range
 const PIT_RANGE = 150;            // a cop this close to a fast player aims for the rear corner (spin him out)
@@ -104,7 +105,8 @@ export class Police {
       const d = Math.hypot(x - fx, y - fy);
       if (d < 800 || d > 1350) continue;
       // SWAT vans at 5 stars, armoured cars of the military at 6 (open world)
-      const army = g.rules.city && g.wanted.stars >= ARMY_STARS && Math.random() < 0.45;
+      const hc = g.config.difficulty === "hardcore";
+      const army = g.rules.city && (hc ? g.wanted.stars >= 2 && Math.random() < 0.75 : g.wanted.stars >= ARMY_STARS && Math.random() < 0.45);
       const swat = !army && g.rules.city && g.wanted.stars >= SWAT_STARS && Math.random() < 0.6;
       const st = g.wanted.stars, r = Math.random();
       const model: CarModel = army ? "armor" : swat ? "swat" : st >= POLSUV_STARS && r < 0.3 ? "polsuv" : st >= INTERCEPTOR_STARS && r < 0.65 ? "interceptor" : "police";
@@ -115,7 +117,7 @@ export class Police {
       c.hp = c.maxHp = army ? 600 : swat ? 220 : Math.round(look!.hp * (g.config.difficulty === "easy" ? 0.7 : 1));
       c.mass = army ? 4 : swat ? 2 : look!.mass;
       c.shootT = rnd(SHELL_EVERY[0], SHELL_EVERY[1]);
-      if (army && !this.armyCalled) { this.armyCalled = true; g.banner("MILITÄR", "Radpanzer rücken aus – versteck dich!", "#9fb35a", 2.4); }
+      if (army && !this.armyCalled) { this.armyCalled = true; g.banner("RADPANZER", "Die Polizei schickt Panzerwagen – versteck dich!", "#4da3ff", 2.4); }
       c.driver = g.rules.city; // open world: officers get out when you are on foot
       g.cars.push(c);
       return;
@@ -242,7 +244,7 @@ export class Police {
     this.seen = w.stars > 0 && this.copSees(g.fx, g.fy);
     if (this.seen) { this.lastX = g.fx; this.lastY = g.fy; }
     if (!g.rules.city) return;
-    if (w.stars < ARMY_STARS) this.armyCalled = false;
+    if (w.stars < (g.config.difficulty === "hardcore" ? 2 : ARMY_STARS)) this.armyCalled = false;
     this.updateHeli(dt);
     this.updateJets(dt);
     this.updateSpikes(dt);
@@ -356,6 +358,7 @@ export class Police {
     const flying = !g.onFoot && isAircraft(p.model) && p.air;
     let n = s >= ARMY_STARS ? 2 : s >= JET_STARS ? 1 : 0;
     if (flying && s >= JET_AIR_STARS) n = Math.max(n, s >= JET_STARS ? 2 : 1); // nobody else can reach you up there
+    if (g.config.difficulty === "hardcore" && s >= 2) n = Math.min(MAX_JETS, s + (flying ? 1 : 0)); // hardcore: a jet per star
     return n;
   }
   // in the tunnel or indoors the jets cannot get at you
@@ -372,7 +375,7 @@ export class Police {
     let alive = 0;
     for (const j of this.jets) if (!j.dead) alive++;
     if (alive < want && this.jetT <= 0) {
-      this.jetT = 7;
+      this.jetT = g.config.difficulty === "hardcore" ? 3 : 7;
       const a = Math.random() * TAU;
       const x = g.fx + Math.cos(a) * 3200, y = g.fy + Math.sin(a) * 3200;
       this.jets.push({ x, y, z: Math.max(terrainH(x, y) + 260, g.fz + 260), a: a + Math.PI, vx: 0, vy: 0, vz: 0, bank: 0, hp: JET_HP, dead: false, shootT: 0, burst: 0, missileT: 3, passT: 0, tgt: -1, retarget: 6 });

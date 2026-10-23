@@ -57,7 +57,7 @@ export interface ShopView {
 export type { Mode } from "./modes";
 export { Car, CARS, LEGACY_CAR_IDS } from "../vehicles/vehicles";
 export type { CarDef, CarModel } from "../vehicles/vehicles";
-export type Difficulty = "easy" | "normal" | "hard";
+export type Difficulty = "easy" | "normal" | "hard" | "hardcore";
 export type CameraMode = "chase" | "fp" | "top";
 export type Quality = "low" | "medium" | "high" | "ultra"; // Schnell, Mittel, Hoch, Ultra
 export { WEAPONS } from "../gameplay/weapons";
@@ -70,13 +70,18 @@ const DIFFS: Record<Difficulty, DiffDef> = {
   easy: { dmg: 0.28, cops: [0, 1, 2, 2, 3, 4, 5], copV: 330, copVStar: 16, heat: 1.3, bust: 0.22, regen: 4, firstCop: 8, spawnGap: 3.5, lead: 0.2 },
   normal: { dmg: 0.6, cops: [0, 1, 2, 3, 5, 6, 7], copV: 390, copVStar: 24, heat: 2.3, bust: 0.75, regen: 1.5, firstCop: 4, spawnGap: 2, lead: 0.4 },
   hard: { dmg: 1, cops: [0, 2, 3, 5, 7, 9, 10], copV: 440, copVStar: 30, heat: 3.2, bust: 1, regen: 0, firstCop: 2.5, spawnGap: 1.4, lead: 0.55 },
+  // hardcore: the stars climb fast, armoured cars without end, the sky full of fighter jets
+  hardcore: { dmg: 1, cops: [0, 4, 7, 10, 14, 18, 24], copV: 480, copVStar: 34, heat: 5, bust: 1, regen: 0, firstCop: 1, spawnGap: 0.6, lead: 0.6 },
 };
 
 export interface HudData {
   score: number; mult: number; combo01: number; stars: number; searching: boolean; cash: number; health01: number; carHealth01: number; nitro01: number;
   kmh: number; time: number; drift: number; bust01: number; takedowns: number;
   weapon: Weapon; ammo: number; reserve: number; reloading: boolean; owned: Weapon[];
-  bombsPlaced: number; jet: boolean; onFoot: boolean; canEnter: boolean; hint: string; air: boolean;
+  bombsPlaced: number; jet: boolean; onFoot: boolean;
+  ending: EndReason | null; endT: number; // WASTED / BUSTED screen (grey picture, big letters)
+  jailT: number;                          // seconds left in the cell (-1: free)
+  canEnter: boolean; hint: string; air: boolean;
   armor01: number; district: string; districtColor: string;
   place: string;          // name of the place you can enter right now ("" = none)
   radio: string;          // station name while driving ("" = off)
@@ -88,7 +93,8 @@ export interface HudData {
   swim: boolean;          // swimming in the bay
 }
 export type EndReason = "dead" | "arrested";
-export const END_LABEL: Record<EndReason, string> = { dead: "ERLEDIGT", arrested: "VERHAFTET" };
+const JAIL_TIME = 30; // seconds in the cell after being busted
+export const END_LABEL: Record<EndReason, string> = { dead: "WASTED", arrested: "BUSTED" };
 
 export interface GameOverData {
   score: number; time: number; takedowns: number; maxStars: number; reason: EndReason | "finished";
@@ -173,6 +179,7 @@ export class Game {
   driftPts = 0; driftHold = 0; bestDrift = 0; bust = 0; nitro = 1; nitroWasOn = false; lastHurt = -10;
   inv = new Inventory(); fireCd = 0; fireHeld = false; hint = ""; hintT = 0;
   ending: null | { reason: EndReason; t: number } = null;
+  jailT = -1; // seconds left in the prison cell (-1: free)
   copSpawnT = 0;
   slowT = 0; // slow motion after detonating bombs (game seconds)
 
@@ -499,6 +506,7 @@ export class Game {
     if (!this.rules.save) return "mode";
     if (this.ending || (this.state !== "playing" && this.state !== "paused")) return "busy";
     if (this.wanted.stars > 0) return "wanted";
+    if (this.jailT > 0) return "busy";
     return null;
   }
 
@@ -686,7 +694,8 @@ export class Game {
   private endRun(reason: EndReason) {
     if (this.ending) return;
     this.ending = { reason, t: 0 };
-    this.banner(END_LABEL[reason], reason === "dead" ? (this.onFoot ? "Du bist draufgegangen" : "Dein Wagen ist Schrott") : "Die Cops haben dich", reason === "dead" ? "#ff2a3a" : "#4da3ff", 3, true);
+    // the big WASTED / BUSTED letters come from the HUD (see Hud.tsx); here only the line under them
+    if (!this.rules.respawn) this.banner(END_LABEL[reason], reason === "dead" ? (this.onFoot ? "Du bist draufgegangen" : "Dein Wagen ist Schrott") : "Die Cops haben dich", reason === "dead" ? "#ff2a3a" : "#4da3ff", 3, true);
     sfx.gameOver();
     this.bankDrift();
   }
@@ -823,7 +832,10 @@ export class Game {
     this.jobs.race = null; this.objective = ""; this.objTimer = -1;
     const place = this.places.find((pl) => pl.kind === rule.place);
     const cost = respawnCost(rule, this.cash);
-    this.cash -= cost;
+    // the clinic bill comes from the cash, then from the bank account; not enough money at all: game over
+    const broke = reason === "dead" && this.cash + this.bank < 50;
+    const fromCash = Math.min(this.cash, cost);
+    this.cash -= fromCash; this.bank = Math.max(0, this.bank - (cost - fromCash));
     // dead: explosives are gone; arrested: the police keeps everything except the pistol
     this.inv.drop(reason === "dead" ? ["grenade", "rocket", "bomb"] : WEAPONS.filter((w) => w !== "fist" && w !== "pistol"));
     this.ped.armor = 0;
@@ -841,6 +853,23 @@ export class Game {
     this.r3d.resetCamera(this.ped.a + Math.PI); // camera on the street, looking at the entrance
     this.banners.length = 0;
     this.autosaveT = 1; // save the new state right after waking up
+    // busted: off to the prison, into the cell (30 seconds, or sleep on the bunk)
+    const jail = reason === "arrested" ? this.interiors.find((i) => i.cell) : undefined;
+    if (jail?.cell) {
+      const c = jail.cell;
+      this.ped = newPed(c.spawn.x, c.spawn.y, Math.PI);
+      this.jailT = JAIL_TIME;
+      this.r3d.resetCamera(0);
+      this.banner("HAFT", `${JAIL_TIME} Sekunden Zelle · −$${cost.toLocaleString("de-DE")} Kaution · auf der Pritsche schlafen lässt den Tag vergehen`, "#8a9098", 3.6);
+      this.autosaveT = -1;
+      return;
+    }
+    if (broke) {
+      this.cash = 0; this.bank = 0;
+      this.banner("GAME OVER", "Pleite! Hol dir Geld von Leuten, mit Jobs oder Überfällen", "#ff2a3a", 5, true);
+      sfx.gameOver();
+      return;
+    }
     this.banner(rule.title, `${place ? place.name + " · " : ""}−$${cost.toLocaleString("de-DE")} ${rule.sub}`, place ? place.color : "#ffffff", 3.2);
   }
 
@@ -1045,6 +1074,11 @@ export class Game {
     this.stats.pedsHit++;
     this.crime(isPolice(c.role) ? "copTakedown" : "pedShot");
     if (c.faction) this.gangs.angered(c.faction); // hurting a gang member makes the whole gang angry for a while
+    // they drop their money (gangsters carry more)
+    if (this.rules.city && Math.random() < (c.faction ? 0.9 : 0.6)) {
+      const v = Math.round(c.faction ? rnd(40, 180) : isPolice(c.role) ? rnd(20, 60) : rnd(8, 70));
+      this.pickups.push({ x: c.x + rnd(-6, 6), y: c.y + rnd(-6, 6), type: "cash", t: 0, value: v });
+    }
     this.onPedKnocked?.(c);
   }
   // hooks for systems that care about knocked-out pedestrians / stolen cars (gangs, missions)
@@ -1283,6 +1317,7 @@ export class Game {
       if (s) { this.seat = s; pd.x = s.x; pd.y = s.y; pd.a = s.a; pd.vx = pd.vy = 0; return true; }
       const home = this.homeAt();
       if (home) { this.useHome(home); return true; }
+      if (this.jailT > 0 && it.cell && Math.hypot(it.cell.bunk.x - pd.x, it.cell.bunk.y - pd.y) < 22) { this.release(true); return true; }
       if (it.range && !this.range && Math.hypot(it.range.stand.x - pd.x, it.range.stand.y - pd.y) < 20) {
         if (WEAPON_DEFS[this.weapon].kind !== "gun") { this.setHint("Erst eine Schusswaffe wählen", 1.5); return true; }
         this.range = { it, t: 30, score: 0, tgt: -1, tT: 1 };
@@ -1299,6 +1334,29 @@ export class Game {
     return true;
   }
   onContact: ((pl: Place) => boolean) | null = null; // missions decide what a contact says
+
+  // ---------- prison ----------
+  private updateJail(dt: number) {
+    if (this.jailT < 0) return;
+    const it = this.interiors.find((i) => i.cell), c = it?.cell, pd = this.ped;
+    this.jailT -= dt;
+    this.objective = "Im Gefängnis – auf der Pritsche schlafen lässt die Zeit schneller vergehen"; this.objTimer = Math.max(0, this.jailT);
+    this.wanted.clear();
+    // the cell door stays shut
+    if (c) { pd.x = clamp(pd.x, c.x0 + 8, c.x1 - 8); pd.y = clamp(pd.y, c.y0 + 8, c.y1 - 8); }
+    if (this.jailT <= 0) this.release(false);
+  }
+  // out of prison: in front of the gate, a day later
+  private release(slept: boolean) {
+    this.jailT = -1; this.objective = ""; this.objTimer = -1;
+    if (slept) this.clock = 8; // the next morning
+    const g = World.PRISON_GATE;
+    this.ped = newPed(g.x + 70, g.y + 30, 0);
+    this.onFoot = true;
+    this.r3d.resetCamera(Math.PI);
+    this.autosaveT = 1;
+    this.banner("ENTLASSEN", slept ? "Ein Tag hinter Gittern – benimm dich (oder nicht)" : "Du bist wieder frei", "#3dff8b", 2.6);
+  }
 
   // ---------- homes: the safehouse, the loft and the flats in the tower ----------
   ownsHome(id: string) { return id === "safehouse" || this.progress.unlocks.includes("home:" + id); }
@@ -1625,7 +1683,7 @@ export class Game {
       health01: this.ped.hp / this.ped.maxHp, carHealth01: p.dead ? 0 : p.hp / p.maxHp, nitro01: this.nitro,
       kmh: Math.round(this.fspeed * 0.36), time: this.time, drift: Math.round(this.driftPts), bust01: this.bust, takedowns: this.takedowns,
       weapon: inv.current, ammo: inv.loaded(), reserve: inv.reserve(), reloading: inv.reloadT > 0, owned: inv.owned,
-      bombsPlaced: this.bombs.length, jet: !this.onFoot && isJet(p.model) && !p.dead, onFoot: this.onFoot,
+      bombsPlaced: this.bombs.length, ending: this.ending?.reason ?? null, endT: this.ending?.t ?? 0, jailT: this.jailT, jet: !this.onFoot && isJet(p.model) && !p.dead, onFoot: this.onFoot,
       canEnter: this.onFoot && !!this.nearestEnterable(), hint: this.hintT > 0 ? this.hint : "", air: !this.onFoot && p.air && p.airT > 0.25 && !isCraft(p.model),
       armor01: this.ped.armor / MAX_ARMOR,
       district: this.rules.city ? dist.name : "", districtColor: this.districtT > 0 ? dist.color : "",
@@ -1653,6 +1711,7 @@ export class Game {
       if (it.range && !this.range && Math.hypot(it.range.stand.x - pd.x, it.range.stand.y - pd.y) < 20) return "Zielübung starten";
       const home = this.homeAt();
       if (home) return this.ownsHome(home.id) ? "Schlafen & speichern" : `${home.name} kaufen – $${home.price.toLocaleString("de-DE")}`;
+      if (this.jailT > 0 && it.cell && Math.hypot(it.cell.bunk.x - pd.x, it.cell.bunk.y - pd.y) < 22) return "Auf der Pritsche schlafen (bis morgen)";
     }
     const pl = this.nearPlace;
     return pl && pl.kind !== "contact" ? pl.name : pl ? this.contactLabel(pl) : "";
@@ -1667,7 +1726,7 @@ export class Game {
     const it = z < 110 ? interiorAt(this.interiors, x, y) : null; // flying over a shop is not being inside
     if (it !== this.inside) {
       this.inside = it; this.insideT = 0; this.copsIn = 0; this.copT = 3;
-      if (it && it.kind !== "safehouse" && this.state === "playing") this.setHint(`„Willkommen bei ${it.name}!“`, 2);
+      if (it && it.kind !== "safehouse" && it.kind !== "jail" && this.state === "playing") this.setHint(`„Willkommen bei ${it.name}!“`, 2);
     }
     if (!it) { this.seat = null; this.range = null; return; }
     this.insideT += dt;
@@ -1861,7 +1920,7 @@ export class Game {
       if (!this.pedBlocked(pd.x, ny)) pd.y = ny; else pd.vy = 0;
       const gnd = Math.max(this.groundH(pd.x, pd.y, pd.z + 4), isWater(pd.x, pd.y) ? WATER_Y : -Infinity);
       pd.vz += (this.lift * 260 - pd.vz) * Math.min(1, dt * 6);
-      pd.z = Math.min(2400, Math.max(gnd, pd.z + pd.vz * dt));
+      pd.z = Math.min(2400, this.ceilingAt(pd.x, pd.y, pd.z, 28), Math.max(gnd, pd.z + pd.vz * dt));
       pd.air = pd.z > gnd + 3; pd.swim = false; pd.fallFrom = pd.z;
       pd.walk += dt * Math.hypot(pd.vx, pd.vy) * 0.05;
       pd.shootT = Math.max(0, pd.shootT - dt); pd.hitFlash = Math.max(0, pd.hitFlash - dt);
@@ -2000,6 +2059,7 @@ export class Game {
 
     if (playing && !this.ending) {
       this.updateInside(dt);
+      this.updateJail(dt);
       this.time += dt;
       const hours = (dt * 24) / (Math.max(1, currentSettings.dayMinutes) * 60);
       this.clock = (this.clock + hours) % 24;
@@ -2283,7 +2343,7 @@ export class Game {
     c.x += c.vx * dt; c.y += c.vy * dt;
     this.sweep(c, dt);
     const gh = this.carGround(c);
-    c.z = Math.min(3000, Math.max(gh, c.z + c.vz * dt));
+    c.z = Math.min(3000, this.ceilingAt(c.x, c.y, c.z, 22), Math.max(gh, c.z + c.vz * dt));
     c.air = c.z > gh + 2; c.airT = 0; c.onRamp = -1;
     c.vF = vF; c.vR = 0;
   }
@@ -2291,7 +2351,7 @@ export class Game {
   // travel: places to go (shops: straight inside)
   flightTargets(): { id: string; name: string; group: "Läden" | "Stadtteile" | "Orte"; x: number; y: number }[] {
     const out: ReturnType<Game["flightTargets"]> = [];
-    for (const it of this.interiors) out.push({ id: "shop:" + it.id, name: it.name, group: "Läden", x: it.door.x + 22, y: it.door.y });
+    for (const it of this.interiors) if (!it.cell) out.push({ id: "shop:" + it.id, name: it.name, group: "Läden", x: it.door.x + 22, y: it.door.y });
     for (const l of districtLabels()) { const q = this.world.nearestSafeRoad(l.x, l.y); out.push({ id: "dist:" + l.id, name: DISTRICTS[l.id].name, group: "Stadtteile", x: q.x, y: q.y }); }
     for (const pl of this.places) if (pl.kind === "dock" || pl.kind === "heliport" || pl.id === "stuntpark" || pl.id === "hospital" || pl.id === "police") out.push({ id: "place:" + pl.id, name: pl.name, group: "Orte", x: pl.x, y: pl.y });
     if (this.waypoint) { const q = this.world.nearestSafeRoad(this.waypoint.x, this.waypoint.y); out.push({ id: "wp", name: "Mein Wegpunkt", group: "Orte", x: q.x, y: q.y }); }
@@ -2419,6 +2479,11 @@ export class Game {
     // the roof over a walkable room: whatever comes down from above lands on it
     if (z > 30) { const it = interiorAt(this.interiors, x, y); if (it && z >= it.H - 6) g = Math.max(g, it.H + 2); }
     return g;
+  }
+  // inside a room the ceiling stops you (fly mode): highest height for something of height h, Infinity elsewhere
+  ceilingAt(x: number, y: number, z: number, h: number): number {
+    const it = interiorAt(this.interiors, x, y);
+    return it && z < it.H - 4 ? Math.max(0, it.H - 2 - h) : Infinity;
   }
   // standing / driving on a bridge deck (not under it)
   onDeck(x: number, y: number, z: number) { const br = this.world.roads.bridgeAt(x, y, 4); return !!br && z >= br.h - 14; }
