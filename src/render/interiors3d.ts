@@ -1,28 +1,32 @@
-// the walkable shops on screen: walls you can see through from inside, a door that opens, furniture,
-// the clerk and a few customers, a mirror in the boutique, the lift in the workshop, cars on turntables,
-// the mall with its upper floor and escalators
+// the walkable rooms on screen: walls you can see through from inside, a door that opens, furniture,
+// ceilings with their lamps, the clerk and a few customers, a mirror in the boutique, the lift in the workshop,
+// cars on turntables, the mall with its three floors, escalators and the glass lift, the prison and its yard.
+// Furniture and lamps are only drawn while you are close (the shell - walls and roof - always is).
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { Reflector } from "three/examples/jsm/objects/Reflector.js";
 import { box, cyl, C, canvasTex, withColor } from "./meshutil";
 import { HumanRig, lookFromSeed } from "../characters/human";
-import type { Interior, Prop } from "../world/interiors";
+import type { Guest, Interior, Prop } from "../world/interiors";
 import type { Building } from "../world/world";
 import { furniture, floorTex, wallTex, type Parts } from "./furniture";
 import type { Game } from "../core/engine";
 
 const FLOOR_Y = 2.6;
-// rooms without their own look (see Interior.floor / wallTex)
-const FLOORS: Record<string, string> = { gun: "#5a5a60", boutique: "#d8cbb8", taco: "#b0743a", burger: "#c9c3b5", workshop: "#6a6a70", safehouse: "#8a6a4a", market: "#d8d8d2", cardealer: "#e8e8ec", barber: "#2a2a30", mall: "#cfc9bd" };
-const WALLS: Record<string, string> = { gun: "#3a3d45", boutique: "#f2e6ee", taco: "#f2c14e", burger: "#e8e8ec", workshop: "#8f8b84", safehouse: "#d8d0c4", market: "#f4f4f0", cardealer: "#f4f6f8", barber: "#3a2a3a", mall: "#ece6dc" };
+const NEAR = 300; // furniture is drawn within this distance of the room (or of the prison yard)
 
+interface Person { rig: HumanRig; anim: string; clerk?: boolean }
+interface Level { z: number; group: THREE.Group }
 interface Room {
-  it: Interior; group: THREE.Group; roof: THREE.Mesh; ceiling: THREE.Mesh; walls: { m: THREE.Mesh; mat: THREE.MeshStandardMaterial; b: Building }[]; tower: THREE.Mesh | null;
+  it: Interior; group: THREE.Group; inner: THREE.Group; roof: THREE.Mesh; ceiling: THREE.Mesh; walls: { m: THREE.Mesh; mat: THREE.MeshStandardMaterial; b: Building }[]; tower: THREE.Mesh | null;
   doors: THREE.Mesh[]; doorOpen: number; gate?: THREE.Mesh;
-  people: { rig: HumanRig; anim: string }[] | null; clerk: HumanRig | null;
+  people: Person[] | null; clerk: HumanRig | null;
   targets: THREE.Mesh[]; mirror: Reflector | null; lift: THREE.Mesh | null; liftH: number;
-  lightK: number; // bright rooms (white walls and floors) get less light, so they do not glare
-  tables: THREE.Group[]; steps: THREE.Texture | null; inner: THREE.Group; lamps: THREE.Mesh; upperMat: THREE.MeshStandardMaterial | null;
+  lightK: number; lightCol: THREE.Color; // bright rooms (white walls and floors) get less light, so they do not glare
+  tables: THREE.Group[]; steps: THREE.Texture | null; lamps: THREE.Mesh | null;
+  levels: Level[];                                   // mall: the upper floors (hidden from the bird's eye view while you are below)
+  cabin: THREE.Group | null; liftDoors: { m: THREE.Mesh; z: number; s: number }[];
+  yard: THREE.Group | null; yardPeople: Person[] | null;
 }
 
 export class InteriorsRenderer {
@@ -32,11 +36,13 @@ export class InteriorsRenderer {
   private glowMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
   private glassMat = new THREE.MeshPhysicalMaterial({ color: 0xbfd8e6, roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide });
   private fGlassMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.08, metalness: 0.2, transparent: true, opacity: 0.4, depthWrite: false });
+  private paneMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.05, metalness: 0.3, transparent: true, opacity: 0.22, depthWrite: false });
+  private steelMat = new THREE.MeshStandardMaterial({ color: 0x9aa3ad, metalness: 0.7, roughness: 0.35 });
   private texCache = new Map<string, THREE.Texture>();
-  private tex(kind: "floor" | "wall", style: string, col: string) {
-    const key = kind + style + col;
+  private tex(kind: "floor" | "wall" | "ceil", style: string, col: string, H = 46, floors: number[] = [0]) {
+    const key = kind + style + col + H + floors.join(",");
     let t = this.texCache.get(key);
-    if (!t) { t = kind === "floor" ? floorTex(style, col) : wallTex(style, col); t.wrapS = t.wrapT = THREE.RepeatWrapping; this.texCache.set(key, t); }
+    if (!t) { t = kind === "floor" ? floorTex(style, col) : kind === "wall" ? wallTex(style, col, H, floors) : ceilTex(style, col); t.wrapS = t.wrapT = THREE.RepeatWrapping; this.texCache.set(key, t); }
     return t;
   }
   liftY = 0; // how far the player's car is lifted in the workshop (the renderer adds it to the car)
@@ -57,45 +63,59 @@ export class InteriorsRenderer {
     return t;
   }
 
+  // a box with its texture in world units: u along the length (one tile = 60), v over the whole height
+  private wallGeo(b: Building, z0: number, H: number) {
+    const geo = new THREE.BoxGeometry(b.w, H, b.h);
+    const uv = geo.attributes.uv as THREE.BufferAttribute, size = [[b.h, 1], [b.h, 1], [b.w, b.h / 60], [b.w, b.h / 60], [b.w, 1], [b.w, 1]];
+    for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) { const i = f * 4 + v; uv.setXY(i, uv.getX(i) * size[f][0] / 60, uv.getY(i) * size[f][1]); }
+    return geo.translate(b.x + b.w / 2, z0 + H / 2, b.y + b.h / 2);
+  }
+
+  // ceiling lamps in a grid over the rect (panel lights, round down lights, fluorescent tubes)
+  private lamps(style: string, x0: number, y0: number, x1: number, y1: number, y: number, P: THREE.BufferGeometry[], Lamp: THREE.BufferGeometry[]) {
+    if (style === "none") return;
+    const step = style === "spot" ? 32 : 46;
+    for (let x = x0 + step / 2; x < x1 - 6; x += step) for (let z = y0 + step / 2; z < y1 - 6; z += step) {
+      if (style === "panel") { P.push(box(18, 0.5, 9, x, y - 0.4, z, "#d8d8dc")); Lamp.push(box(16, 0.3, 7, x, y - 0.8, z, "#fff6e0")); }
+      else if (style === "spot") { P.push(cyl(2.6, 2.6, 0.6, x, y - 0.4, z, "#c9ced8", 12)); Lamp.push(cyl(1.9, 1.9, 0.3, x, y - 0.8, z, "#fff4dc", 12)); }
+      else { P.push(box(22, 1.4, 4, x, y - 1, z, "#c9ced8")); Lamp.push(box(20, 0.6, 1.4, x, y - 1.9, z, "#f4f8ff")); }
+    }
+  }
+
   private build(it: Interior): Room {
     const group = new THREE.Group(), inner = new THREE.Group();
     group.add(inner);
     const cx = (it.x0 + it.x1) / 2, cy = (it.y0 + it.y1) / 2, W = it.x1 - it.x0, L = it.y1 - it.y0;
-    const P: THREE.BufferGeometry[] = [], G: THREE.BufferGeometry[] = [], Lamp: THREE.BufferGeometry[] = [], Up: THREE.BufferGeometry[] = [];
+    const P: THREE.BufferGeometry[] = [], G: THREE.BufferGeometry[] = [], Lamp: THREE.BufferGeometry[] = [], Q: THREE.BufferGeometry[] = []; // Q: glass panes
     const parts: Parts = { std: [], glow: [], glass: [] }, extra: THREE.Object3D[] = [];
-    // the floor (textured: wood, tiles, marble, ...) and ceiling lights (they hang under the roof: hidden with it while you are inside)
-    const [fs, fc] = it.floor ?? ["paint", FLOORS[it.kind] ?? "#cfc9bd"];
+    const floors = it.levels ? [0, ...it.levels.map((l) => l.z)] : [0];
+    // the floor (textured: wood, tiles, marble, ...)
+    const [fs, fc] = it.floor ?? ["paint", "#cfc9bd"];
     const ftex = this.tex("floor", fs, fc).clone(); ftex.needsUpdate = true; ftex.repeat.set((W + 8) / 90, (L + 8) / 90);
-    const floor = new THREE.Mesh(new THREE.BoxGeometry(W + 8, 0.6, L + 8).translate(cx, FLOOR_Y, cy), new THREE.MeshStandardMaterial({ map: ftex, roughness: fs === "marble" || fs === "tile" ? 0.55 : 0.8, metalness: 0.02 }));
+    const shiny = fs === "marble" || fs === "tile" || fs === "polished" || fs === "terrazzo" || fs === "checker";
+    const floorMat = new THREE.MeshStandardMaterial({ map: ftex, roughness: shiny ? 0.35 : 0.8, metalness: shiny ? 0.08 : 0.02 });
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(W + 8, 0.6, L + 8).translate(cx, FLOOR_Y, cy), floorMat);
     floor.receiveShadow = true; inner.add(floor);
-    for (let x = it.x0 + 25; x < it.x1 - 10; x += 45) for (let y = it.y0 + 25; y < it.y1 - 10; y += 45) Lamp.push(box(16, 0.4, 5, x, it.H - 1.4, y, "#fff6e0"));
     // walls: one mesh and material each, so the ones between the camera and you can fade out
-    const [ws, wc] = it.wallTex ?? ["paint", WALLS[it.kind] ?? "#e8e2d6"];
-    const wtex = this.tex("wall", ws, wc);
+    const [ws, wc] = it.wallTex ?? ["paint", "#e8e2d6"];
+    const wtex = this.tex("wall", ws, wc, it.H, floors);
     const walls: Room["walls"] = [];
     for (const b of it.walls) {
       if (b.low) continue;
-      const H = it.H, geo = new THREE.BoxGeometry(b.w, H, b.h);
-      // texture in world units (one tile = 60 units) on every face
-      const uv = geo.attributes.uv as THREE.BufferAttribute, size = [[b.h, H], [b.h, H], [b.w, b.h], [b.w, b.h], [b.w, H], [b.w, H]];
-      for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) { const i = f * 4 + v; uv.setXY(i, uv.getX(i) * size[f][0] / 60, uv.getY(i) * size[f][1] / 60); }
-      geo.translate(b.x + b.w / 2, H / 2, b.y + b.h / 2);
       const mat = new THREE.MeshStandardMaterial({ map: wtex, roughness: 0.85, transparent: true, opacity: 1 });
-      const m = new THREE.Mesh(geo, mat);
+      const m = new THREE.Mesh(this.wallGeo(b, 0, it.H), mat);
       m.castShadow = true; m.receiveShadow = true;
       group.add(m); walls.push({ m, mat, b });
     }
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(W + 10, 2, L + 10).translate(cx, it.H + 1, cy), new THREE.MeshStandardMaterial({ color: "#6a6a70", roughness: 0.9 }));
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(W + 10, 2, L + 10).translate(cx, it.H + 1, cy), new THREE.MeshStandardMaterial({ color: it.prison ? "#7a766e" : "#6a6a70", roughness: 0.9 }));
     roof.castShadow = true; group.add(roof);
-    // the ceiling seen from inside: panels with a fine grid (dark in the club and the cells, raw in the garages)
-    const ceilCol = it.kind === "club" ? "#1c1826" : it.kind === "jail" ? "#6e6c66" : it.kind === "workshop" || it.kind === "garage" ? "#5c5c60" : "#b8b3aa";
-    const ct = canvasTex(128, 128, (cg) => {
-      cg.fillStyle = ceilCol; cg.fillRect(0, 0, 128, 128);
-      cg.strokeStyle = "rgba(0,0,0,0.18)"; cg.lineWidth = 2; for (let k = 0; k <= 128; k += 32) { cg.beginPath(); cg.moveTo(k, 0); cg.lineTo(k, 128); cg.moveTo(0, k); cg.lineTo(128, k); cg.stroke(); }
-    });
-    ct.wrapS = ct.wrapT = THREE.RepeatWrapping; ct.repeat.set(W / 60, L / 60);
-    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W + 8, L + 8).rotateX(Math.PI / 2).translate(cx, it.H - 0.2, cy), new THREE.MeshStandardMaterial({ map: ct, roughness: 0.9 }));
+    // the ceiling seen from inside (acoustic tiles, plaster, wooden boards or raw concrete) and its lamps
+    const [cs, cc] = it.ceil ?? ["tiles", "#b8b3aa"];
+    const ct = this.tex("ceil", cs, cc).clone(); ct.needsUpdate = true; ct.repeat.set(W / 60, L / 60);
+    const ceilMat = new THREE.MeshStandardMaterial({ map: ct, roughness: 0.9 });
+    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W + 8, L + 8).rotateX(Math.PI / 2).translate(cx, it.H - 0.2, cy), ceilMat);
     ceiling.visible = false; ceiling.castShadow = true; group.add(ceiling); // keeps the sun out while the roof is hidden
+    this.lamps(it.lamps ?? "panel", it.x0, it.y0, it.x1, it.y1, it.H, P, Lamp);
     // the apartment tower: the storeys above the ground floor (seen from outside)
     let tower: THREE.Mesh | null = null;
     if (it.kind === "tower") {
@@ -110,39 +130,61 @@ export class InteriorsRenderer {
       tower = new THREE.Mesh(new THREE.BoxGeometry(W + 10, th, L + 10).translate(cx, it.H + 2 + th / 2, cy), new THREE.MeshStandardMaterial({ map: ft, roughness: 0.7 }));
       tower.castShadow = true; group.add(tower);
     }
-    // street side: sign, awning, shop windows next to the door
-    const d = it.door, fx = d.x - 0.6;
-    const sg = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(L * 0.8, 110), 12), new THREE.MeshBasicMaterial({ map: this.sign(it.name, it.color), toneMapped: false }));
-    sg.position.set(fx - 0.4, Math.min(it.H - 8, 34), d.y); sg.rotation.y = -Math.PI / 2;
-    group.add(sg);
-    if (it.kind !== "workshop") {
-      P.push(box(10, 1, Math.min(L * 0.7, 90), fx - 5, 24, d.y, it.color));
-      for (const s of [-1, 1]) {
-        const wy = d.y + s * (d.w / 2 + 20);
-        if (wy - 16 > it.y0 && wy + 16 < it.y1) G.push(box(0.6, 16, 30, fx - 0.2, 12, wy, "#cfe6f2", 0.35));
-      }
-    }
-    // the door: two glass panels that slide apart (workshop: a roller gate)
     const doors: THREE.Mesh[] = [];
     let gate: THREE.Mesh | undefined;
-    if (it.kind === "workshop") {
-      gate = new THREE.Mesh(new THREE.BoxGeometry(1, it.H - 6, d.w), new THREE.MeshStandardMaterial({ color: "#9aa0a8", metalness: 0.5, roughness: 0.4 }));
-      gate.position.set(fx + 1, (it.H - 6) / 2, d.y); group.add(gate);
-    } else for (const s of [-1, 1]) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(0.8, 22, d.w / 2), this.glassMat);
-      m.position.set(fx + 1.5, 11, d.y + s * d.w / 4); m.userData.s = s; group.add(m); doors.push(m);
+    const d = it.door, fx = d.x - 0.6;
+    if (!it.prison) {
+      // street side: sign, awning, shop windows next to the door
+      const sg = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(L * 0.8, 110), 12), new THREE.MeshBasicMaterial({ map: this.sign(it.name, it.color), toneMapped: false }));
+      sg.position.set(fx - 0.4, Math.min(it.H - 8, 34), d.y); sg.rotation.y = -Math.PI / 2;
+      group.add(sg);
+      if (it.kind !== "workshop") {
+        P.push(box(10, 1, Math.min(L * 0.7, 90), fx - 5, 24, d.y, it.color));
+        for (const s of [-1, 1]) {
+          const wy = d.y + s * (d.w / 2 + 20);
+          if (wy - 16 > it.y0 && wy + 16 < it.y1) G.push(box(0.6, 16, 30, fx - 0.2, 12, wy, "#cfe6f2", 0.35));
+        }
+      }
+      // the door: two glass panels that slide apart (workshop: a roller gate)
+      if (it.kind === "workshop") {
+        gate = new THREE.Mesh(new THREE.BoxGeometry(1, it.H - 6, d.w), new THREE.MeshStandardMaterial({ color: "#9aa0a8", metalness: 0.5, roughness: 0.4 }));
+        gate.position.set(fx + 1, (it.H - 6) / 2, d.y); group.add(gate);
+      } else for (const s of [-1, 1]) {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(0.8, 22, d.w / 2), this.glassMat);
+        m.position.set(fx + 1.5, 11, d.y + s * d.w / 4); m.userData.s = s; group.add(m); doors.push(m);
+      }
+    } else {
+      // prison: steel door frames in every opening, a sign over the door to the yard
+      for (const o of it.doors ?? []) {
+        const hw = o.w / 2 + 1.5, dz = 30;
+        if (o.alongX) P.push(box(o.w + 6, 3, 5, o.x, dz + 1.5, o.y, "#5a5d66"), box(3, dz, 5, o.x - hw, dz / 2, o.y, "#5a5d66"), box(3, dz, 5, o.x + hw, dz / 2, o.y, "#5a5d66"));
+        else P.push(box(5, 3, o.w + 6, o.x, dz + 1.5, o.y, "#5a5d66"), box(5, dz, 3, o.x, dz / 2, o.y - hw, "#5a5d66"), box(5, dz, 3, o.x, dz / 2, o.y + hw, "#5a5d66"));
+      }
+      const sg = new THREE.Mesh(new THREE.PlaneGeometry(40, 8), new THREE.MeshBasicMaterial({ map: this.sign(it.name.toUpperCase(), "#3a4048", 384, 72), toneMapped: false }));
+      sg.position.set(d.x + 0.8, 38, d.y); sg.rotation.y = Math.PI / 2; group.add(sg);
     }
-    // furniture
+    // furniture (mall: what stands on an upper floor goes with that floor)
+    const levels: Level[] = (it.levels ?? []).map((lv) => ({ z: lv.z, group: new THREE.Group() }));
+    const lvParts = levels.map((): Parts => ({ std: [], glow: [], glass: [] })), lvExtra = levels.map((): THREE.Object3D[] => []), lvP = levels.map((): THREE.BufferGeometry[] => []), lvG = levels.map((): THREE.BufferGeometry[] => []), lvQ = levels.map((): THREE.BufferGeometry[] => []);
+    const levelIx = (z: number | undefined) => levels.findIndex((l) => Math.abs(l.z - (z ?? 0)) < 1);
     const targets: THREE.Mesh[] = [];
     let seed = it.id.length * 131;
     for (const p of it.props) {
-      if (p.k.startsWith("f:")) furniture({ k: p.k.slice(2), x: p.x, y: p.y, w: p.w, d: p.d, a: p.a, z: p.z, c: p.c, c2: p.c2 }, parts, seed++, extra, it.H, FLOOR_Y);
-      else this.prop(p, P, G, inner);
+      const li = p.lv ? levelIx(p.lv) : -1;
+      const pp = li >= 0 ? lvParts[li] : parts, ex = li >= 0 ? lvExtra[li] : extra, pP = li >= 0 ? lvP[li] : P, pG = li >= 0 ? lvG[li] : G, pQ = li >= 0 ? lvQ[li] : Q;
+      if (p.k.startsWith("f:")) furniture({ k: p.k.slice(2), x: p.x, y: p.y, w: p.w, d: p.d, a: p.a, z: p.z, c: p.c, c2: p.c2 }, pp, seed++, ex, it.H, FLOOR_Y);
+      else if (p.k === "front") this.front(p, pP, pG, pQ, li >= 0 ? levels[li].group : inner);
+      else this.prop(p, pP, pG);
     }
     for (const o of extra) inner.add(o);
-    if (parts.std.length) { const m = new THREE.Mesh(mergeGeometries(parts.std)!, this.propMat); m.castShadow = true; m.receiveShadow = true; inner.add(m); for (const g of parts.std) g.dispose(); }
-    if (parts.glow.length) { const m = new THREE.Mesh(mergeGeometries(parts.glow)!, this.glowMat); inner.add(m); for (const g of parts.glow) g.dispose(); }
-    if (parts.glass.length) { const m = new THREE.Mesh(mergeGeometries(parts.glass)!, this.fGlassMat); inner.add(m); for (const g of parts.glass) g.dispose(); }
+    const flush = (pp: Parts, Pl: THREE.BufferGeometry[], Gl: THREE.BufferGeometry[], Ql: THREE.BufferGeometry[], to: THREE.Group) => {
+      if (Ql.length) { const m = new THREE.Mesh(mergeGeometries(Ql)!, this.paneMat); m.renderOrder = 2; to.add(m); for (const g of Ql) g.dispose(); Ql.length = 0; }
+      if (pp.std.length) { const m = new THREE.Mesh(mergeGeometries(pp.std)!, this.propMat); m.castShadow = true; m.receiveShadow = true; to.add(m); for (const g of pp.std) g.dispose(); }
+      if (pp.glow.length) { const m = new THREE.Mesh(mergeGeometries(pp.glow)!, this.glowMat); to.add(m); for (const g of pp.glow) g.dispose(); }
+      if (pp.glass.length) { const m = new THREE.Mesh(mergeGeometries(pp.glass)!, this.fGlassMat); to.add(m); for (const g of pp.glass) g.dispose(); }
+      if (Pl.length) { const m = new THREE.Mesh(mergeGeometries(Pl)!, this.propMat); m.castShadow = true; m.receiveShadow = true; to.add(m); for (const g of Pl) g.dispose(); Pl.length = 0; }
+      if (Gl.length) { const m = new THREE.Mesh(mergeGeometries(Gl)!, this.glowMat); to.add(m); for (const g of Gl) g.dispose(); Gl.length = 0; }
+    };
     if (it.range) for (const t of it.range.targets) {
       const m = new THREE.Mesh(new THREE.BoxGeometry(1, 12, 9).translate(0, 6, 0), new THREE.MeshStandardMaterial({ map: this.targetTex(), roughness: 0.7 }));
       m.position.set(t.x, FLOOR_Y + 4, t.y); m.rotation.z = -1.4; inner.add(m); targets.push(m);
@@ -169,37 +211,81 @@ export class InteriorsRenderer {
       if (car) { t.add(car); this.setup(car); }
       inner.add(t); tables.push(t);
     }
-    // the mall: upper floor around the open middle, glass railing, escalators
-    let steps: THREE.Texture | null = null;
-    if (it.gallery) {
-      const b = it.gallery.band, y = it.gallery.y;
-      Up.push(box(W, 2, b, cx, y - 1, it.y0 + b / 2, "#d8d2c6"), box(W, 2, b, cx, y - 1, it.y1 - b / 2, "#d8d2c6"));
-      Up.push(box(b, 2, L - 2 * b, it.x0 + b / 2, y - 1, cy, "#d8d2c6"), box(b, 2, L - 2 * b, it.x1 - b / 2, y - 1, cy, "#d8d2c6"));
-      const ix0 = it.x0 + b, ix1 = it.x1 - b, iy0 = it.y0 + b, iy1 = it.y1 - b;
-      for (const [ax, ay, bx2, by2] of [[ix0, iy1, ix1, iy1], [ix0, iy0, ix0, iy1], [ix1, iy0, ix1, iy1]] as [number, number, number, number][]) G.push(box(Math.max(0.5, bx2 - ax), 10, Math.max(0.5, by2 - ay), (ax + bx2) / 2, y + 5, (ay + by2) / 2, "#cfe6f2", 0.3));
-      for (let x = ix0; x < ix1; x += 40) P.push(cyl(2.2, 2.2, y, x, y / 2, iy0 - 4, "#bfbab0", 10), cyl(2.2, 2.2, y, x, y / 2, iy1 + 4, "#bfbab0", 10));
+    // the mall: the galleries (floor on top, ceiling below, lamps under them), glass rails, escalators, the glass lift
+    let steps: THREE.Texture | null = null, cabin: THREE.Group | null = null;
+    const liftDoors: Room["liftDoors"] = [];
+    if (it.levels) {
+      it.levels.forEach((lv, li) => {
+        const lg = levels[li].group, LP = lvP[li], LL: THREE.BufferGeometry[] = [];
+        for (const r of lv.slabs) {
+          const w = r.x1 - r.x0, h = r.y1 - r.y0;
+          const top = this.tex("floor", fs, fc).clone(); top.needsUpdate = true; top.repeat.set(w / 90, h / 90);
+          const slab = new THREE.Mesh(new THREE.BoxGeometry(w, 2, h).translate((r.x0 + r.x1) / 2, FLOOR_Y + lv.z - 1, (r.y0 + r.y1) / 2), new THREE.MeshStandardMaterial({ map: top, roughness: shiny ? 0.35 : 0.8 }));
+          slab.receiveShadow = true; slab.castShadow = true; lg.add(slab);
+          const under = new THREE.Mesh(new THREE.PlaneGeometry(w, h).rotateX(Math.PI / 2).translate((r.x0 + r.x1) / 2, FLOOR_Y + lv.z - 2.1, (r.y0 + r.y1) / 2), ceilMat);
+          lg.add(under);
+          this.lamps(it.lamps ?? "panel", r.x0, r.y0, r.x1, r.y1, FLOOR_Y + lv.z - 2.2, LP, LL);
+        }
+        if (LL.length) { const m = new THREE.Mesh(mergeGeometries(LL)!, this.glowMat); lg.add(m); for (const g of LL) g.dispose(); }
+      });
+      // glass rails (the thin height-limited walls) with a steel handrail on top
+      for (const b of it.walls) if (b.zb !== undefined && b.zt! - b.zb <= 14) {
+        const li = levelIx(b.zb), to = li >= 0 ? lvQ[li] : Q, toP = li >= 0 ? lvP[li] : P;
+        to.push(box(b.w, 10, b.h, b.x + b.w / 2, FLOOR_Y + b.zb + 5, b.y + b.h / 2, "#cfe6f2"));
+        toP.push(box(b.w + 0.4, 0.8, b.h + 0.4, b.x + b.w / 2, FLOOR_Y + b.zb + 10.4, b.y + b.h / 2, "#9aa3ad"));
+      }
       steps = canvasTex(32, 128, (g) => { g.fillStyle = "#4a4d55"; g.fillRect(0, 0, 32, 128); g.fillStyle = "#8a8d95"; for (let k = 0; k < 128; k += 16) g.fillRect(0, k, 32, 3); });
-      steps.wrapS = steps.wrapT = THREE.RepeatWrapping; steps.repeat.set(1, 4);
+      steps.wrapS = steps.wrapT = THREE.RepeatWrapping; steps.repeat.set(1, 6);
       const sm = new THREE.MeshStandardMaterial({ map: steps, roughness: 0.6, metalness: 0.3 });
       for (const e of it.escalators!) {
-        const len = Math.hypot(e.y1 - e.y0, y), ang = Math.atan2(y, e.y1 - e.y0);
-        const m = new THREE.Mesh(new THREE.BoxGeometry(e.x1 - e.x0, 1.2, len), sm);
-        m.position.set((e.x0 + e.x1) / 2, y / 2 + 0.6, (e.y0 + e.y1) / 2); m.rotation.x = ang; inner.add(m);
-        for (const sx of [e.x0, e.x1]) { const sd = new THREE.Mesh(new THREE.BoxGeometry(1, 8, len), this.glassMat); sd.position.set(sx, y / 2 + 4.6, (e.y0 + e.y1) / 2); sd.rotation.x = ang; inner.add(sd); }
+        const run = e.y1 - e.y0, rise = e.zb - e.za, len = Math.hypot(run, rise), ang = -Math.atan2(rise, run), mx = (e.x0 + e.x1) / 2, mz = (e.y0 + e.y1) / 2, my = FLOOR_Y + (e.za + e.zb) / 2;
+        const tread = new THREE.Mesh(new THREE.BoxGeometry(e.x1 - e.x0, 1.2, len), sm);
+        tread.position.set(mx, my + 0.4, mz); tread.rotation.x = ang; inner.add(tread);
+        if (!e.up) tread.userData.down = true;
+        // the truss under it and the balustrades with their black handrails
+        const truss = new THREE.Mesh(new THREE.BoxGeometry(e.x1 - e.x0 + 3, 5, len), this.steelMat);
+        truss.position.set(mx, my - 2.6, mz); truss.rotation.x = ang; inner.add(truss);
+        for (const sx of [e.x0, e.x1]) {
+          const bal = new THREE.Mesh(new THREE.BoxGeometry(0.8, 9, len), this.glassMat); bal.position.set(sx, my + 5, mz); bal.rotation.x = ang; inner.add(bal);
+          const rail = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1, len + 4), this.propMat); rail.position.set(sx, my + 9.8, mz); rail.rotation.x = ang; inner.add(rail);
+        }
       }
+      const el = it.elevator;
+      if (el) {
+        // the cabin: floor, glass on three sides, a lit ceiling; sliding doors on every floor
+        cabin = new THREE.Group();
+        const cw = el.x1 - el.x0, cd = el.y1 - el.y0, ccx = (el.x0 + el.x1) / 2, ccz = (el.y0 + el.y1) / 2;
+        const cP = [box(cw, 1, cd, 0, -0.5, 0, "#3a3d45"), box(cw, 1, cd, 0, 30, 0, "#3a3d45"), box(1, 30, 1, -cw / 2 + 0.5, 15, cd / 2 - 0.5, "#9aa3ad"), box(1, 30, 1, cw / 2 - 0.5, 15, cd / 2 - 0.5, "#9aa3ad"), box(4, 6, 0.6, cw / 2 - 4, 14, -cd / 2 + 0.5, "#2a2d33")];
+        const cm = new THREE.Mesh(mergeGeometries(cP)!, this.propMat); cabin.add(cm); for (const g of cP) g.dispose();
+        const cg = new THREE.Mesh(new THREE.BoxGeometry(cw - 1, 29, cd - 1), this.glassMat); cg.position.y = 15; cabin.add(cg);
+        const cl = new THREE.Mesh(withColor(new THREE.BoxGeometry(cw - 6, 0.4, cd - 6), C("#fff6e0")), this.glowMat); cl.position.y = 29.3; cabin.add(cl);
+        cabin.position.set(ccx, FLOOR_Y + el.z, ccz); inner.add(cabin);
+        for (const z of el.floors) for (const s of [-1, 1]) {
+          const m = new THREE.Mesh(new THREE.BoxGeometry((cw - 14) / 2, 28, 0.8), this.steelMat);
+          m.position.set(ccx + s * (cw - 14) / 4, FLOOR_Y + z + 14, el.y1 + 1); inner.add(m); liftDoors.push({ m, z, s });
+        }
+        P.push(box(cw + 4, 2, 2, ccx, FLOOR_Y + it.H - 1, el.y1 + 1, "#3a3d45"));
+      }
+      levels.forEach((l, li) => { flush(lvParts[li], lvP[li], lvG[li], lvQ[li], l.group); for (const o of lvExtra[li]) l.group.add(o); inner.add(l.group); });
     }
-    if (P.length) { const m = new THREE.Mesh(mergeGeometries(P)!, this.propMat); m.castShadow = true; m.receiveShadow = true; inner.add(m); for (const g of P) g.dispose(); }
-    if (G.length) { const m = new THREE.Mesh(mergeGeometries(G)!, this.glowMat); inner.add(m); for (const g of G) g.dispose(); }
-    const lamps = new THREE.Mesh(mergeGeometries(Lamp)!, this.glowMat); group.add(lamps); for (const g of Lamp) g.dispose();
-    // the mall's upper floor: see-through while you are below it
-    let upper: THREE.Mesh | null = null, upperMat: THREE.MeshStandardMaterial | null = null;
-    if (Up.length) { upperMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, transparent: true }); upper = new THREE.Mesh(mergeGeometries(Up)!, upperMat); upper.receiveShadow = true; inner.add(upper); for (const g of Up) g.dispose(); }
+    flush(parts, P, G, Q, inner);
+    let lamps: THREE.Mesh | null = null;
+    if (Lamp.length) { lamps = new THREE.Mesh(mergeGeometries(Lamp)!, this.glowMat); inner.add(lamps); for (const g of Lamp) g.dispose(); }
+    // the prison yard (outdoors, drawn with the cell block)
+    let yard: THREE.Group | null = null;
+    if (it.yard) {
+      yard = new THREE.Group();
+      const yp: Parts = { std: [], glow: [], glass: [] }, ye: THREE.Object3D[] = [];
+      for (const p of it.yard.props) furniture({ k: p.k.slice(2), x: p.x, y: p.y, w: p.w, d: p.d, a: p.a, z: p.z, c: p.c, c2: p.c2 }, yp, seed++, ye, it.H, 0);
+      flush(yp, [], [], [], yard); for (const o of ye) yard.add(o);
+      this.scene.add(yard); this.setup(yard);
+    }
     this.scene.add(group);
     this.setup(group);
     const lum = (hex: string) => { const c = new THREE.Color(hex); return 0.3 * c.r + 0.59 * c.g + 0.11 * c.b; };
     const bright = Math.max(lum(fc), lum(wc));
     const lightK = 1 - 0.85 * Math.max(0, Math.min(1, (bright - 0.3) / 0.5));
-    return { it, group, roof, ceiling, walls, tower, lightK, doors, doorOpen: 0, gate, people: null, clerk: null, targets, mirror, lift, liftH: 0, tables, steps, inner, lamps, upperMat };
+    return { it, group, inner, roof, ceiling, walls, tower, lightK, lightCol: new THREE.Color(it.light ?? "#fff1dc"), doors, doorOpen: 0, gate, people: null, clerk: null, targets, mirror, lift, liftH: 0, tables, steps, lamps, levels, cabin, liftDoors, yard, yardPeople: null };
   }
 
   private targetTex() {
@@ -211,29 +297,38 @@ export class InteriorsRenderer {
     return t;
   }
 
-  // one piece of furniture (into the merged meshes; text signs as their own meshes)
-  private prop(p: Prop, P: THREE.BufferGeometry[], G: THREE.BufferGeometry[], inner: THREE.Group) {
+  // a closed shop in the mall: shop window with goods behind it, a frame, the lit name above
+  private front(p: Prop, P: THREE.BufferGeometry[], G: THREE.BufferGeometry[], Q: THREE.BufferGeometry[], to: THREE.Group) {
+    const z = FLOOR_Y + (p.z ?? 0), a = p.a ?? 0, w = p.w, dep = p.d, col = p.c2 ?? "#2a2d33";
+    // local: x along the wall, the window looks to +n (into the mall); n = 0 at the wall
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const at = (u: number, n: number): [number, number] => [p.x + u * ca - n * sa, p.y + u * sa + n * ca];
+    const bx = (u: number, n: number, bw: number, bh: number, bd: number, y: number, c: string | THREE.Color, mul = 1) => { const [x, yy] = at(u, n); return box(bw, bh, bd, x, y, yy, c, mul, -a); };
+    // window glass, frame, a dark backdrop, shelves and goods in the window
+    Q.push(bx(0, dep, w - 2, 24, 0.5, z + 12, "#cfe6f2"));
+    P.push(bx(0, dep, w, 2, 1.6, z + 25, "#3a3d45"), bx(-w / 2 + 0.8, dep, 1.6, 26, 1.6, z + 13, "#3a3d45"), bx(w / 2 - 0.8, dep, 1.6, 26, 1.6, z + 13, "#3a3d45"), bx(0, dep, w, 1.4, 1.6, z + 0.7, "#3a3d45"));
+    P.push(bx(0, 0.6, w - 2, 24, 0.6, z + 12, C(col).clone().multiplyScalar(0.35)), bx(0, dep * 0.45, w - 4, 4, dep * 0.7, z + 2, "#e8e4dc"));
+    for (let k = 0; k < Math.floor(w / 9); k++) {
+      const u = -w / 2 + 5 + k * 9, h = 5 + ((k * 7) % 5) * 1.5;
+      P.push(bx(u, dep * 0.45, 5, h, 4, z + 4 + h / 2, k % 2 ? col : "#f4f2ee"));
+    }
+    G.push(bx(0, dep - 0.4, w - 4, 0.6, 1, z + 23.6, "#fff6e0", 1.2));
+    const [sx, sy] = at(0, dep + 0.4);
+    const sgn = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.8, 5.5), new THREE.MeshBasicMaterial({ map: this.sign(p.c ?? "", col, 384, 64), toneMapped: false }));
+    sgn.position.set(sx, z + 29.5, sy); sgn.rotation.y = -a; to.add(sgn);
+    P.push(bx(0, dep * 0.5, w, 6.5, dep, z + 29.5, "#2a2d33"));
+  }
+
+  // one piece of the older prop set (into the merged meshes)
+  private prop(p: Prop, P: THREE.BufferGeometry[], G: THREE.BufferGeometry[]) {
     const z = FLOOR_Y + (p.z ?? 0), c = p.c ?? "#888";
     const rot = (g: THREE.BufferGeometry) => { if (p.a) { g.translate(-p.x, 0, -p.y); g.rotateY(-p.a); g.translate(p.x, 0, p.y); } return g; };
     switch (p.k) {
-      case "counter": case "desk":
-        P.push(box(p.w, p.h, p.d, p.x, z + p.h / 2, p.y, c), box(p.w + 2, 1, p.d + 2, p.x, z + p.h + 0.5, p.y, "#d8d2c6"));
-        P.push(box(2, 4, 3, p.x, z + p.h + 3, p.y - p.d * 0.3, "#1b1b1f")); // till
-        break;
       case "gunrack": P.push(box(p.w, p.h, p.d, p.x, z + p.h / 2, p.y, "#5a4636")); for (let k = 0; k < 3; k++) P.push(box(1, 1.4, p.d * 0.8, p.x - 1.2, z + 5 + k * 7, p.y, "#1b1b1f")); break;
       case "lane": P.push(box(p.w, 0.2, 1, p.x, FLOOR_Y + 0.4, p.y, c)); break;
       case "bench": case "table": case "tattoochair":
         P.push(box(p.w, 1.2, p.d, p.x, z + p.h, p.y, c), cyl(1, 1.4, p.h, p.x, z + p.h / 2, p.y, "#3a3d45", 8)); break;
-      case "chair": case "barberchair": P.push(box(p.w, 1, p.d, p.x, z + p.h, p.y, c), box(1, 7, p.d, p.x + (p.k === "chair" ? -p.w / 2 : p.w / 2), z + p.h + 3.5, p.y, c), cyl(0.6, 0.6, p.h, p.x, z + p.h / 2, p.y, "#888", 6)); break;
-      case "rack": {
-        P.push(box(1, 1, p.d, p.x, z + p.h, p.y, "#c9ced8"), box(1, p.h, 1, p.x, z + p.h / 2, p.y - p.d / 2, "#c9ced8"), box(1, p.h, 1, p.x, z + p.h / 2, p.y + p.d / 2, "#c9ced8"));
-        const cols = ["#ff6f91", "#2bb3ff", "#ffd23f", "#3dd68c", "#1f2a44", "#f5f0e1"];
-        for (let k = 0; k < 8; k++) P.push(box(6, 10, 1.2, p.x, z + p.h - 6, p.y - p.d / 2 + 3 + k * (p.d - 6) / 7, cols[k % cols.length]));
-        break;
-      }
       case "booth": P.push(box(p.w, p.h, 1, p.x, z + p.h / 2, p.y - 12, c), box(1, p.h, 24, p.x - p.w / 2, z + p.h / 2, p.y, c)); break;
-      case "plant": P.push(cyl(3, 2.4, 5, p.x, z + 2.5, p.y, "#7a5a3a", 8), withColor(new THREE.SphereGeometry(5, 8, 6).translate(p.x, z + 10, p.y), C(c))); break;
-      case "menu": G.push(box(1, p.h, p.d, p.x - 0.6, z + p.h / 2, p.y, c, 0.9)); break;
       case "lift": break;
       case "dancefloor": {
         // glowing tiles in neon colours
@@ -241,64 +336,44 @@ export class InteriorsRenderer {
         for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) G.push(box(p.w / n - 1, 0.3, p.d / n - 1, p.x - p.w / 2 + (i + 0.5) * p.w / n, FLOOR_Y + 0.5, p.y - p.d / 2 + (j + 0.5) * p.d / n, cols[(i * 3 + j * 2) % cols.length], 1.4));
         break;
       }
-      case "tools": P.push(box(p.w, p.h, p.d, p.x, z + p.h / 2, p.y, "#5a5e66")); for (let k = 0; k < 4; k++) P.push(box(1, 4, 1.5, p.x - 1.2, z + 4 + k * 4, p.y - 4 + k * 2.5, "#c9ced8")); break;
       case "tyres": for (let k = 0; k < 4; k++) P.push(withColor(new THREE.TorusGeometry(3.6, 1.6, 6, 12).rotateX(Math.PI / 2).translate(p.x, z + 1.6 + k * 3.2, p.y), C("#151515"))); break;
-      case "bed": P.push(box(p.w, 5, p.d, p.x, z + 2.5, p.y, "#5a4636"), box(p.w - 2, 2.4, p.d - 2, p.x, z + 6, p.y, c), box(6, 2, p.d - 4, p.x + p.w / 2 - 5, z + 7.6, p.y, "#e8e8ec")); break;
-      case "wardrobe": P.push(box(p.w, p.h, p.d, p.x, z + p.h / 2, p.y, c), box(0.6, p.h - 4, 0.6, p.x - p.w / 2, z + p.h / 2, p.y, "#2a1e14")); break;
-      case "tv": P.push(box(p.w + 2, p.h + 2, 1.5, p.x, z + p.h / 2, p.y + 1, "#15161b")); G.push(box(p.w, p.h, 0.4, p.x, z + p.h / 2, p.y + 2, "#3a6a9a", 0.8)); break;
-      case "sofa": P.push(box(p.w, 4, p.d, p.x, z + 2, p.y, c), box(p.w, 6, 3, p.x, z + 5, p.y - p.d / 2 + 1.5, c)); break;
-      case "shelf": {
-        P.push(box(p.w, p.h, p.d, p.x, z + p.h / 2, p.y, "#e8e8ec"));
-        const cols = ["#c0392b", "#e1b12c", "#2e6da4", "#2d8a5a", "#e67e22", "#8e44ad"];
-        for (let lv = 0; lv < 4; lv++) for (let k = 0; k < p.d / 6; k++) P.push(box(p.w + 1, 3.2, 4.4, p.x, z + 3 + lv * 5, p.y - p.d / 2 + 3 + k * 6, cols[(k + lv * 2) % cols.length]));
-        break;
-      }
-      case "fridge": P.push(box(p.w, p.h, p.d, p.x, z + p.h / 2, p.y, "#e8e8ec")); G.push(box(0.6, p.h - 4, p.d - 4, p.x - p.w / 2 - 0.3, z + p.h / 2, p.y, "#cfe6f2", 0.7)); break;
-      case "turntable": P.push(cyl(p.w / 2, p.w / 2, 1, p.x, z + 0.5, p.y, c, 28)); break;
-      case "mirrorwall": P.push(box(p.w, p.h, p.d, p.x - 0.6, z + p.h / 2, p.y, "#cfe6f2")); break;
-      case "front": {
-        // a closed shop inside the mall: glass front and a lit name
-        const g1 = new THREE.BoxGeometry(p.w, p.h, 1).translate(p.x, z + p.h / 2, p.y + (p.a ? -1.5 : 1.5));
-        G.push(withColor(g1, C("#cfe6f2"), 0.25));
-        const sgn = new THREE.Mesh(new THREE.PlaneGeometry(p.w * 0.7, 6), new THREE.MeshBasicMaterial({ map: this.sign(c, "#2a2d33", 384, 64), toneMapped: false }));
-        sgn.position.set(p.x, z + p.h + 4, p.y + (p.a ? -2 : 2)); sgn.rotation.y = p.a ? Math.PI : 0; inner.add(sgn);
-        break;
-      }
+      case "turntable": P.push(cyl(p.w / 2, p.w / 2, 1, p.x, z + 0.5, p.y, c, 28), cyl(p.w / 2 + 0.6, p.w / 2 + 0.6, 0.4, p.x, z + 0.2, p.y, "#9aa3ad", 28)); break;
       default: P.push(rot(box(p.w, p.h, p.d, p.x, z + p.h / 2, p.y, c)));
     }
   }
 
+  private spawn(g: Guest, seed: number, list: Person[], clerk = false) {
+    const rig = new HumanRig(lookFromSeed(seed * 31 + 7, g.role ?? "civ", g.shirt ?? "", g.pants ?? ""), 1);
+    rig.root.position.set(g.x, FLOOR_Y + (g.z ?? 0), g.y); rig.root.rotation.y = -g.a; rig.play(g.anim, 0);
+    this.scene.add(rig.root); this.setup(rig.root);
+    list.push({ rig, anim: g.anim, clerk });
+    return rig;
+  }
   private people(room: Room) {
-    const it = room.it, list: { rig: HumanRig; anim: string }[] = [];
+    const it = room.it, list: Person[] = [];
     let seed = it.id.length * 97;
-    const mk = (x: number, y: number, a: number, anim: string, role = "civ") => {
-      const rig = new HumanRig(lookFromSeed(seed++ * 31 + 7, role), 1);
-      rig.root.position.set(x, FLOOR_Y, y); rig.root.rotation.y = -a; rig.play(anim, 0);
-      this.scene.add(rig.root); this.setup(rig.root);
-      list.push({ rig, anim });
-      return rig;
-    };
-    if (it.clerk.x > -1e4) room.clerk = mk(it.clerk.x, it.clerk.y, it.clerk.a, "idle");
-    for (const g of it.guests) mk(g.x, g.y, g.a, g.anim);
+    if (it.clerk.x > -1e4) room.clerk = this.spawn({ x: it.clerk.x, y: it.clerk.y, a: it.clerk.a, anim: "idle" }, seed++, list, true);
+    for (const g of it.guests) this.spawn(g, seed++, list);
     room.people = list;
   }
-  private dropPeople(room: Room) {
-    for (const p of room.people ?? []) { this.scene.remove(p.rig.root); p.rig.dispose(); }
-    room.people = null; room.clerk = null;
-  }
+  private drop(list: Person[] | null) { for (const p of list ?? []) { this.scene.remove(p.rig.root); p.rig.dispose(); } }
 
   update(g: Game, dt: number, cam: THREE.Vector3) {
-    const pd = g.ped, px = g.onFoot ? pd.x : g.player.x, py = g.onFoot ? pd.y : g.player.y;
-    let lit: Room | null = null;
+    const pd = g.ped, px = g.onFoot ? pd.x : g.player.x, py = g.onFoot ? pd.y : g.player.y, pz = g.onFoot ? pd.z : g.player.z;
+    const top = g.config.camera === "top";
+    let lit: Room | null = null, litD = Infinity;
     for (const room of this.rooms) {
       const it = room.it, cx = (it.x0 + it.x1) / 2, cy = (it.y0 + it.y1) / 2;
-      const d = Math.hypot(cx - px, cy - py);
-      const inside = g.inside === it;
+      // distance to the room's rectangle
+      const d = Math.hypot(Math.max(it.x0 - px, 0, px - it.x1), Math.max(it.y0 - py, 0, py - it.y1));
+      const inside = g.inside === it, sameHouse = inside || (!!it.prison && !!g.inside?.prison);
+      const near = inside || d < NEAR;
+      room.inner.visible = near;
       // people only when you are close
       if (d < 420 && !room.people) this.people(room);
-      else if (d > 520 && room.people) this.dropPeople(room);
+      else if (d > 520 && room.people) { this.drop(room.people); room.people = null; room.clerk = null; }
       if (room.people) for (const p of room.people) {
-        if (p.rig === room.clerk) {
+        if (p.clerk) {
           const rob = g.robbery?.it === it;
           p.rig.play(rob ? "handsUp" : "idle", 0.2);
           // the clerk looks at you
@@ -307,28 +382,33 @@ export class InteriorsRenderer {
         }
         p.rig.update(dt);
       }
+      // the prison yard: its props and inmates while you are near the prison
+      if (room.yard) {
+        const yd = Math.hypot(px - cx - 300, py - cy);
+        room.yard.visible = yd < 900;
+        if (yd < 700 && !room.yardPeople) { const l: Person[] = []; let s = 501; for (const q of it.yard!.guests) this.spawn(q, s++, l); room.yardPeople = l; }
+        else if (yd > 800 && room.yardPeople) { this.drop(room.yardPeople); room.yardPeople = null; }
+        if (room.yardPeople) for (const p of room.yardPeople) p.rig.update(dt);
+      }
       // the door opens when somebody comes close
       const dd = Math.hypot(it.door.x - px, it.door.y - py);
       room.doorOpen += ((dd < 40 ? 1 : 0) - room.doorOpen) * Math.min(1, dt * 5);
       for (const m of room.doors) m.position.z = it.door.y + (m.userData.s as number) * (it.door.w / 4 + room.doorOpen * it.door.w * 0.45);
       if (room.gate) { room.gate.scale.y = 1 - room.doorOpen * 0.9; room.gate.position.y = ((it.H - 6) * (1 - room.doorOpen * 0.9)) / 2 + room.doorOpen * (it.H - 6) * 0.9; }
-      // inside: no roof, walls between the camera and you see-through
       // inside: the roof gives way to the ceiling with its lamps (only the bird's eye view looks in from above)
-      const top = g.config.camera === "top";
-      room.roof.visible = !inside; room.ceiling.visible = inside && !top; room.lamps.visible = !inside || !top;
+      room.roof.visible = !inside; room.ceiling.visible = inside && !top;
+      if (room.lamps) room.lamps.visible = !inside || !top;
       if (room.tower) room.tower.visible = !inside;
-      if (room.upperMat) {
-        // from below the gallery is see-through; with the camera right under it, it is left out (no milky haze)
-        const gb = it.gallery!, under = cam.y < gb.y && (cam.x < it.x0 + gb.band || cam.x > it.x1 - gb.band || cam.z < it.y0 + gb.band || cam.z > it.y1 - gb.band);
-        const o = inside && under ? 0 : inside && (g.onFoot ? pd.z : 0) < 20 ? 0.22 : 1; room.upperMat.opacity += (o - room.upperMat.opacity) * Math.min(1, dt * 8); room.upperMat.depthWrite = room.upperMat.opacity > 0.9; }
+      // mall: from above the floors over you are left out
+      for (const lv of room.levels) lv.group.visible = !(inside && top && lv.z > pz + 10);
       // only the walls between the camera and you (or right at the camera) fade out
       for (const w of room.walls) {
-        const b = w.b, fade = inside && (segHitsRect(cam.x, cam.z, px, py, b.x - 3, b.y - 3, b.x + b.w + 3, b.y + b.h + 3) || (cam.x > b.x - 10 && cam.x < b.x + b.w + 10 && cam.z > b.y - 10 && cam.z < b.y + b.h + 10)) ? 0.15 : 1;
+        const b = w.b, fade = sameHouse && (segHitsRect(cam.x, cam.z, px, py, b.x - 3, b.y - 3, b.x + b.w + 3, b.y + b.h + 3) || (cam.x > b.x - 10 && cam.x < b.x + b.w + 10 && cam.z > b.y - 10 && cam.z < b.y + b.h + 10)) ? 0.15 : 1;
         if (Math.abs(w.mat.opacity - fade) > 0.01) w.mat.opacity += (fade - w.mat.opacity) * Math.min(1, dt * 8);
         w.mat.depthWrite = w.mat.opacity > 0.9;
       }
       if (room.mirror) room.mirror.visible = inside;
-      if (inside || d < 200) lit = room;
+      if (inside) { lit = room; litD = -1; } else if (d < 200 && d < litD) { lit = room; litD = d; }
       // workshop lift: the car goes up while you are in the menu there
       if (room.lift) {
         const up = g.modal?.kind === "shop" && g.modal.place.id === it.id && !g.onFoot ? 14 : 0;
@@ -336,8 +416,17 @@ export class InteriorsRenderer {
         room.lift.position.y = FLOOR_Y + 0.8 + room.liftH;
         if (inside) this.liftY = room.liftH;
       }
-      for (const t of room.tables) t.rotation.y += dt * 0.25;
-      if (room.steps) room.steps.offset.y = (room.steps.offset.y + dt * 0.4) % 1;
+      // the mall's lift: the cabin follows the game, the doors of the floor it stands at slide open
+      const el = it.elevator;
+      if (room.cabin && el) {
+        room.cabin.position.y = FLOOR_Y + el.z;
+        const cw = el.x1 - el.x0, ccx = (el.x0 + el.x1) / 2;
+        for (const q of room.liftDoors) { const open = Math.abs(el.z - q.z) < 0.5 ? el.open : 0; q.m.position.x = ccx + q.s * ((cw - 14) / 4 + open * (cw - 14) * 0.42); }
+      }
+      if (near) {
+        for (const t of room.tables) t.rotation.y += dt * 0.25;
+        if (room.steps) room.steps.offset.y = (room.steps.offset.y + dt * 0.4) % 1;
+      }
       // shooting range: the target that is up
       if (room.targets.length) {
         const rg = g.range?.it === it ? g.range : null;
@@ -345,16 +434,36 @@ export class InteriorsRenderer {
       }
     }
     if (!g.inside) this.liftY *= 0.9;
-    // one light for the shop you are in (or next to)
+    // one light for the room you are in (or the closest one)
     if (lit) {
-      // big blocks (mall, tower): the light follows you, so the room you are in is lit and nothing glares
-      const it = lit.it, big = it.x1 - it.x0 > 220 && g.inside === it;
+      // big rooms (mall, tower, prison): the light follows you, so the part you are in is lit and nothing glares
+      const it = lit.it, big = (it.x1 - it.x0 > 220 || it.y1 - it.y0 > 220) && g.inside === it;
+      const z = g.onFoot ? Math.max(0, pd.z) : 0;
       // below the ceiling (not right under it: the ceiling would glare)
-      this.light.position.set(big ? px : (it.x0 + it.x1) / 2, Math.min(it.H - 16, 30) + (g.onFoot && big ? Math.max(0, pd.z) : 0), big ? py : (it.y0 + it.y1) / 2);
+      this.light.position.set(big ? px : (it.x0 + it.x1) / 2, Math.min((it.levels && big ? 30 : it.H - 16), 30) + (big ? z : 0), big ? py : (it.y0 + it.y1) / 2);
+      this.light.color.copy(lit.lightCol);
       this.light.intensity = 1700 * lit.lightK * (big ? 0.7 : 1); this.light.distance = big ? 260 : Math.max(it.x1 - it.x0, it.y1 - it.y0) * 1.4;
     }
     else this.light.intensity = 0;
   }
+}
+
+// ceilings: acoustic tiles, smooth plaster, wooden boards, raw concrete with formwork joints
+function ceilTex(style: string, col: string) {
+  return canvasTex(128, 128, (g) => {
+    g.fillStyle = col; g.fillRect(0, 0, 128, 128);
+    if (style === "tiles") {
+      g.strokeStyle = "rgba(0,0,0,0.2)"; g.lineWidth = 2; for (let k = 0; k <= 128; k += 32) { g.beginPath(); g.moveTo(k, 0); g.lineTo(k, 128); g.moveTo(0, k); g.lineTo(128, k); g.stroke(); }
+      for (let k = 0; k < 600; k++) { g.fillStyle = "rgba(0,0,0,0.08)"; g.fillRect(Math.random() * 128, Math.random() * 128, 1, 1); }
+    } else if (style === "wood") {
+      for (let k = 0; k < 8; k++) { g.fillStyle = `rgba(0,0,0,${0.05 + (k % 3) * 0.04})`; g.fillRect(0, k * 16, 128, 15); g.fillStyle = "rgba(0,0,0,0.35)"; g.fillRect(0, k * 16 + 15, 128, 1); }
+    } else if (style === "concrete") {
+      for (let k = 0; k < 1500; k++) { g.fillStyle = Math.random() < 0.5 ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.07)"; g.fillRect(Math.random() * 128, Math.random() * 128, 2, 2); }
+      g.strokeStyle = "rgba(0,0,0,0.18)"; g.lineWidth = 1; g.strokeRect(0, 0, 128, 64); g.strokeRect(0, 64, 128, 64);
+    } else {
+      for (let k = 0; k < 800; k++) { g.fillStyle = Math.random() < 0.5 ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)"; g.fillRect(Math.random() * 128, Math.random() * 128, 2, 2); }
+    }
+  });
 }
 
 // does the segment (ax, ay) - (bx, by) cross the rectangle? (slab test)

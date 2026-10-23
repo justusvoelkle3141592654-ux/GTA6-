@@ -35,6 +35,7 @@ export interface Building {
   garage?: boolean;       // parking garage (its roof is reached over a ramp)
   low?: boolean;          // fences, rails, containers: cars stop, but it is no building to enter
   shell?: boolean;        // wall or furniture of a walkable shop (drawn by interiors3d, not as a city building)
+  zb?: number; zt?: number; // only solid between these heights (walls and rails of the mall's upper floors)
 }
 export interface Tree { x: number; y: number; r: number; rot: number; kind?: number; }
 export type BlockKind = "city" | "park" | "plaza" | "site" | "lot" | "garage" | "skate" | "townhall" | "stadium" | "mall";
@@ -274,14 +275,10 @@ export class World {
     this.extra(P.x1 - 8, gy - 54, 14, 16, hgt(82), "#8c867c", M); this.extra(P.x1 - 8, gy + 38, 14, 16, hgt(82), "#8c867c", M); // gate piers
     this.extra(P.x1 - 2, gy - 38, 4, 76, hgt(56), "#5c6168", M);                                                                 // the closed gate
     this.extra(P.x1 - 23, gy - 77, 18, 22, hgt(32), "#a39d92", M);                                                              // guard booth (inside)
-    // watch towers in the corners, two cell blocks in the yard
+    // watch towers in the corners (the walkable prison building and the yard: world/interiors.ts)
     for (const [x, y] of [[P.x0 + 30, P.y0 + 30], [P.x1 - 30, P.y0 + 30], [P.x0 + 30, P.y1 - 30], [P.x1 - 30, P.y1 - 30]]) {
       this.modelSpots.push({ id: "prison_tower", x, y, a: 0 });
       this.extra(x - 15, y - 15, 30, 30, hgt(118), "#8c867c", M);
-    }
-    for (const y of [P.y0 + 130, P.y1 - 130]) {
-      this.modelSpots.push({ id: "prison_block", x: P.x0 + 230, y, a: y < gy ? 0 : Math.PI }); // the doors look into the yard
-      this.extra(P.x0 + 150, y - 30, 160, 60, hgt(100), "#a39d92", M);
     }
     // gas station by the northern highway: shop, canopy columns, pumps, price sign
     const G = GAS_STATION;
@@ -499,9 +496,10 @@ export class World {
     return this.roads.isRoad(x, y);
   }
 
-  isSolid(x: number, y: number, pad = 0): boolean {
+  // z: height of whoever asks (feet); walls with a height range (zb..zt) only stop what overlaps it (without z: the ground)
+  isSolid(x: number, y: number, pad = 0, z = 0): boolean {
     const b = this.blockAt(x, y);
-    if (b) for (const bd of b.buildings) if (x > bd.x - pad && x < bd.x + bd.w + pad && y > bd.y - pad && y < bd.y + bd.h + pad) return true;
+    if (b) for (const bd of b.buildings) if (x > bd.x - pad && x < bd.x + bd.w + pad && y > bd.y - pad && y < bd.y + bd.h + pad && (bd.zb === undefined || (z + 20 > bd.zb && z < bd.zt! - 4))) return true;
     const ex = this.extrasAt(x, y);
     if (ex) for (const e of ex) if (x > e.x - pad && x < e.x + e.w + pad && y > e.y - pad && y < e.y + e.h + pad) return true;
     return false;

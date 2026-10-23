@@ -29,6 +29,7 @@ export class Spawner {
     const g = this.g;
     if (!this.allowed) return "Nur in der Open World";
     if (g.missions.active || g.hide.active) return "Nicht während einer Mission oder des Versteckspiels";
+    if (g.jailT > 0) return "Nicht im Gefängnis";
     const fx = g.fx, fy = g.fy;
     let x = fx, y = fy;
     if (isBoat(model)) {

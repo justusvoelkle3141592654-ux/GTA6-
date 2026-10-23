@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 
-export type ModelId = "armor" | "jet" | "jet_police" | "heli" | "heli_police" | "prison_wall" | "prison_tower" | "prison_gate" | "prison_block" | "gas_station" | "cash";
+export type ModelId = "armor" | "jet" | "jet_police" | "heli" | "heli_police" | "prison_wall" | "prison_tower" | "prison_gate" | "gas_station" | "cash";
 const FILES = import.meta.glob("../assets/models/*.glb", { query: "?url", import: "default", eager: true }) as Record<string, string>;
 
 const ready = new Map<ModelId, THREE.Group>();

@@ -12,6 +12,7 @@ import Hud from "./ui/Hud";
 import ShopMenu from "./ui/ShopMenu";
 import DialogBox from "./ui/DialogBox";
 import WeaponWheel from "./ui/WeaponWheel";
+import LiftPanel from "./ui/LiftPanel";
 import StartScreen from "./ui/StartScreen";
 import GameOver, { DIFF_LABEL } from "./ui/GameOver";
 import PauseMenu, { type PauseTab } from "./ui/PauseMenu";
@@ -172,6 +173,7 @@ export default function App() {
       {state === "modal" && g && modal?.kind === "dialog" && <DialogBox d={modal} isTouch={isTouch} onNext={() => g.dialogNext()} />}
       {state === "modal" && g && modal?.kind === "phone" && <Phone game={g} onClose={() => g.closeModal()} />}
       {state === "modal" && g && modal?.kind === "call" && <IncomingCall game={g} from={modal.from} text={modal.text} job={modal.job} onClose={() => { /* closed by the game */ }} />}
+      {state === "modal" && g && modal?.kind === "lift" && <LiftPanel d={modal} onPick={(i) => g.liftTo(i)} onClose={() => g.closeModal()} />}
       {state === "modal" && g && modal?.kind === "wheel" && <WeaponWheel owned={g.inv.owned} current={g.inv.current} onPick={(w) => { g.setWeapon(w); g.closeModal(); }} onClose={() => g.closeModal()} />}
 
       {state === "menu" && !glError && (

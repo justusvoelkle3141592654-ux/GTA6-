@@ -1,5 +1,5 @@
 import { sfx } from "../audio/audio";
-import { World, MAP_MIN, MAP_MAX, WATER_Y, EDGE_LAND, SOFT_EDGE, TUNNEL, ROAD, inCity, isWater, isEdgeSea, edgeDist, terrainH, terrainGrad, tunnelAt, roofOf, PAD_S0, PAD_S1, type Building } from "../world/world";
+import { World, MAP_MIN, MAP_MAX, WATER_Y, EDGE_LAND, SOFT_EDGE, TUNNEL, ROAD, inCity, isWater, isEdgeSea, edgeDist, terrainH, terrainGrad, tunnelAt, roofOf, PAD_S0, PAD_S1, PRISON, type Building } from "../world/world";
 import { Renderer3D } from "../render/renderer3d";
 import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, CRIMES, type Crime } from "../ai/wanted";
@@ -8,7 +8,7 @@ import { PedSystem, PED_LIMIT, isPolice, type Civilian, type Team } from "../ai/
 import { Car, CARS, VEH_SCALE, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, isJet, isAircraft, isTwoWheel, hitCar, copyBody, repairBody, type CarDef, type FactionId } from "../vehicles/vehicles";
 import { Inventory, WEAPONS, WEAPON_DEFS, type Weapon } from "../gameplay/weapons";
 import { SHAPES, hasRig } from "../vehicles/carmodel";
-import { buildInteriors, interiorAt, interiorFloor, type Home, type Interior, type Seat } from "../world/interiors";
+import { buildInteriors, interiorAt, interiorFloor, interiorCeil, type Elevator, type Home, type Interior, type Seat } from "../world/interiors";
 import type { ActKind } from "../render/people3d";
 import { AUTOSAVE_EVERY, SAVE_VERSION, emptyProgress, emptyStats, writeSave, type Progress, type SaveData, type SaveResult, type SaveStats } from "./save";
 import { Traffic, PARKED_LIMIT } from "../ai/traffic";
@@ -39,7 +39,8 @@ export type ModalInfo =
   | { kind: "dialog"; speaker: string; text: string; color: string; index: number; count: number }
   | { kind: "wheel" }
   | { kind: "phone" }
-  | { kind: "call"; from: string; text: string; job: string };
+  | { kind: "call"; from: string; text: string; job: string }
+  | { kind: "lift"; floors: string[]; at: number };
 export interface DialogLine { speaker: string; text: string; color: string; }
 
 // what the shop overlay shows
@@ -330,6 +331,7 @@ export class Game {
       // dialogs advance with E / Enter / Space, other overlays close with Esc
       if (this.modal?.kind === "dialog" && (b.is("enter", k) || k === "Enter" || k === "Space")) this.dialogNext();
       else if (k === "Escape" && this.modal?.kind !== "dialog") this.closeModal();
+      else if (this.modal?.kind === "lift" && /^Digit[0-9]$/.test(k)) { const i = +k.slice(5); if (i < this.modal.floors.length && i !== this.modal.at) this.liftTo(i); }
       return;
     }
     if (b.is("pause", k) || k === "Escape") { if (this.state === "playing") this.pause(); else if (this.state === "paused") this.resume(); }
@@ -859,8 +861,8 @@ export class Game {
       const c = jail.cell;
       this.ped = newPed(c.spawn.x, c.spawn.y, Math.PI);
       this.jailT = JAIL_TIME;
-      this.r3d.resetCamera(0);
-      this.banner("HAFT", `${JAIL_TIME} Sekunden Zelle · −$${cost.toLocaleString("de-DE")} Kaution · auf der Pritsche schlafen lässt den Tag vergehen`, "#8a9098", 3.6);
+      this.r3d.resetCamera(Math.PI); // from the day room into the cell
+      this.banner("HAFT", `${JAIL_TIME} Sekunden Haft · −$${cost.toLocaleString("de-DE")} Kaution · das Gefängnis ist offen, auf der Pritsche schlafen lässt den Tag vergehen`, "#8a9098", 3.6);
       this.autosaveT = -1;
       return;
     }
@@ -1310,6 +1312,7 @@ export class Game {
   interact(): boolean {
     if (this.hide.interact()) return true;
     if (this.jobs.interact()) return true;
+    if (this.liftInteract()) return true;
     if (this.onFoot && this.inside) {
       const it = this.inside, pd = this.ped;
       if (this.seat) { this.seat = null; return true; }
@@ -1340,10 +1343,11 @@ export class Game {
     if (this.jailT < 0) return;
     const it = this.interiors.find((i) => i.cell), c = it?.cell, pd = this.ped;
     this.jailT -= dt;
-    this.objective = "Im Gefängnis – auf der Pritsche schlafen lässt die Zeit schneller vergehen"; this.objTimer = Math.max(0, this.jailT);
+    this.objective = "Im Gefängnis – Zellen, Mensa, Freizeitraum und Hof sind offen; auf der Pritsche in deiner Zelle schlafen lässt die Zeit schneller vergehen"; this.objTimer = Math.max(0, this.jailT);
     this.wanted.clear();
-    // the cell door stays shut
-    if (c) { pd.x = clamp(pd.x, c.x0 + 8, c.x1 - 8); pd.y = clamp(pd.y, c.y0 + 8, c.y1 - 8); }
+    // free inside the outer wall, but the gate stays shut (no flying or fetching a vehicle in here)
+    if (c) { pd.x = clamp(pd.x, PRISON.x0 + 10, PRISON.x1 - 10); pd.y = clamp(pd.y, PRISON.y0 + 10, PRISON.y1 - 10); }
+    if (this.flyMode) this.flyMode = false;
     if (this.jailT <= 0) this.release(false);
   }
   // out of prison: in front of the gate, a day later
@@ -1704,6 +1708,11 @@ export class Game {
     if (sp) return `Verstecken: ${SPOT_NAME[sp.kind]}`;
     const a = this.jobs.active;
     if (a?.kind === "trash" && this.onFoot && !a.carrying && a.bins.some((b) => !b.done && Math.hypot(b.x - this.fx, b.y - this.fy) < 26)) return "Mülltonne nehmen";
+    if (this.onFoot && this.inside?.elevator) {
+      const el = this.inside.elevator, pd = this.ped;
+      if (this.inLift(el, pd.x, pd.y)) return el.z === el.to ? "Aufzug: Etage wählen" : "";
+      if (pd.x > el.x0 - 6 && pd.x < el.x1 + 6 && pd.y > el.y1 && pd.y < el.y1 + 22) return "Aufzug rufen";
+    }
     if (this.onFoot && this.inside) {
       const it = this.inside, pd = this.ped;
       if (this.seat) return "Aufstehen";
@@ -1726,7 +1735,8 @@ export class Game {
     const it = z < 110 ? interiorAt(this.interiors, x, y) : null; // flying over a shop is not being inside
     if (it !== this.inside) {
       this.inside = it; this.insideT = 0; this.copsIn = 0; this.copT = 3;
-      if (it && it.kind !== "safehouse" && it.kind !== "jail" && this.state === "playing") this.setHint(`„Willkommen bei ${it.name}!“`, 2);
+      if (it && it.kind !== "safehouse" && !it.prison && this.state === "playing") this.setHint(`„Willkommen bei ${it.name}!“`, 2);
+      else if (it?.prison && this.state === "playing") this.setHint(it.name, 1.5);
     }
     if (!it) { this.seat = null; this.range = null; return; }
     this.insideT += dt;
@@ -1902,8 +1912,61 @@ export class Game {
     // tunnel walls: inside the bore you stay between them
     const tf = tunnelAt(TUNNEL.x, y);
     if (!isNaN(tf) && pd.z < tf + TUNNEL.clear && Math.abs(x - TUNNEL.x) > ROAD / 2 - 1 && Math.abs(x - TUNNEL.x) < TUNNEL.hw + 40) return true;
-    if (!w.isSolid(x, y, 7)) return false;
+    // the lift: its door is only open while the cabin stands at your floor
+    const el = this.liftNear(x, y);
+    if (el) {
+      const inNow = this.inLift(el, pd.x, pd.y), inNext = this.inLift(el, x, y);
+      if (inNow !== inNext && (el.z !== el.to || Math.abs(el.z - pd.z) > 3 || el.open < 0.8)) return true;
+    }
+    if (!w.isSolid(x, y, 7, pd.z)) return false;
     return !(this.ped.z > 30 && w.roofAt(x, y) <= this.ped.z + 4);
+  }
+  // ---------- the lift in the mall ----------
+  private liftNear(x: number, y: number): Elevator | null {
+    const el = this.inside?.elevator;
+    return el && x > el.x0 - 12 && x < el.x1 + 12 && y > el.y0 - 12 && y < el.y1 + 14 ? el : null;
+  }
+  private inLift(el: Elevator, x: number, y: number) { return x > el.x0 && x < el.x1 && y > el.y0 && y < el.y1; }
+  // the cabin moves to its target floor (you ride along when you stand in it), the door opens when it is there
+  private stepLift(dt: number) {
+    for (const it of this.interiors) {
+      const el = it.elevator;
+      if (!el) continue;
+      if (el.z !== el.to) {
+        el.open = Math.max(0, el.open - dt * 3);
+        if (el.open > 0) continue;
+        const was = el.z, d = el.to - el.z, step = Math.sign(d) * Math.min(Math.abs(d), 30 * dt);
+        el.z += step;
+        const pd = this.ped;
+        if (this.onFoot && this.inLift(el, pd.x, pd.y) && Math.abs(pd.z - was) < 4) { pd.z = el.z; pd.vz = 0; pd.air = false; pd.fallFrom = pd.z; }
+        if (el.z === el.to) sfx.beep();
+      } else el.open = Math.min(1, el.open + dt * 3);
+    }
+  }
+  // E in front of the lift calls it, E in the cabin opens the floor buttons
+  private liftInteract(): boolean {
+    const pd = this.ped, el = this.inside?.elevator;
+    if (!el || !this.onFoot) return false;
+    const fl = el.floors.findIndex((z) => Math.abs(z - pd.z) < 6);
+    if (this.inLift(el, pd.x, pd.y)) {
+      if (el.z !== el.to) return true;
+      this.openModal({ kind: "lift", floors: el.floors.map((_, i) => i === 0 ? "Erdgeschoss" : `${i}. Obergeschoss`), at: fl });
+      return true;
+    }
+    if (fl >= 0 && pd.x > el.x0 - 6 && pd.x < el.x1 + 6 && pd.y > el.y1 && pd.y < el.y1 + 22) {
+      if (el.z === el.floors[fl] && el.to === el.z) this.setHint("Der Aufzug ist da", 1.2);
+      else { el.to = el.floors[fl]; this.setHint("Aufzug kommt …", 1.5); sfx.beep(); }
+      return true;
+    }
+    return false;
+  }
+  // a button in the cabin was pressed
+  liftTo(i: number) {
+    const el = this.inside?.elevator;
+    this.closeModal();
+    if (!el || i < 0 || i >= el.floors.length) return;
+    el.to = el.floors[i];
+    if (el.to !== el.z) sfx.beep();
   }
 
   private updatePed(dt: number) {
@@ -1918,7 +1981,7 @@ export class Game {
       const nx = pd.x + pd.vx * dt, ny = pd.y + pd.vy * dt;
       if (!this.pedBlocked(nx, pd.y)) pd.x = nx; else pd.vx = 0;
       if (!this.pedBlocked(pd.x, ny)) pd.y = ny; else pd.vy = 0;
-      const gnd = Math.max(this.groundH(pd.x, pd.y, pd.z + 4), isWater(pd.x, pd.y) ? WATER_Y : -Infinity);
+      const gnd = Math.max(this.groundH(pd.x, pd.y, pd.z + 4), isWater(pd.x, pd.y) ? WATER_Y : -Infinity, interiorFloor(this.interiors, pd.x, pd.y, pd.z));
       pd.vz += (this.lift * 260 - pd.vz) * Math.min(1, dt * 6);
       pd.z = Math.min(2400, this.ceilingAt(pd.x, pd.y, pd.z, 28), Math.max(gnd, pd.z + pd.vz * dt));
       pd.air = pd.z > gnd + 3; pd.swim = false; pd.fallFrom = pd.z;
@@ -2059,6 +2122,7 @@ export class Game {
 
     if (playing && !this.ending) {
       this.updateInside(dt);
+      this.stepLift(dt);
       this.updateJail(dt);
       this.time += dt;
       const hours = (dt * 24) / (Math.max(1, currentSettings.dayMinutes) * 60);
@@ -2320,6 +2384,7 @@ export class Game {
   // ---------- fly mode, travel menu ----------
   flyMode = false;
   toggleFly() {
+    if (this.jailT > 0 && !this.flyMode) { this.setHint("Nicht im Gefängnis", 1.5); return false; }
     this.flyMode = !this.flyMode;
     if (!this.flyMode) {
       // back on the ground gently: no fall damage from up there
@@ -2351,7 +2416,7 @@ export class Game {
   // travel: places to go (shops: straight inside)
   flightTargets(): { id: string; name: string; group: "Läden" | "Stadtteile" | "Orte"; x: number; y: number }[] {
     const out: ReturnType<Game["flightTargets"]> = [];
-    for (const it of this.interiors) if (!it.cell) out.push({ id: "shop:" + it.id, name: it.name, group: "Läden", x: it.door.x + 22, y: it.door.y });
+    for (const it of this.interiors) if (!it.prison) out.push({ id: "shop:" + it.id, name: it.name, group: "Läden", x: it.door.x + 22, y: it.door.y });
     for (const l of districtLabels()) { const q = this.world.nearestSafeRoad(l.x, l.y); out.push({ id: "dist:" + l.id, name: DISTRICTS[l.id].name, group: "Stadtteile", x: q.x, y: q.y }); }
     for (const pl of this.places) if (pl.kind === "dock" || pl.kind === "heliport" || pl.id === "stuntpark" || pl.id === "hospital" || pl.id === "police") out.push({ id: "place:" + pl.id, name: pl.name, group: "Orte", x: pl.x, y: pl.y });
     if (this.waypoint) { const q = this.world.nearestSafeRoad(this.waypoint.x, this.waypoint.y); out.push({ id: "wp", name: "Mein Wegpunkt", group: "Orte", x: q.x, y: q.y }); }
@@ -2362,6 +2427,7 @@ export class Game {
   travelTo(id: string, instant: boolean): string {
     if (!this.rules.city) return "Nur in der Open World";
     if (this.missions.active || this.hide.active) return "Nicht während einer Mission oder des Versteckspiels";
+    if (this.jailT > 0) return "Nicht im Gefängnis";
     const d = this.flightTargets().find((q) => q.id === id);
     if (!d) return "";
     if (!this.onFoot) { const p = this.player; p.vx = 0; p.vy = 0; p.throttle = 0; this.exitCar(false); }
@@ -2483,7 +2549,9 @@ export class Game {
   // inside a room the ceiling stops you (fly mode): highest height for something of height h, Infinity elsewhere
   ceilingAt(x: number, y: number, z: number, h: number): number {
     const it = interiorAt(this.interiors, x, y);
-    return it && z < it.H - 4 ? Math.max(0, it.H - 2 - h) : Infinity;
+    if (!it || z >= it.H - 4) return Infinity;
+    const c = interiorCeil(it, x, y, z);
+    return Math.max(0, c - 2 - h);
   }
   // standing / driving on a bridge deck (not under it)
   onDeck(x: number, y: number, z: number) { const br = this.world.roads.bridgeAt(x, y, 4); return !!br && z >= br.h - 14; }
@@ -2609,6 +2677,7 @@ export class Game {
     const bs = w.nearbyBuildings(c.x, c.y, this.tmpB); // buildings, containers, fences, rails
     for (const b of bs) {
       if (c.z >= roofOf(b) - 25) continue; // car is up on/above the roof: no wall
+      if (b.zb !== undefined && c.z + 15 < b.zb) continue; // a rail or wall of an upper floor (mall): the car is below it
       const pen = this.boxRect(c, b.x, b.y, b.x + b.w, b.y + b.h);
       if (pen > 0) resolve(this.entrySide(c, b.x, b.y, b.x + b.w, b.y + b.h, pen));
     }

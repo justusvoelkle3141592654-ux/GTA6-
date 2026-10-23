@@ -57,6 +57,51 @@ export const SHAPES: Partial<Record<CarModel, Shape>> = {
 };
 export const hasRig = (m: CarModel) => !!SHAPES[m];
 
+// the look of each model (body sculpting and the parts that make it recognisable)
+type Grille = "mesh" | "bars" | "split" | "truck" | "none";
+type Lamp = "slim" | "round" | "square";
+type Tail = "bar" | "split" | "vertical" | "round";
+type Rim = "five" | "multi" | "mesh" | "steel" | "dish" | "wire" | "turbine";
+interface Style {
+  crease: number;   // shoulder line: how far it stands out (0 soft .. 1 sharp)
+  flare: number;    // wheel arches: extra width over the wheels
+  grille: Grille; lamp: Lamp; tail: Tail; rim: Rim; rimCol: string;
+  chrome?: boolean; // chrome window line and bumper strips
+  spoiler?: "lip" | "duck" | "wing"; skirts?: boolean; diffuser?: boolean; rails?: boolean; scoop?: boolean; antenna?: boolean; pipes?: 1 | 2;
+}
+const ST = (o: Partial<Style>): Style => ({ crease: 0.5, flare: 0.5, grille: "bars", lamp: "slim", tail: "split", rim: "five", rimCol: "#c9ced8", ...o });
+const STYLE: Partial<Record<CarModel, Style>> = {
+  sedan: ST({ chrome: true, antenna: true }),
+  taxi: ST({ rim: "steel", rimCol: "#b8bec8", antenna: true }),
+  police: ST({ grille: "mesh", rim: "steel", rimCol: "#9aa3ad", antenna: true }),
+  unmarked: ST({ grille: "mesh", rim: "five", rimCol: "#3a3d45", antenna: true }),
+  sport: ST({ crease: 0.8, flare: 1.1, grille: "split", tail: "bar", rim: "multi", spoiler: "duck", skirts: true, diffuser: true, pipes: 2 }),
+  super: ST({ crease: 0.9, flare: 1.3, grille: "none", tail: "bar", rim: "turbine", rimCol: "#2a2d33", skirts: true, diffuser: true, spoiler: "lip", pipes: 2 }),
+  muscle: ST({ crease: 0.9, flare: 1.0, grille: "bars", lamp: "round", tail: "round", rim: "dish", scoop: true, pipes: 2, chrome: true }),
+  roadster: ST({ crease: 0.6, flare: 0.9, grille: "mesh", tail: "split", rim: "multi", pipes: 2 }),
+  compact: ST({ crease: 0.4, flare: 0.5, grille: "mesh", tail: "vertical", rim: "five", spoiler: "lip" }),
+  wagon: ST({ crease: 0.5, flare: 0.4, tail: "vertical", rails: true, chrome: true }),
+  suv: ST({ crease: 0.6, flare: 1.0, grille: "truck", lamp: "square", tail: "vertical", rim: "multi", rails: true }),
+  offroad: ST({ crease: 0.3, flare: 1.5, grille: "bars", lamp: "round", tail: "vertical", rim: "steel", rimCol: "#3a3d45" }),
+  pickup: ST({ crease: 0.5, flare: 1.1, grille: "truck", lamp: "square", tail: "vertical", rim: "steel", rimCol: "#c9ced8" }),
+  van: ST({ crease: 0.2, flare: 0.3, grille: "bars", lamp: "square", tail: "vertical", rim: "steel" }),
+  ambulance: ST({ crease: 0.2, flare: 0.3, grille: "bars", lamp: "square", tail: "vertical", rim: "steel" }),
+  icecream: ST({ crease: 0.2, flare: 0.3, grille: "bars", lamp: "round", tail: "vertical", rim: "steel", chrome: true }),
+  swat: ST({ crease: 0.3, flare: 0.6, grille: "mesh", lamp: "square", tail: "vertical", rim: "steel", rimCol: "#2a2d33" }),
+  truck: ST({ crease: 0.2, flare: 0.3, grille: "truck", lamp: "square", tail: "vertical", rim: "steel" }),
+  garbage: ST({ crease: 0.2, flare: 0.3, grille: "truck", lamp: "square", tail: "vertical", rim: "steel" }),
+  tow: ST({ crease: 0.2, flare: 0.3, grille: "truck", lamp: "square", tail: "vertical", rim: "steel" }),
+  fire: ST({ crease: 0.2, flare: 0.3, grille: "truck", lamp: "square", tail: "vertical", rim: "steel", chrome: true }),
+  hyper: ST({ crease: 1, flare: 1.4, grille: "none", tail: "bar", rim: "turbine", rimCol: "#15161b", skirts: true, diffuser: true, pipes: 2 }),
+  lowrider: ST({ crease: 0.7, flare: 0.3, grille: "bars", lamp: "round", tail: "round", rim: "wire", rimCol: "#e8ecf2", chrome: true }),
+  monster: ST({ crease: 0.5, flare: 0.2, grille: "truck", lamp: "square", tail: "vertical", rim: "steel", rimCol: "#ffd23f" }),
+  formula: ST({ crease: 0, flare: 0, grille: "none", tail: "split", rim: "multi", rimCol: "#2a2d33" }),
+  interceptor: ST({ crease: 0.9, flare: 1.2, grille: "mesh", tail: "bar", rim: "multi", rimCol: "#2a2d33", skirts: true, diffuser: true, pipes: 2 }),
+  polsuv: ST({ crease: 0.6, flare: 1.0, grille: "mesh", lamp: "square", tail: "vertical", rim: "steel", rimCol: "#3a3d45", rails: true }),
+  bus: ST({ crease: 0.1, flare: 0.1, grille: "none", lamp: "square", tail: "vertical", rim: "steel" }),
+};
+const styleOf = (m: CarModel) => STYLE[m] ?? ST({});
+
 // --------------------------------------------------------------------------- body loft
 const smooth = (t: number) => t * t * (3 - 2 * t);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -86,13 +131,22 @@ function halfW(s: Shape, x: number) {
 }
 
 interface Loft { pos: number[]; idx: number[]; }
-const ringPts = (hw: number, bot: number, top: number) => {
-  const mid = bot + (top - bot) * 0.5, sh = top - Math.min(1.6, (top - bot) * 0.25);
-  // from the bottom middle round one side to the top middle (z positive = right side)
-  return [[0, bot - 0.2], [hw * 0.86, bot], [hw * 0.985, bot + 0.9], [hw, mid], [hw * 0.985, sh], [hw * 0.9, top], [hw * 0.45, top + 0.35], [0, top + 0.45]];
+// one cross section: from the bottom middle round one side to the top middle (z positive = right side).
+// fl: the wheel arch flare (the lower body is wider there), cr: how sharp the shoulder line stands out
+const RING_N = 10;
+const ringPts = (hw: number, bot: number, top: number, fl: number, cr: number) => {
+  const h = top - bot, crease = bot + h * 0.66, sh = top - Math.min(1.6, h * 0.22), lw = hw + fl;
+  return [[0, bot - 0.2], [lw * 0.84, bot], [lw * 0.975, bot + Math.min(0.9, h * 0.15)], [lw, bot + (crease - bot) * 0.42], [hw + fl * 0.45, crease - Math.min(1.2, h * 0.14)],
+    [hw + 0.12 + cr * 0.28, crease], [hw * (0.985 - cr * 0.012), sh], [hw * 0.9, top], [hw * 0.46, top + 0.38], [0, top + 0.48]];
 };
+// the flare over a wheel at x (0 away from the wheels)
+function flareAt(s: Shape, x: number, amount: number) {
+  let f = 0;
+  for (const wx of [s.wf, s.wr]) { const d = Math.abs(x - wx) / ((s.R + 1.4) * 1.9); if (d < 1) f = Math.max(f, smooth(1 - d)); }
+  return f * amount;
+}
 // faces of station segments that belong to a door are put into their own lists
-function buildBody(s: Shape, doorRanges: [number, number][]) {
+function buildBody(s: Shape, doorRanges: [number, number][], st: Style) {
   const hl = s.L / 2, N = 46;
   const xs: number[] = [];
   for (let i = 0; i <= N; i++) { const t = i / N; xs.push(-hl + s.L * (0.5 - 0.5 * Math.cos(t * Math.PI))); } // denser at the ends
@@ -103,7 +157,7 @@ function buildBody(s: Shape, doorRanges: [number, number][]) {
   const rings: number[][][] = X.map((x) => {
     const end = 1 - smooth(clamp01((Math.abs(x) - (hl - 2.5)) / 2.5)) * 0.18;
     const hw = halfW(s, x) * end, bot = bottomAt(s, x), top = topAt(s, x) * (0.96 + 0.04 * end);
-    const one = ringPts(hw, bot, top);
+    const one = ringPts(hw, bot, top, flareAt(s, x, st.flare) * end, st.crease * end);
     const full = [...one, ...one.slice(1, -1).reverse().map(([z, y]) => [-z, y])]; // mirrored left side
     return full.map(([z, y]) => [x, y, z]);
   });
@@ -122,10 +176,10 @@ function buildBody(s: Shape, doorRanges: [number, number][]) {
     const cabin = xm < cabF && xm > cabR;
     for (let k = 0; k < M; k++) {
       const k2 = (k + 1) % M;
-      if (cabin && k >= 5 && k <= 8) continue;
+      if (cabin && k >= RING_N - 3 && k <= RING_N) continue;
       const a = rings[i][k], b = rings[i + 1][k], c = rings[i + 1][k2], d = rings[i][k2];
       // side faces between the sill and the shoulder inside a door range go to that door
-      const side = (k >= 1 && k <= 4) ? 1 : (k >= M - 5 && k <= M - 2) ? -1 : 0;
+      const side = (k >= 1 && k <= RING_N - 4) ? 1 : (k >= M - (RING_N - 3) && k <= M - 2) ? -1 : 0;
       let target = body;
       doorRanges.forEach((dr, j) => { if (side && xm > dr[0] && xm < dr[1] && Math.sign(j % 2 ? -1 : 1) === side) target = doors[j]; });
       // counter-clockwise seen from outside: the normals point out on both sides
@@ -198,7 +252,8 @@ export function rigGeo(model: CarModel): RigGeo {
   const dF: [number, number] = [Math.min(front, s.roofF + 2) - (s.doors === 2 ? s.L * 0.24 : s.L * 0.18), Math.min(front, s.roofF + 2)];
   const dR: [number, number] = [Math.max(s.wr + 0.5, dF[0] - s.L * 0.2), dF[0] - 0.3];
   const ranges: [number, number][] = s.doors === 4 ? [dF, dF, dR, dR] : [dF, dF];
-  const lb = buildBody(s, ranges);
+  const st = styleOf(model);
+  const lb = buildBody(s, ranges, st);
   // ---- greenhouse: roof, pillars, glass
   const T: THREE.BufferGeometry[] = [], P: THREE.BufferGeometry[] = [], G: { geo: THREE.BufferGeometry; id: string }[] = [], X: THREE.BufferGeometry[] = [];
   const bw = hw * 0.93, rw = hw * s.taper;
@@ -255,35 +310,125 @@ export function rigGeo(model: CarModel): RigGeo {
     gGeo.translate(-hingeX, 0, -hingeZ);
     doors.push({ geo: dGeo, glass: gGeo, hinge: [hingeX, hingeZ], side });
   });
-  // ---- trim: grille, bumpers (separate), sills, mirrors, wipers base, exhaust, mud flaps
-  const yb = s.y0 + 0.5;
-  T.push(bx(0.6, Math.max(1.5, (s.nose - s.y0) * 0.45), s.W * 0.46, hl - 0.2, s.y0 + (s.nose - s.y0) * 0.45, 0, "#0c0d10"));
-  for (let i = 0; i < 4; i++) T.push(bx(0.4, 0.25, s.W * 0.44, hl, s.y0 + (s.nose - s.y0) * (0.3 + i * 0.08), 0, "#5a5e66"));
-  for (const z of [-1, 1]) {
-    T.push(bx(2.4, 1.4, 1.2, s.cowlX - 1, s.belt + 1.4, z * (hw + 1.0), "#1a1b1f")); // mirror housing
-    T.push(bx(0.3, 1.1, 1.0, s.cowlX - 1.2, s.belt + 1.4, z * (hw + 1.6), "#9fb0c0", 1.3));
-    T.push(bx(s.L * 0.5, 0.8, 0.6, (s.wf + s.wr) / 2, s.y0 + 0.4, z * (hw - 0.2), "#121316")); // sill
+  // ---- trim: grille, intakes, bumpers (separate), sills, mirrors, exhaust tips, diffuser, spoilers, roof rails
+  const yb = s.y0 + 0.5, fh = s.nose - s.y0, big = !!s.box || s.L > 60, low = s.nose < 7;
+  const chrome = "#dfe4ea", black = "#0c0d10", dark = "#1a1b1f";
+  const gw = s.W * (st.grille === "truck" ? 0.62 : 0.42), gy = s.y0 + fh * (st.grille === "truck" ? 0.55 : 0.5), gh = Math.max(1.4, fh * (st.grille === "truck" ? 0.62 : 0.34));
+  switch (st.grille) {
+    case "mesh": {
+      T.push(bx(0.6, gh, gw, hl - 0.3, gy, 0, black));
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 7; j++) T.push(bx(0.3, gh / 5, gw / 9, hl - 0.05, gy - gh / 2 + gh * (i + 0.7) / 4.4, -gw / 2 + gw * (j + 0.6) / 7.2, "#2c2f36"));
+      T.push(bx(0.4, 0.4, gw + 0.6, hl - 0.1, gy + gh / 2 + 0.2, 0, st.chrome ? chrome : "#2a2d34"));
+      break;
+    }
+    case "bars": {
+      T.push(bx(0.6, gh, gw, hl - 0.3, gy, 0, black));
+      for (let i = 0; i < 4; i++) T.push(bx(0.4, 0.28, gw - 0.4, hl, gy - gh / 2 + gh * (i + 0.5) / 4, 0, st.chrome ? chrome : "#5a5e66"));
+      T.push(bx(0.5, gh + 0.5, 0.5, hl - 0.05, gy, gw / 2, st.chrome ? chrome : "#3a3d45"), bx(0.5, gh + 0.5, 0.5, hl - 0.05, gy, -gw / 2, st.chrome ? chrome : "#3a3d45"));
+      break;
+    }
+    case "split": {
+      // a slim upper opening and two big lower intakes either side
+      T.push(bx(0.6, Math.max(0.8, gh * 0.4), gw * 0.7, hl - 0.25, gy + gh * 0.25, 0, black));
+      for (const z of [-1, 1]) T.push(bx(0.6, gh * 0.9, s.W * 0.18, hl - 0.4, s.y0 + 1.6, z * s.W * 0.3, black), bx(0.3, 0.3, s.W * 0.18, hl - 0.1, s.y0 + 1.6, z * s.W * 0.3, "#3a3d45"));
+      break;
+    }
+    case "truck": {
+      // big chrome grille with vertical bars and a badge
+      T.push(bx(0.8, gh, gw, hl - 0.2, gy, 0, "#15161b"), bx(0.6, gh + 0.8, gw + 0.8, hl - 0.35, gy, 0, chrome));
+      for (let j = 0; j < 9; j++) T.push(bx(0.4, gh - 0.6, 0.35, hl + 0.05, gy, -gw / 2 + gw * (j + 0.5) / 9, "#b8bec8"));
+      T.push(bx(0.4, 0.5, gw - 0.6, hl + 0.1, gy, 0, "#b8bec8"), cy(0.7, 0.3, hl + 0.3, gy + gh * 0.25, 0, "#e8ecf2", "x", 12));
+      break;
+    }
+    case "none": T.push(bx(0.5, Math.max(0.8, fh * 0.22), s.W * 0.56, hl - 0.4, s.y0 + 1.4, 0, black)); break;
   }
-  // bumpers in body colour with a dark lower lip (they take the paint material)
-  const big = !!s.box || s.L > 60;
+  if (!big && st.grille !== "truck") T.push(cy(0.55, 0.3, hl + 0.05, gy + gh / 2 + 0.6, 0, "#e8ecf2", "x", 12)); // badge
+  for (const z of [-1, 1]) {
+    // mirrors on a short arm, glass towards the back
+    T.push(bx(0.8, 0.5, 1.2, s.cowlX - 1.3, s.belt + 0.9, z * (hw + 0.2), dark));
+    T.push(col(new THREE.SphereGeometry(1, 10, 8).scale(1.3, 0.85, 1.05).translate(s.cowlX - 1.6, s.belt + 1.5, z * (hw + 1.2)), dark));
+    T.push(bx(0.2, 1.0, 1.4, s.cowlX - 2.8, s.belt + 1.5, z * (hw + 1.2), "#9fb0c0", 1.3));
+    T.push(bx(s.L * 0.5, 0.8, 0.6, (s.wf + s.wr) / 2, s.y0 + 0.4, z * (hw - 0.2), "#121316")); // sill
+    if (st.skirts) T.push(bx(s.wf - s.wr - s.R * 2.4, 1.2, 0.8, (s.wf + s.wr) / 2, s.y0 + 0.2, z * (hw + st.flare * 0.4), black));
+    if (st.chrome) T.push(bx(s.cowlX - (s.box ? s.box.x1 : s.deckX), 0.28, 0.25, (s.cowlX + (s.box ? s.box.x1 : s.deckX)) / 2, s.belt + 0.25, z * (hw * 0.93 + 0.1), chrome)); // window line
+  }
+  // bumpers in body colour (big vehicles: grey plastic) with a dark lower lip; they take the paint material
   const bc = big ? "#3a3d45" : "#ffffff";
-  const bumperF = merge([bx(2.6, 2.6, s.W * 0.86, hl - 0.9, yb + 0.8, 0, bc), bx(1.4, 0.8, s.W * 0.8, hl - 0.6, yb - 0.6, 0, "#1a1b1f"), bx(0.6, 0.9, s.W * 0.4, hl + 0.35, yb + 0.6, 0, "#121316")]);
-  const bumperR = merge([bx(2.6, 2.8, s.W * 0.86, -hl + 0.9, yb + 1, 0, bc), bx(1.4, 0.8, s.W * 0.8, -hl + 0.6, yb - 0.4, 0, "#1a1b1f")]);
-  T.push(cy(0.55, 3, -hl - 0.6, s.y0 + 0.8, hw * 0.55, "#7a7f88", "x", 8)); // exhaust
-  // ---- lights (lenses; housings and reflectors are trim)
+  const bF: THREE.BufferGeometry[] = [col(new THREE.CapsuleGeometry(1.3, s.W * 0.78, 4, 10).rotateX(Math.PI / 2).translate(hl - 1.0, yb + 0.9, 0), bc), bx(1.4, 0.8, s.W * 0.8, hl - 0.6, yb - 0.6, 0, dark)];
+  if (!low) bF.push(bx(0.6, 0.9, s.W * 0.4, hl + 0.35, yb + 0.6, 0, "#121316"));
+  if (st.chrome) bF.push(bx(0.4, 0.35, s.W * 0.7, hl + 0.3, yb + 1.3, 0, chrome));
+  const bR: THREE.BufferGeometry[] = [col(new THREE.CapsuleGeometry(1.4, s.W * 0.78, 4, 10).rotateX(Math.PI / 2).translate(-hl + 1.0, yb + 1.1, 0), bc), bx(1.4, 0.8, s.W * 0.8, -hl + 0.6, yb - 0.4, 0, dark)];
+  if (st.chrome) bR.push(bx(0.4, 0.35, s.W * 0.7, -hl - 0.3, yb + 1.5, 0, chrome));
+  const bumperF = merge(bF), bumperR = merge(bR);
+  // exhaust tips (one or a pair), a diffuser with fins for the fast ones
+  const pipes = st.pipes ?? 1;
+  for (let k = 0; k < pipes; k++) { const z = pipes === 1 ? hw * 0.55 : (k ? -1 : 1) * hw * 0.42; T.push(cy(0.6, 2.6, -hl - 0.5, s.y0 + 0.9, z, "#8a8f98", "x", 10), cy(0.45, 2.7, -hl - 0.55, s.y0 + 0.9, z, "#15161b", "x", 10)); }
+  if (st.diffuser) { T.push(bx(2.6, 0.5, s.W * 0.6, -hl + 0.6, s.y0 + 0.2, 0, black)); for (let k = -2; k <= 2; k++) T.push(bx(2.4, 1.4, 0.3, -hl + 0.6, s.y0 + 0.8, k * s.W * 0.1, black)); }
+  if (st.spoiler === "duck") X.push(col(new THREE.BoxGeometry(2.2, 0.5, s.W * 0.82).rotateZ(0.35).translate(-hl + 1.4, s.tail + 0.4, 0), "#ffffff"));
+  if (st.spoiler === "lip") X.push(bx(1.6, 0.35, s.W * 0.7, s.box ? s.box.x1 : -hl + 1.2, (s.box ? s.roof : s.tail) + 0.2, 0, "#ffffff"));
+  if (st.rails && !s.open) for (const z of [-1, 1]) { T.push(bx(s.roofF - (s.box ? s.box.x1 : s.roofR) - 2, 0.5, 0.6, (s.roofF + (s.box ? s.box.x1 : s.roofR)) / 2, s.roof + 1.1, z * hw * s.taper * 0.85, "#2a2d33")); for (const x of [s.roofF - 1.5, (s.box ? s.box.x1 : s.roofR) + 1.5]) T.push(bx(0.8, 0.9, 0.6, x, s.roof + 0.6, z * hw * s.taper * 0.85, "#2a2d33")); }
+  if (st.scoop) { X.push(bx(7, 1.4, s.W * 0.26, (s.cowlX + hl) / 2 - 2, topAt(s, (s.cowlX + hl) / 2) + 0.4, 0, "#ffffff")); T.push(bx(0.4, 0.9, s.W * 0.22, (s.cowlX + hl) / 2 + 1.5, topAt(s, (s.cowlX + hl) / 2) + 0.6, 0, black)); }
+  if (st.antenna && !s.open) T.push(cy(0.08, 5, s.roofR + 3, s.roof + 2.4, 0, "#15161b", "y", 4));
+  // ---- lights (lenses; housings and reflectors are trim). Lenses sit on the nose and tail surfaces
   const lz = hw - Math.min(4, s.W * 0.2), ly = Math.min(s.nose - 1.6, s.y0 + 4.5);
   const head: THREE.BufferGeometry[] = [], tail: THREE.BufferGeometry[] = [], brake: THREE.BufferGeometry[] = [], rev: THREE.BufferGeometry[] = [], indL: THREE.BufferGeometry[] = [], indR: THREE.BufferGeometry[] = [];
   const ty = Math.min(s.tail - 1.5, s.y0 + 6);
+  const ind = (z: number, l: THREE.BufferGeometry[]) => { (z < 0 ? indL : indR).push(...l); };
   for (const z of [-1, 1]) {
-    T.push(bx(1.2, 2.3, 5.4, hl - 0.6, ly, z * lz, "#2a2d34"), bx(0.5, 1.6, 4.6, hl - 0.15, ly, z * lz, "#cfd5de", 1.4)); // housing + chrome reflector
-    head.push(bx(0.4, 1.7, 3.2, hl + 0.15, ly, z * (lz + 0.6), "#ffffff"));
-    indL.push(...(z < 0 ? [bx(0.4, 1.0, 1.2, hl + 0.1, ly, z * (lz - 2.6), "#ffffff"), bx(0.4, 1.0, 1.2, -hl - 0.1, ty, z * (lz - 2.8), "#ffffff")] : []));
-    indR.push(...(z > 0 ? [bx(0.4, 1.0, 1.2, hl + 0.1, ly, z * (lz - 2.6), "#ffffff"), bx(0.4, 1.0, 1.2, -hl - 0.1, ty, z * (lz - 2.8), "#ffffff")] : []));
-    T.push(bx(1.0, 2.6, 6, -hl + 0.5, ty, z * lz, "#2a1012"));
-    tail.push(bx(0.4, 1.4, 5, -hl - 0.15, ty + 0.5, z * lz, "#ffffff"));
-    brake.push(bx(0.4, 0.9, 5, -hl - 0.17, ty - 0.6, z * lz, "#ffffff"));
-    rev.push(bx(0.4, 0.8, 1.6, -hl - 0.18, ty - 0.6, z * (lz - 3.6), "#ffffff"));
+    if (st.lamp === "slim") {
+      // a slim swept lamp with an LED strip below it
+      const wy = -z * 0.32;
+      T.push(bx(1.2, 1.9, 5.6, hl - 0.7, ly + 0.4, z * lz, "#15171c", 1, 0, wy), bx(0.4, 1.1, 4.4, hl - 0.25, ly + 0.5, z * lz, "#cfd5de", 1.4, 0, wy));
+      head.push(bx(0.35, 1.0, 3.4, hl, ly + 0.5, z * (lz + 0.4), "#ffffff", 1, 0, wy), bx(0.3, 0.3, 4.4, hl + 0.02, ly - 0.4, z * lz, "#ffffff", 1, 0, wy));
+      ind(z, [bx(0.35, 0.5, 1.4, hl - 0.1, ly + 0.5, z * (lz - 2.4), "#ffffff", 1, 0, wy)]);
+    } else if (st.lamp === "round") {
+      // twin round lamps in chrome rings
+      const n = s.W > 19 ? 2 : 1;
+      for (let k = 0; k < n; k++) {
+        const zz = z * (lz + (n === 2 ? (k ? -1.4 : 1.2) : 0.4)), r = n === 2 ? 1.05 : 1.4;
+        T.push(cy(r + 0.35, 0.8, hl - 0.25, ly + 0.3, zz, chrome, "x", 16));
+        head.push(cy(r, 0.5, hl + 0.05, ly + 0.3, zz, "#ffffff", "x", 16));
+      }
+      ind(z, [bx(0.4, 0.8, 1.2, hl, ly - 1.4, z * (lz - 1), "#ffffff")]);
+    } else {
+      // square lamps (vans, trucks, the big SUVs)
+      T.push(bx(1.2, 2.8, 4.8, hl - 0.6, ly + 0.3, z * lz, "#2a2d34"), bx(0.5, 2.2, 4.2, hl - 0.15, ly + 0.3, z * lz, "#cfd5de", 1.4));
+      head.push(bx(0.4, 1.9, 3.0, hl + 0.15, ly + 0.4, z * (lz + 0.5), "#ffffff"));
+      ind(z, [bx(0.4, 1.9, 0.9, hl + 0.12, ly + 0.4, z * (lz - 1.8), "#ffffff")]);
+    }
+    // the rear: a light bar across the tail, two clusters, tall vertical lamps or round ones
+    if (st.tail === "bar") {
+      T.push(bx(0.8, 1.6, s.W * 0.42, -hl + 0.4, ty + 0.6, z * s.W * 0.22, "#2a1012"));
+      tail.push(bx(0.3, 0.5, s.W * 0.42, -hl - 0.1, ty + 0.9, z * s.W * 0.22, "#ffffff"));
+      brake.push(bx(0.3, 0.6, 3.6, -hl - 0.12, ty + 0.3, z * lz, "#ffffff"));
+      rev.push(bx(0.3, 0.6, 1.4, -hl - 0.14, ty + 0.3, z * (lz - 3.2), "#ffffff"));
+      ind(z, [bx(0.3, 0.4, 1.6, -hl - 0.12, ty + 1.4, z * lz, "#ffffff")]);
+    } else if (st.tail === "vertical") {
+      const th = Math.min(8, s.tail - s.y0 - 3), tz = hw - 1.6;
+      T.push(bx(1.0, th + 0.8, 2.4, -hl + 0.5, s.y0 + 3 + th / 2, z * tz, "#2a1012"));
+      tail.push(bx(0.4, th * 0.45, 2.0, -hl - 0.12, s.y0 + 3 + th * 0.75, z * tz, "#ffffff"));
+      brake.push(bx(0.4, th * 0.3, 2.0, -hl - 0.14, s.y0 + 3 + th * 0.4, z * tz, "#ffffff"));
+      rev.push(bx(0.4, th * 0.15, 2.0, -hl - 0.15, s.y0 + 3 + th * 0.12, z * tz, "#ffffff"));
+      ind(z, [bx(0.4, 0.6, 2.0, -hl - 0.13, s.y0 + 3 + th * 0.97, z * tz, "#ffffff")]);
+    } else if (st.tail === "round") {
+      for (const k of [0, 1]) {
+        const zz = z * (lz + (k ? -2.6 : 0.4));
+        T.push(cy(1.35, 0.8, -hl + 0.3, ty + 0.3, zz, chrome, "x", 14));
+        (k ? brake : tail).push(cy(1.05, 0.5, -hl - 0.05, ty + 0.3, zz, "#ffffff", "x", 14));
+      }
+      rev.push(bx(0.4, 0.6, 1.2, -hl - 0.1, ty - 1.4, z * (lz - 1), "#ffffff"));
+      ind(z, [bx(0.4, 0.6, 1.4, -hl - 0.1, ty - 1.4, z * (lz + 0.8), "#ffffff")]);
+    } else {
+      T.push(bx(1.0, 2.6, 6, -hl + 0.5, ty, z * lz, "#2a1012"));
+      tail.push(bx(0.4, 1.4, 5, -hl - 0.15, ty + 0.5, z * lz, "#ffffff"));
+      brake.push(bx(0.4, 0.9, 5, -hl - 0.17, ty - 0.6, z * lz, "#ffffff"));
+      rev.push(bx(0.4, 0.8, 1.6, -hl - 0.18, ty - 0.6, z * (lz - 3.6), "#ffffff"));
+      ind(z, [bx(0.4, 1.0, 1.2, -hl - 0.1, ty, z * (lz - 2.8), "#ffffff")]);
+    }
   }
+  if (st.tail === "bar") tail.push(bx(0.3, 0.3, s.W * 0.1, -hl - 0.1, ty + 0.9, 0, "#ffffff"));
+  // the third brake light under the rear window / on the roof edge of boxes
+  if (!s.open && !s.box && !big) brake.push(bx(0.4, 0.35, s.W * 0.2, s.roofR - 0.4, s.roof - 0.6, 0, "#ffffff"));
   // ---- interior: seats, dashboard, centre console, gear lever, rear view mirror
   const I: THREE.BufferGeometry[] = [];
   // hip height so that a seated person fits under the roof; low cars recline the seats (lean)
@@ -313,19 +458,34 @@ export function rigGeo(model: CarModel): RigGeo {
   // wipers (two, they sweep in the rain)
   const wn = new THREE.Vector3(s.roof - s.belt, s.cowlX - s.roofF, 0).normalize(); // windshield normal
   const wipers = [-1, 1].map((k) => ({ geo: col(new THREE.BoxGeometry(0.35, 0.3, s.W * 0.36).translate(0, 0.25, s.W * 0.18), "#101114"), x: s.cowlX - 0.2, y: s.belt + 0.45, z: k * hw * 0.2 - hw * 0.42, n: wn }));
-  // ---- wheels: tyre with tread, rim with spokes and a brake disc
+  // ---- wheels: tyre with tread and a sidewall, rim (style per model) with a brake disc and calliper
   const R = s.R, wd = s.wd ?? Math.max(1.8, R * 0.62);
-  const tire = new THREE.CylinderGeometry(R, R, wd, 26, 1, false); tire.rotateX(Math.PI / 2);
-  const tread = new THREE.TorusGeometry(R - 0.2, 0.32, 4, 26); // rounded shoulders
-  const tGeo = mergeGeometries([col(tire, "#121214"), col(tread.clone().translate(0, 0, wd / 2 - 0.2), "#121214"), col(tread.translate(0, 0, -wd / 2 + 0.2), "#121214")])!;
-  const RP: THREE.BufferGeometry[] = [];
+  const tire = new THREE.CylinderGeometry(R, R, wd, 28, 1, false); tire.rotateX(Math.PI / 2);
+  const tread = new THREE.TorusGeometry(R - 0.2, 0.32, 4, 28); // rounded shoulders
+  const TP = [col(tire, "#121214"), col(tread.clone().translate(0, 0, wd / 2 - 0.2), "#121214"), col(tread.translate(0, 0, -wd / 2 + 0.2), "#121214")];
+  for (let k = 0; k < 14; k++) { const g = new THREE.BoxGeometry(0.5, 0.25, wd * 0.9); g.translate(0, R + 0.02, 0); g.rotateZ((k / 14) * Math.PI * 2); TP.push(col(g, "#1c1c20")); } // tread blocks
+  const tGeo = merge(TP);
+  const RP: THREE.BufferGeometry[] = [], rc = st.rimCol, rr = R * (st.rim === "steel" ? 0.6 : st.rim === "dish" || st.rim === "wire" ? 0.66 : 0.72);
+  const disc = (sd: number, r: number, h: number, z: number, c: string, seg = 22) => RP.push(col(new THREE.CylinderGeometry(r, r, h, seg).rotateX(Math.PI / 2).translate(0, 0, sd * z), c));
+  const spoke = (sd: number, len: number, w: number, a: number, z: number, c: string, off = 0) => { const g = new THREE.BoxGeometry(len, w, 0.35); g.translate(off + len / 2, 0, 0); g.rotateZ(a); g.translate(0, 0, sd * z); RP.push(col(g, c)); };
   for (const sd of [-1, 1]) {
-    RP.push(col(new THREE.CylinderGeometry(R * 0.68, R * 0.68, 0.3, 22).rotateX(Math.PI / 2).translate(0, 0, sd * (wd / 2 + 0.05)), "#9da3ad"));
-    RP.push(col(new THREE.CylinderGeometry(R * 0.56, R * 0.56, 0.35, 22).rotateX(Math.PI / 2).translate(0, 0, sd * (wd / 2 + 0.12)), "#2a2c31")); // dark between the spokes
-    for (let k = 0; k < 5; k++) { const g = new THREE.BoxGeometry(R * 0.56, 0.55, 0.4); g.translate(R * 0.28, 0, 0); g.rotateZ((k / 5) * Math.PI * 2); g.translate(0, 0, sd * (wd / 2 + 0.22)); RP.push(col(g, "#c9ced8")); }
-    RP.push(col(new THREE.CylinderGeometry(R * 0.16, R * 0.16, 0.5, 10).rotateX(Math.PI / 2).translate(0, 0, sd * (wd / 2 + 0.3)), "#7a7f88"));
-    RP.push(col(new THREE.CylinderGeometry(R * 0.48, R * 0.48, 0.25, 18).rotateX(Math.PI / 2).translate(0, 0, sd * (wd / 2 - 0.4)), "#6a6e76")); // brake disc
+    const face = wd / 2 + 0.05;
+    disc(sd, rr, 0.3, face, rc); // the rim lip
+    disc(sd, rr * 0.9, 0.35, face + 0.06, st.rim === "steel" ? rc : "#202226"); // the dark between the spokes
+    switch (st.rim) {
+      case "five": for (let k = 0; k < 5; k++) for (const o of [-0.16, 0.16]) spoke(sd, rr * 0.75, 0.36, (k / 5) * Math.PI * 2 + o, face + 0.18, rc, rr * 0.12); break;
+      case "multi": for (let k = 0; k < 10; k++) spoke(sd, rr * 0.8, 0.26, (k / 10) * Math.PI * 2, face + 0.18, rc, rr * 0.1); break;
+      case "mesh": for (let k = 0; k < 8; k++) { spoke(sd, rr * 0.82, 0.2, (k / 8) * Math.PI * 2 + 0.3, face + 0.18, rc); spoke(sd, rr * 0.82, 0.2, (k / 8) * Math.PI * 2 - 0.3, face + 0.2, rc); } break;
+      case "turbine": for (let k = 0; k < 12; k++) { const g = new THREE.BoxGeometry(rr * 0.75, 0.5, 0.3); g.translate(rr * 0.45, 0, 0); g.rotateY(0.35); g.rotateZ((k / 12) * Math.PI * 2); g.translate(0, 0, sd * (face + 0.2)); RP.push(col(g, k % 2 ? rc : "#e8ecf2")); } break;
+      case "dish": disc(sd, rr * 0.88, 0.4, face + 0.12, "#e8ecf2"); for (let k = 0; k < 5; k++) spoke(sd, rr * 0.5, 0.6, (k / 5) * Math.PI * 2, face + 0.3, "#9aa3ad", rr * 0.2); break;
+      case "wire": disc(sd, rr * 0.9, 0.3, face + 0.08, "#c9ced8"); for (let k = 0; k < 24; k++) spoke(sd, rr * 0.85, 0.08, (k / 24) * Math.PI * 2 + (k % 2 ? 0.25 : -0.25), face + 0.15 + (k % 2) * 0.05, "#e8ecf2", 0); break;
+      case "steel": for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2; RP.push(col(new THREE.CylinderGeometry(0.35, 0.35, 0.5, 8).rotateX(Math.PI / 2).translate(Math.cos(a) * rr * 0.55, Math.sin(a) * rr * 0.55, sd * (face + 0.1)), "#15161b")); } disc(sd, rr * 0.4, 0.5, face + 0.2, "#c9ced8", 14); break;
+    }
+    disc(sd, R * 0.15, 0.55, face + 0.3, "#7a7f88", 10); // hub
+    disc(sd, R * 0.5, 0.25, wd / 2 - 0.4, "#6a6e76", 20); // brake disc
   }
+  // a brake calliper (red on the fast ones) at the top of the disc
+  RP.push(bx(R * 0.3, R * 0.18, 0.6, 0, R * 0.42, wd / 2 - 0.55, st.diffuser ? "#c0392b" : "#3a3d45"), bx(R * 0.3, R * 0.18, 0.6, 0, R * 0.42, -wd / 2 + 0.55, st.diffuser ? "#c0392b" : "#3a3d45"));
   const rim = merge(RP);
   const wz = s.track ?? hw - wd / 2 - 0.2;
   const wheels = [{ x: s.wf, z: wz, front: true }, { x: s.wf, z: -wz, front: true }, { x: s.wr, z: wz, front: false }, { x: s.wr, z: -wz, front: false }];
