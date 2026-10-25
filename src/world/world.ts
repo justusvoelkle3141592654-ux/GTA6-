@@ -676,11 +676,11 @@ export class World {
       const wx = MAP_MIN + (px + 0.5) / s, wy = MAP_MIN + (py + 0.5) / s;
       const mi = Math.min(MASK_N - 1, Math.floor((wx - MAP_MIN) / cell)), mj = Math.min(MASK_N - 1, Math.floor((wy - MAP_MIN) / cell));
       let R: number, G: number, B: number;
-      if (wm[mj * MASK_N + mi] === 1 && isWater(wx, wy)) { const deep = Math.min(1, -terrainH(wx, wy) / 90); R = 18 - deep * 10; G = 92 - deep * 40; B = 130 - deep * 30; }
+      if (wm[mj * MASK_N + mi] === 1 && isWater(wx, wy)) { const deep = Math.min(1, -terrainH(wx, wy) / 90); R = 62 - deep * 20; G = 104 - deep * 30; B = 138 - deep * 30; }
       else {
         const h = terrainH(wx, wy), t = Math.max(0, Math.min(1, h / 600));
         if (h < 6 && !inCity(wx, wy) && cityDist(wx, wy) > 200) { R = 200; G = 182; B = 130; }
-        else { R = 50 + t * 150; G = 100 + t * 110; B = 50 + t * 160; }
+        else { R = 72 + t * 120; G = 98 + t * 100; B = 70 + t * 130; }
       }
       const k = (py * size + px) * 4;
       D[k] = R; D[k + 1] = G; D[k + 2] = B; D[k + 3] = 255;
@@ -694,12 +694,12 @@ export class World {
     // highways, bridges
     g.lineCap = "round"; g.lineJoin = "round";
     for (const rd of this.roads.roads) {
-      g.strokeStyle = "#4a4660"; g.lineWidth = Math.max(2, ROAD * s);
+      g.strokeStyle = "#a3a7ad"; g.lineWidth = Math.max(2, ROAD * s);
       g.beginPath();
       for (let p = 0; p < rd.n; p += 3) { const X = ox + rd.pts[p * 2] * s, Y = ox + rd.pts[p * 2 + 1] * s; if (p) g.lineTo(X, Y); else g.moveTo(X, Y); }
       g.stroke();
     }
-    g.strokeStyle = "#b9b4c8"; g.lineWidth = Math.max(1.5, ROAD * s * 0.7);
+    g.strokeStyle = "#c9cdd3"; g.lineWidth = Math.max(1.5, ROAD * s * 0.7);
     for (const b of this.roads.bridges) {
       g.beginPath();
       if (b.alongX) { g.moveTo(ox + b.s0 * s, ox + b.c * s); g.lineTo(ox + b.s1 * s, ox + b.c * s); }
@@ -707,13 +707,14 @@ export class World {
       g.stroke();
     }
     // city streets and blocks
-    g.fillStyle = "#3a3550";
+    // GTA radar colours: light grey streets, dark grey blocks, green parks
+    g.fillStyle = "#a3a7ad";
     g.fillRect(ox, ox, WORLD * s, WORLD * s);
     for (const b of this.blocks) {
       const x0 = ox + (b.bx * BLOCK + ROAD) * s, y0 = ox + (b.by * BLOCK + ROAD) * s, sz = (BLOCK - ROAD) * s;
-      g.fillStyle = b.kind === "park" || b.kind === "skate" ? "#1f5a3a" : b.kind === "site" ? "#5a4a32" : b.kind === "lot" ? "#2a2838" : "#1a1428";
+      g.fillStyle = b.kind === "park" || b.kind === "skate" ? "#41704a" : b.kind === "site" ? "#5e5848" : b.kind === "lot" ? "#4a4d53" : "#3c4046";
       g.fillRect(x0, y0, sz, sz);
-      g.fillStyle = "#2c2342";
+      g.fillStyle = "#52565d";
       for (const bd of b.buildings) g.fillRect(ox + bd.x * s, ox + bd.y * s, bd.w * s, bd.h * s);
     }
     g.fillStyle = "#8a6a4a";
