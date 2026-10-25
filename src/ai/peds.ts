@@ -33,6 +33,8 @@ export interface Civilian {
   target: number;                 // ped it fights (-1: the player)
   getUp: number;                  // knocked down but not hurt: stands up after this many seconds (0: stays down)
   air: boolean; spin: number;     // flying after a hit (ragdoll), how fast the body tumbles
+  react: "" | "handsUp" | "call"; // cowering with the hands up (a gun points at them) / calling the police
+  aimT: number;                   // how long your gun has been pointing at them
 }
 
 // what the pedestrian system needs from the game
@@ -41,7 +43,8 @@ export interface PedHost {
   readonly fx: number; readonly fy: number; readonly fz: number;
   readonly fvx: number; readonly fvy: number;
   readonly onFoot: boolean;
-  readonly ped: { x: number; y: number };
+  readonly ped: { x: number; y: number; a: number; vx: number; vy: number; sprint: boolean };
+  readonly gunOut: boolean; // on foot with a gun in the hand (people put their hands up when it points at them)
   readonly stars: number;
   pedHit(c: Civilian, by: Car, speed: number): void;
   enemyShot(x: number, y: number, z: number, a: number, dmg: number, team: Team, src: number): void;
@@ -99,7 +102,7 @@ function newCiv(id: number): Civilian {
     bx: 0, by: 0, corner: 0, dir: 1, cross: false, offPath: false, tx: 0, ty: 0,
     speed: 30, walk: 0, look: 0, scale: 1, threatX: 0, threatY: 0,
     role: "civ", faction: null, hp: 30, maxHp: 30, armed: false, shootT: 0, shirt: "", pants: "", tag: "",
-    id, target: -1, getUp: 0, air: false, spin: 0,
+    id, target: -1, getUp: 0, air: false, spin: 0, react: "", aimT: 0,
   };
 }
 
@@ -134,7 +137,7 @@ export class PedSystem {
     c.state = "walk"; c.t = 0; c.dur = 0; c.cross = false; c.offPath = false;
     c.speed = rnd(WALK_V[0], WALK_V[1]); c.walk = Math.random() * 10;
     c.look = Math.floor(Math.random() * 1e6); c.scale = rnd(0.9, 1.06);
-    c.role = "civ"; c.faction = null; c.hp = c.maxHp = 30; c.armed = false; c.shootT = 0; c.shirt = ""; c.pants = ""; c.tag = ""; c.target = -1; c.getUp = 0;
+    c.role = "civ"; c.faction = null; c.hp = c.maxHp = 30; c.armed = false; c.shootT = 0; c.shirt = ""; c.pants = ""; c.tag = ""; c.target = -1; c.getUp = 0; c.react = ""; c.aimT = 0;
   }
 
   // police on foot, gang members, mission peds
@@ -271,7 +274,7 @@ export class PedSystem {
   private scare(c: Civilian, x: number, y: number) {
     if (c.state === "down" || c.state === "attack" || isPolice(c.role) || c.tag === "fare" || c.role === "seeker") return;
     if (c.role === "gang") return; // gangs do not run away (they fight back when hurt, see damage)
-    c.threatX = x; c.threatY = y;
+    c.threatX = x; c.threatY = y; c.react = "";
     const wasFleeing = c.state === "flee";
     c.state = "flee"; c.t = 0; c.dur = rnd(5, 8);
     c.speed = rnd(FLEE_V[0], FLEE_V[1]);
@@ -460,10 +463,13 @@ export class PedSystem {
         const o = this.findOpponent(c);
         if (o >= 0) { c.target = o; c.state = "attack"; c.t = 0; const cop = this.list[o]; if (cop.target < 0) { cop.target = c.id; cop.state = "attack"; } }
       }
+      if (c.role === "civ" && !c.tag) this.react(c, dt, h, dist);
       switch (c.state) {
         case "idle":
           c.vx = 0; c.vy = 0;
           if (c.role === "gang") c.a += Math.sin(c.t * 0.7 + c.look) * dt * 0.6;
+          // a passer-by that stopped for a moment walks on
+          if (c.role === "civ" && c.dur > 0 && c.t > c.dur) { c.state = "walk"; c.t = 0; c.dur = 0; }
           break;
         case "attack":
           this.attack(c, dt, h, dist);
@@ -481,12 +487,69 @@ export class PedSystem {
           break;
         case "cower":
           c.vx = 0; c.vy = 0;
+          if (c.react === "handsUp") c.a = Math.atan2(h.ped.y - c.y, h.ped.x - c.x); // keeps looking at the gun
           if (c.t > c.dur) this.scare(c, c.threatX, c.threatY);
           break;
       }
-      if (c.state === "walk" || c.state === "wait" || c.state === "idle") this.watchTraffic(c, h);
+      if (c.state === "walk" || c.state === "wait" || c.state === "idle" || c.state === "flee") this.watchTraffic(c, h);
       this.hitByCars(c, h);
-      if (h.onFoot) this.pushFrom(c, h.ped.x, h.ped.y, 10);
+      if (h.onFoot) this.bump(c, h);
+    }
+    this.separate();
+  }
+
+  // how passers-by react to you and to what happens around them
+  private react(c: Civilian, dt: number, h: PedHost, dist: number) {
+    const pd = h.ped;
+    // a gun has been pointing at them for a moment (you stand or walk slowly): hands up, then they run as soon as they can
+    const aimed = h.onFoot && h.gunOut && dist < 130 && Math.hypot(pd.vx, pd.vy) < 45 && (c.state === "walk" || c.state === "idle" || c.state === "wait")
+      && Math.abs(wrap(Math.atan2(c.y - pd.y, c.x - pd.x) - pd.a)) < 0.25;
+    c.aimT = aimed ? c.aimT + dt : 0;
+    if (c.aimT > 0.7 && this.world.lineClear(pd.x, pd.y, c.x, c.y, 30)) {
+      c.state = "cower"; c.react = "handsUp"; c.t = 0; c.dur = rnd(2, 3.5); c.threatX = pd.x; c.threatY = pd.y; c.cross = false; c.vx = c.vy = 0; c.aimT = 0;
+      return;
+    }
+    // somebody close lies on the ground: some run, some call the police (cowering with the phone at the ear)
+    if ((c.state === "walk" || c.state === "idle") && Math.random() < dt * 2) {
+      for (const o of this.list) {
+        if (!o.active || o.state !== "down" || o === c || o.t > 6) continue;
+        if (Math.hypot(o.x - c.x, o.y - c.y) > 160 || !this.world.lineClear(c.x, c.y, o.x, o.y, 40)) continue;
+        if (Math.random() < 0.4) { c.state = "cower"; c.react = "call"; c.t = 0; c.dur = rnd(3.5, 5.5); c.threatX = o.x; c.threatY = o.y; c.cross = false; c.a = Math.atan2(o.y - c.y, o.x - c.x); }
+        else this.scare(c, o.x, o.y);
+        return;
+      }
+    }
+    // walking: now and then a short stop (phone, cigarette, looking around)
+    if (c.state === "walk" && !c.cross && !c.offPath && inCity(c.x, c.y) && Math.random() < dt / 45) { c.state = "idle"; c.t = 0; c.dur = rnd(2.5, 6); c.vx = c.vy = 0; }
+  }
+
+  // you run into somebody: walking you just push them aside, sprinting they stumble and fall
+  private bump(c: Civilian, h: PedHost) {
+    const pd = h.ped, dx = c.x - pd.x, dy = c.y - pd.y, d = Math.hypot(dx, dy), v = Math.hypot(pd.vx, pd.vy);
+    if (d < 9 && pd.sprint && v > 70 && c.state !== "attack" && !c.armed && c.role !== "seeker" && !c.tag) {
+      this.knockDown(c, pd.vx * 0.7, pd.vy * 0.7, 45);
+      c.getUp = rnd(1.4, 2.2); c.threatX = pd.x; c.threatY = pd.y;
+      return;
+    }
+    this.pushFrom(c, pd.x, pd.y, 10);
+  }
+
+  // people keep a little distance to each other instead of walking through one another
+  private separate() {
+    const L = this.list, R = 7;
+    for (let i = 0; i < L.length; i++) {
+      const a = L[i];
+      if (!a.active || a.state === "down") continue;
+      for (let j = i + 1; j < L.length; j++) {
+        const b = L[j];
+        if (!b.active || b.state === "down") continue;
+        const dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy;
+        if (d2 >= R * R || d2 < 1e-4 || Math.abs(a.z - b.z) > 12) continue;
+        const d = Math.sqrt(d2), k = ((R - d) / d) * 0.5;
+        const ax = a.x - dx * k, ay = a.y - dy * k, bx = b.x + dx * k, by = b.y + dy * k;
+        if (!this.blocked(ax, ay)) { a.x = ax; a.y = ay; }
+        if (!this.blocked(bx, by)) { b.x = bx; b.y = by; }
+      }
     }
   }
 
@@ -600,7 +663,18 @@ export class PedSystem {
       if (sp < DODGE_SPEED) continue;
       const dx = c.x - car.x, dy = c.y - car.y, d = Math.hypot(dx, dy);
       if (d > DODGE_DIST || d < 1) continue;
-      if ((car.vx * dx + car.vy * dy) / (sp * d) > 0.8) { this.scare(c, car.x, car.y); return; }
+      if ((car.vx * dx + car.vy * dy) / (sp * d) > 0.8) {
+        // close and fast: a jump to the side (they land and get up again), otherwise they just run
+        const lat = (car.vx * dy - car.vy * dx) / sp; // which side of the car's path they are on
+        if (d < 75 && sp > 200 && Math.random() < 0.6) {
+          const side = lat >= 0 ? -1 : 1, nx = -car.vy / sp * side, ny = car.vx / sp * side;
+          this.knockDown(c, nx * 150, ny * 150, 70);
+          c.getUp = rnd(1.2, 1.8); c.threatX = car.x; c.threatY = car.y;
+          return;
+        }
+        if (c.state !== "flee") this.scare(c, car.x, car.y);
+        return;
+      }
     }
   }
 

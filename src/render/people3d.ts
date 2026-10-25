@@ -20,6 +20,14 @@ export function outfitLook(i: number, style?: Style): Look {
 
 // walking, running, sprinting blended by speed (see HumanRig.move)
 function locomote(r: HumanRig, sp: number, _sprint: boolean, panic = false) { r.move(sp, panic); }
+// close to you, a passer-by turns the head (and the eyes) towards you
+function lookAtYou(r: HumanRig, c: Civilian, px: number, py: number) {
+  const d = Math.hypot(px - c.x, py - c.y);
+  if (d > 70 || d < 4) return;
+  const rel = wrapA(Math.atan2(py - c.y, px - c.x) - c.a);
+  if (Math.abs(rel) > 1.9) return; // behind them: they do not see you
+  r.lookYaw = clamp(-rel, -1, 1); r.eyeYaw = clamp(-rel - r.lookYaw, -0.4, 0.4);
+}
 
 const gunMats = {
   metal: new THREE.MeshStandardMaterial({ color: 0x23252c, metalness: 0.7, roughness: 0.35 }),
@@ -186,6 +194,7 @@ export class CrowdFigures {
   // camera position (x, y on the map), list of all peds; returns the peds drawn here (the instanced crowd skips them)
   update(list: readonly Civilian[], visible: boolean, camX: number, camY: number, px: number, py: number, dt: number) {
     this.drawn.clear();
+    this.px = px; this.py = py;
     const cand: [number, number][] = [];
     if (visible) for (const c of list) {
       if (!c || !c.active) continue;
@@ -220,8 +229,9 @@ export class CrowdFigures {
     }
   }
 
+  private px = 0; private py = 0; // where you are (people look at you)
   private animate(s: Slot, c: Civilian, list: readonly Civilian[], d: number, dt: number) {
-    const r = s.rig, root = r.root;
+    const r = s.rig, root = r.root, px = this.px, py = this.py;
     root.visible = true;
     const scale = r.look.height * c.scale * PERSON_SCALE;
     root.scale.setScalar(scale);
@@ -259,9 +269,13 @@ export class CrowdFigures {
     if (s.getup && r.done("getup") && r.done("getupFront")) s.getup = false;
     if (s.getup) { /* keep getting up */ }
     else switch (c.state) {
-      case "walk": locomote(r, sp, false); if (c.role === "seeker") upper = "lookAround"; break;
+      case "walk": locomote(r, sp, false); if (c.role === "seeker") upper = "lookAround"; else lookAtYou(r, c, px, py); break;
       case "flee": locomote(r, Math.max(sp, 70), false, c.look % 2 === 0); break;
-      case "cower": r.play(c.tag === "hiding" ? "crouch" : "cower", 0.2); break;
+      case "cower":
+        if (c.react === "handsUp") r.play("handsUp", 0.2);
+        else if (c.react === "call") { r.play("idle", 0.3); upper = "phone"; prop = "phone"; } // calling the police
+        else r.play(c.tag === "hiding" ? "crouch" : "cower", 0.2);
+        break;
       case "down":
         if (c.t < 0.45 && sp > 40) r.play("ragdoll", 0.1);
         else r.play(r.current === "fallBack" || r.current === "lying" ? (r.done("fallBack") ? "lying" : "fallBack") : "fallBack", 0.12);
@@ -287,6 +301,7 @@ export class CrowdFigures {
           r.lookYaw = clamp(-rel, -1.1, 1.1); r.eyeYaw = clamp(-rel - r.lookYaw, -0.4, 0.4);
         } else if (v === 1) { upper = "phone"; prop = "phone"; }
         else if (v === 2) { upper = "smoke"; prop = "cig"; }
+        else lookAtYou(r, c, px, py); // nothing to do: they look at you when you come close
       }
     }
     s.prev = c.state;

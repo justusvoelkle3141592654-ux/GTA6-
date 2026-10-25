@@ -356,6 +356,8 @@ export class Game {
   get fy() { return this.onFoot ? this.ped.y : this.player.y; }
   get fz() { return this.onFoot ? this.ped.z : this.player.z; }
   get fa() { return this.onFoot ? this.ped.a : this.player.a; }
+  // on foot with a gun in the hand (passers-by put their hands up when it points at them)
+  get gunOut() { return this.onFoot && WEAPON_DEFS[this.inv.current].kind === "gun" && !this.ped.dead; }
   get fvx() { return this.onFoot ? this.ped.vx : this.player.vx; }
   get fvy() { return this.onFoot ? this.ped.vy : this.player.vy; }
   get fspeed() { return Math.hypot(this.fvx, this.fvy); }
