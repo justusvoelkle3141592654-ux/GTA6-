@@ -12,7 +12,7 @@ const TITLE: Record<Place["kind"], string> = {
   hospital: "Klinik", police: "Wache", gunshop: "Waffenladen", workshop: "Werkstatt & Lackiererei", clothes: "Kleidung",
   food: "Imbiss", safehouse: "Safehouse", contact: "", dock: "Bootssteg", heliport: "Heliport", park: "Park", job: "Job",
   market: "Supermarkt", cardealer: "Autohaus", barber: "Friseur & Tattoo", mall: "Foodcourt", club: "Nachtclub", home: "Wohnung", prison: "Haftanstalt",
-  gas: "Tankstelle & 24/7-Shop", bar: "Bar", pharmacy: "Apotheke", boats: "Bootshändler", planes: "Flugzeughändler", electronics: "Elektronik & Handys",
+  gas: "Tankstelle & 24/7-Shop", bar: "Bar", pharmacy: "Apotheke", boats: "Bootshändler", planes: "Flugzeughändler", electronics: "Elektronik & Handys", house: "Wohnhaus",
 };
 const Head = ({ children }: { children: React.ReactNode }) => <div className="pt-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/50">{children}</div>;
 

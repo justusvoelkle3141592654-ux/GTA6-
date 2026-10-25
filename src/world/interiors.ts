@@ -8,7 +8,8 @@ import type { Place } from "./places";
 
 export type InteriorKind = "gun" | "boutique" | "taco" | "burger" | "workshop" | "safehouse" | "market" | "cardealer" | "barber" | "mall"
   | "hospital" | "police" | "garage" | "cafe" | "office" | "harbor" | "precinct" | "club" | "loft" | "tower" | "jail" | "mess" | "rec"
-  | "gas247" | "bar" | "pharmacy" | "boats" | "planes";
+  | "gas247" | "bar" | "pharmacy" | "boats" | "planes"
+  | "flat" | "family" | "student" | "studio"; // homes of the people in town (walk in, nothing to buy)
 // k "f:<kind>": a piece from the furniture library (render/furniture.ts); w, d are its size before turning by a
 // (a = 0: the front looks south (+y), PI/2 west, PI north, -PI/2 east)
 export interface Prop { k: string; x: number; y: number; w: number; d: number; h: number; a?: number; z?: number; lv?: number; c?: string; c2?: string; solid?: boolean }
@@ -70,6 +71,8 @@ const KIND_OF: Record<string, [InteriorKind, number, number]> = {
   hospital: ["hospital", 170, 150], police: ["police", 160, 140], lou: ["garage", 150, 130], marisol: ["cafe", 130, 120], dock: ["office", 120, 110],
   ines: ["harbor", 130, 120], ruiz: ["precinct", 120, 110], club: ["club", 170, 150], loft: ["loft", 160, 140],
   bar: ["bar", 150, 130], pharmacy: ["pharmacy", 120, 110], boats: ["boats", 170, 170], planes: ["planes", 170, 170],
+  house1: ["flat", 170, 150], house2: ["family", 170, 150], house3: ["student", 170, 150], house4: ["studio", 170, 150],
+  house5: ["flat", 170, 150], house6: ["family", 170, 150], house7: ["student", 170, 150], house8: ["studio", 170, 150],
 };
 const WIDE_DOOR = new Set<InteriorKind>(["workshop", "garage"]);
 
@@ -768,6 +771,74 @@ function furnish(it: Interior) {
       break;
     }
     case "mall": case "tower": case "jail": case "mess": case "rec": break;
+    case "flat": case "family": case "student": case "studio": {
+      // a home: hall and living room by the door, bathroom in the north-west corner, a study nook, a bedroom
+      // (kids' room, shared room or music room) in the north-east, the kitchen with the dining table in the south-east
+      const k = it.kind, xm = x0 + 92;
+      const v = {
+        flat: { floor: ["parquet", "#a07850"], wall: ["wallpaper", "#e4dccc"], sofa: "#4a5a7a", bed: "#8a3a3a", wood: "#6a4a32", rug: ["#c9a070", "#8a4a3a"], art: "#2bb3ff" },
+        family: { floor: ["wood", "#8a6a4a"], wall: ["paint", "#efe6d2"], sofa: "#7a5a3a", bed: "#3a6a9a", wood: "#8a5a32", rug: ["#b84a3a", "#e8c070"], art: "#ffd23f" },
+        student: { floor: ["planks", "#9a7a5a"], wall: ["paint", "#cfe3d8"], sofa: "#3a7a5a", bed: "#7a3a8a", wood: "#5a4a3a", rug: ["#3a5a8a", "#e8e4dc"], art: "#ff3cac" },
+        studio: { floor: ["concrete", "#8a8580"], wall: ["brick", "#a8604a"], sofa: "#2a2d33", bed: "#c9a227", wood: "#3a2a1a", rug: ["#2a2d33", "#c9a227"], art: "#ff8a1f" },
+      }[k];
+      // walls of the rooms (gaps are the doors)
+      wall(x0 + 42, y0, 3, 24); wall(x0, y0 + 42, 45, 3);         // bathroom
+      wall(xm, y0, 3, cy - y0 - 22); wall(xm, cy, x1 - xm, 3);    // bedroom
+      // bathroom
+      F(k === "family" ? "bath" : "shower", x0 + 12, y0 + 12, 18, k === "family" ? 30 : 16, SOUTH, "#f4f2ee");
+      F("toilet", x0 + 32, y0 + 8, 10, 12, SOUTH); F("basin", x0 + 6, y0 + 33, 12, 8, EAST, "#f4f2ee"); F("mirror", x0 + 0.6, y0 + 33, 12, 1, EAST, "#c9d8e8", { z: 18 });
+      // living room (south-west): sofa facing the TV on the south wall
+      if (k === "studio") F("sofaL", x0 + 46, cy + 24, 48, 24, SOUTH, v.sofa, { solid: true });
+      else F("sofa", x0 + 46, cy + 22, 40, 15, SOUTH, v.sofa, { solid: true });
+      F(k === "family" ? "fireplace" : "tv", x0 + 46, y1 - 6, 34, 10, NORTH, v.wood, { solid: true });
+      if (k === "family") F("tv", x0 + 80, y1 - 6, 20, 8, NORTH, "#3a2a1a", { solid: true });
+      if (k === "student") { F("lowtable", x0 + 46, cy + 42, 24, 12, 0, v.wood); F("cushion", x0 + 30, cy + 48, 10, 10); F("cushion", x0 + 62, cy + 48, 10, 10); }
+      else F("coffee", x0 + 46, cy + 42, 22, 10, 0, v.wood);
+      F("rug", x0 + 46, cy + 40, 58, 34, 0, v.rug[0], { c2: v.rug[1] });
+      F("armchair", x0 + 12, cy + 46, 14, 14, EAST, v.sofa);
+      F("plant", x0 + 8, y1 - 8, 10, 10); F("lamp", x0 + 84, cy + 14, 8, 8);
+      it.seats.push({ x: x0 + 40, y: cy + 27, a: Math.PI / 2 }, { x: x0 + 52, y: cy + 27, a: Math.PI / 2 });
+      // study nook (north, between bathroom and bedroom)
+      if (k === "family") F("piano", x0 + 68, y0 + 8, 30, 12, SOUTH, "#1a1a1f", { solid: true });
+      else {
+        F("desk", x0 + 68, y0 + 8, 28, 12, SOUTH, v.wood, { solid: true }); F("pc", x0 + 68, y0 + 7, 10, 6, SOUTH, "#2a2d33", { z: 12 });
+        F("chair", x0 + 68, y0 + 20, 9, 9, NORTH, "#2a2d33");
+      }
+      F("shelf", xm - 6, y0 + 34, 26, 8, EAST, v.wood, { solid: true });
+      // bedroom (north-east)
+      if (k === "family") {
+        F("bunk", x1 - 22, y0 + 24, 26, 36, WEST, v.bed, { solid: true }); F("boxes", xm + 14, y0 + 50, 12, 12, 0.4); F("cubeshelf", xm + 24, y0 + 6, 24, 8, SOUTH, "#f4f2ee", { solid: true });
+        onN("poster", x1 - 22, 18, "#3dff8b", "STERNE", 22);
+      } else if (k === "student") {
+        F("futon", x1 - 20, y0 + 22, 26, 34, WEST, v.bed, { solid: true }); F("bunk", xm + 16, y0 + 26, 22, 34, EAST, "#3a5a8a", { solid: true });
+        onN("poster", x1 - 40, 20, "#ff3cac", "PARTY", 22);
+      } else if (k === "studio") {
+        F("piano", x1 - 20, y0 + 10, 30, 12, SOUTH, "#1a1a1f", { solid: true }); F("speaker", xm + 10, y0 + 8, 10, 10, SOUTH); F("speaker", x1 - 6, y0 + 50, 10, 10, WEST);
+        F("dj", xm + 32, cy - 14, 26, 12, NORTH, "#2a2d33", { solid: true }); F("cushion", x1 - 18, cy - 14, 12, 12);
+      } else {
+        F("bed", x1 - 22, y0 + 24, 28, 36, WEST, v.bed, { solid: true }); F("side", x1 - 8, y0 + 47, 10, 8, WEST, v.wood);
+        F("wardrobe", xm + 22, y0 + 6, 28, 10, SOUTH, v.wood, { solid: true }); F("lamp", x1 - 8, y0 + 56, 8, 8);
+      }
+      // kitchen and dining (south-east)
+      F("counter", x1 - 7, y1 - 20, 22, 14, WEST, "#e8e4dc", { solid: true }); F("stove", x1 - 7, y1 - 40, 18, 14, WEST, "#e8e4dc", { solid: true });
+      F("sink", x1 - 7, y1 - 57, 18, 14, WEST, "#e8e4dc", { solid: true }); F("fridge", x1 - 7, cy + 12, 14, 12, WEST, "#f4f2ee", { solid: true });
+      F(k === "family" ? "longtable" : "table", xm + 26, y1 - 28, k === "family" ? 30 : 22, 16, 0, v.wood, { solid: true });
+      F("chair", xm + 26, y1 - 40, 9, 9, SOUTH, "#3a2a1a"); F("chair", xm + 26, y1 - 16, 9, 9, NORTH, "#3a2a1a");
+      if (k === "family") { F("chair", xm + 8, y1 - 28, 9, 9, EAST, "#3a2a1a"); F("chair", xm + 44, y1 - 28, 9, 9, WEST, "#3a2a1a"); }
+      F("pendant", xm + 26, y1 - 28, 10, 10, 0, "#3a3d45");
+      // pictures, windows
+      onS("art", xm + 30, 22, v.art, k === "studio" ? "sun" : "wave", 22); onE("clock", y1 - 70, 8, "#f4f2ee", undefined, 30);
+      if (k === "studio") { onN("art", x0 + 68, 26, "#2bb3ff", "wave", 30); F("spotrail", x0 + 46, cy + 30, 40, 4, 0, "#2a2d33"); }
+      streetWindows("blinds");
+      // the people who live here
+      it.guests.push({ x: x0 + 52, y: cy + 27, a: Math.PI / 2, anim: "bench" }, { x: xm + 40, y: cy + 22, a: Math.PI, anim: "idle" });
+      if (k === "family" || k === "student") it.guests.push({ x: xm + 26, y: y1 - 40, a: Math.PI / 2, anim: "bench" });
+      if (k === "studio") it.guests.push({ x: x1 - 20, y: y0 + 24, a: -Math.PI / 2, anim: "idle" });
+      it.counter = { x: x0 + 14, y: cy }; it.clerk = { x: -1e5, y: -1e5, a: 0 }; // nobody to buy from
+      it.floor = v.floor as [string, string]; it.wallTex = v.wall as [string, string];
+      look(["plaster", "#ece6dc"], k === "studio" ? "spot" : "none", k === "studio" ? "#ffe2c0" : "#ffe8c8");
+      break;
+    }
     case "gas247": {
       // 24/7 shop of the gas station: counter with the till by the door, shelves, coolers, coffee, hot dogs, lottery
       counterAt(x0 + 30, y0 + 22, 30, "#e8e8ec");

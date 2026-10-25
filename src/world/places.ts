@@ -4,7 +4,7 @@ import type { JobKind } from "../gameplay/jobs";
 import { STUNT_PARK, PRISON, GAS_SHOP } from "./terrain";
 
 export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport" | "park" | "job" | "market" | "cardealer" | "barber" | "mall" | "club" | "home" | "prison"
-  | "gas" | "bar" | "pharmacy" | "boats" | "planes" | "electronics";
+  | "gas" | "bar" | "pharmacy" | "boats" | "planes" | "electronics" | "house";
 export type PlaceAccess = "foot" | "car" | "both" | "none";
 
 export interface PlaceDef {
@@ -76,6 +76,15 @@ export const PLACE_DEFS: PlaceDef[] = [
   { id: "pharmacy", kind: "pharmacy", name: "Bucht-Apotheke", color: "#2ecc71", icon: "Rx", near: [8, 6], access: "foot", robbable: true },
   { id: "boats", kind: "boats", name: "Marina Bootshandel", color: "#2b9bd6", icon: "Bo", near: [0, 6], access: "foot", robbable: true },
   { id: "planes", kind: "planes", name: "Skyline Flugzeughandel", color: "#7fb2ff", icon: "Fl", near: [15, 3], access: "foot", robbable: true },
+  // homes of the people in town: walk in (the outside stays as it is)
+  { id: "house1", kind: "house", name: "Wohnung Ahornweg", color: "#c8b89a", icon: "Hs", near: [5, 3], access: "none" },
+  { id: "house2", kind: "house", name: "Familienhaus Lindenstraße", color: "#c8b89a", icon: "Hs", near: [3, 5], access: "none" },
+  { id: "house3", kind: "house", name: "WG Kastanienallee", color: "#c8b89a", icon: "Hs", near: [12, 3], access: "none" },
+  { id: "house4", kind: "house", name: "Atelier Hafenblick", color: "#c8b89a", icon: "Hs", near: [13, 10], access: "none" },
+  { id: "house5", kind: "house", name: "Wohnung Palmenring", color: "#c8b89a", icon: "Hs", near: [9, 13], access: "none" },
+  { id: "house6", kind: "house", name: "Familienhaus Hügelweg", color: "#c8b89a", icon: "Hs", near: [7, 2], access: "none" },
+  { id: "house7", kind: "house", name: "WG am Park", color: "#c8b89a", icon: "Hs", near: [10, 12], access: "none" },
+  { id: "house8", kind: "house", name: "Musikstudio Neonbucht", color: "#c8b89a", icon: "Hs", near: [4, 12], access: "none" },
   { id: "electro", kind: "electronics", name: "Bucht-Elektro (Bay Plaza)", color: "#2bb3ff", icon: "El", near: [9, 9], access: "foot", inMall: true },
 ];
 
@@ -88,7 +97,8 @@ export interface Place extends PlaceDef {
 export const PLACE_RADIUS = { foot: 22, car: 46 };
 // shops with a room you walk into (door symbol on the maps)
 export const WALKABLE = new Set(["gunshop", "clothes", "food", "food2", "workshop", "safehouse", "market", "cardealer", "barber", "mall",
-  "hospital", "police", "lou", "marisol", "dock", "ines", "ruiz", "club", "loft", "tower", "gas", "bar", "pharmacy", "boats", "planes"]);
+  "hospital", "police", "lou", "marisol", "dock", "ines", "ruiz", "club", "loft", "tower", "gas", "bar", "pharmacy", "boats", "planes",
+  "house1", "house2", "house3", "house4", "house5", "house6", "house7", "house8"]);
 
 // a place on a map: coloured circle with its letter; walkable shops get a door in the circle
 export function drawPlaceIcon(g: CanvasRenderingContext2D, pl: { id: string; color: string; icon: string }, x: number, y: number, r: number) {
