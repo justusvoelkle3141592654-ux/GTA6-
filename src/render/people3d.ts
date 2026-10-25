@@ -1,7 +1,7 @@
 // the player figure and the people near the camera as skinned, animated humans (human.ts);
 // people further away stay instanced simple figures (crowd3d.ts, the far detail level)
 import * as THREE from "three";
-import { HumanRig, PERSON_SCALE, kaiLook, lookFromSeed, weaponGeo, type Look } from "../characters/human";
+import { BODY_GEN, HumanRig, PERSON_SCALE, kaiLook, lookFromSeed, weaponGeo, type Look } from "../characters/human";
 import { VEH_SCALE } from "../vehicles/vehicles";
 import { OUTFITS, type Style } from "../gameplay/economy";
 import { WEAPONS, WEAPON_DEFS, type Weapon } from "../gameplay/weapons";
@@ -58,7 +58,7 @@ export class PlayerFigure {
   // car: where the figure sits when driving (host: the car's body group, seat: hip position in it)
   update(g: Game, dt: number, car: { host: THREE.Object3D; seat: [number, number, number]; ride: boolean; steer: number } | null, fp: boolean) {
     const r = this.rig, root = r.root, pd = g.ped;
-    const sk = g.outfit + ":" + g.style.hair + g.style.beard + g.style.tattoo;
+    const sk = g.outfit + ":" + g.style.hair + g.style.beard + g.style.tattoo + ":" + BODY_GEN;
     if (this.lookKey !== sk) { this.lookKey = sk; r.setLook(outfitLook(g.outfit, g.style), 0); }
     r.setVest(pd.armor > 0);
     const hidden = g.state === "menu" || !!g.hide.hiddenIn;
@@ -160,7 +160,7 @@ export class CrowdFigures {
     hand.add(phone, cig, gun);
     this.scene.add(rig.root);
     this.setup(rig.root);
-    return { rig, ped: c.id, look: c.look * 1000 + c.role.length, acc: 0, prev: "", getup: false, punchT: 0, tumble: 0, props: { phone, cig, gun } };
+    return { rig, ped: c.id, look: c.look * 1000 + c.role.length + BODY_GEN * 0.1, acc: 0, prev: "", getup: false, punchT: 0, tumble: 0, props: { phone, cig, gun } };
   }
 
   // camera position (x, y on the map), list of all peds; returns the peds drawn here (the instanced crowd skips them)
@@ -181,7 +181,7 @@ export class CrowdFigures {
     for (const pid of want) {
       const c = list[pid];
       let si = this.byPed.get(pid);
-      const lookKey = c.look * 1000 + c.role.length;
+      const lookKey = c.look * 1000 + c.role.length + BODY_GEN * 0.1;
       if (si === undefined) {
         si = this.slots.findIndex((s) => s === null || s.ped < 0);
         if (si < 0) { si = this.slots.length; this.slots.push(null); }

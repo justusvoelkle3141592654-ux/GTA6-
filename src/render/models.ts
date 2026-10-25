@@ -6,7 +6,8 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 
 export type ModelId = "armor" | "jet" | "jet_police" | "heli" | "heli_police" | "prison_wall" | "prison_tower" | "prison_gate" | "gas_station" | "cash"
-  | "tank" | "tractor" | "forklift" | "mixer" | "plane" | "seaplane" | "sailboat" | "yacht" | "hovercraft"; // Realism update (tools/blender/realism_vehicles.py)
+  | "tank" | "tractor" | "forklift" | "mixer" | "plane" | "seaplane" | "sailboat" | "yacht" | "hovercraft" // Realism update (tools/blender/realism_vehicles.py)
+  | "body_m" | "body_f"; // people (tools/blender/human.py)
 const FILES = import.meta.glob("../assets/models/*.glb", { query: "?url", import: "default", eager: true }) as Record<string, string>;
 
 const ready = new Map<ModelId, THREE.Group>();
@@ -41,6 +42,8 @@ export function model(id: ModelId): THREE.Group | null {
   return g ? g.clone(true) : null;
 }
 export const hasModel = (id: ModelId) => ready.has(id);
+// the parsed model itself (not a copy): the people's bodies are read from it once
+export const rawModel = (id: ModelId) => ready.get(id) ?? null;
 // run once all models are parsed (right away when they already are)
 export function whenModels(f: () => void) {
   if (done) f(); else waiting.push(f);

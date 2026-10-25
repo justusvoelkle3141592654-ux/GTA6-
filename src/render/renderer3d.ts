@@ -13,7 +13,8 @@ import { terrainMesh, backdropMesh, roadsMesh, rampsMesh, coastMesh, extrasMesh,
 import { TrafficLights } from "../ai/traffic";
 import { Atmosphere } from "./atmosphere";
 import { MAX_JETS } from "../ai/police";
-import { loadModels, whenModels, model, hasModel, type ModelId } from "./models";
+import { loadModels, whenModels, model, hasModel, rawModel, type ModelId } from "./models";
+import { setModelledBodies } from "../characters/human";
 import { currentSettings } from "../core/settings";
 import { WaterSurface } from "./water";
 import { buildHideFields } from "../gameplay/hide";
@@ -1825,6 +1826,9 @@ export class Renderer3D {
   private heliG: THREE.Group | null = null; private heliRotor: THREE.Object3D | null = null; private heliSpot: THREE.Mesh | null = null;
   // ---------------------------------------------------------- Blender models
   private useModels() {
+    // the people's bodies from Blender (characters/human.ts dresses them)
+    const bm = rawModel("body_m"), bf = rawModel("body_f");
+    if (bm && bf) setModelledBodies([{ sex: "m", scene: bm }, { sex: "f", scene: bf }]);
     const hm = model("heli_police");
     if (hm && this.heliG) {
       for (const ch of [...this.heliG.children]) this.heliG.remove(ch);

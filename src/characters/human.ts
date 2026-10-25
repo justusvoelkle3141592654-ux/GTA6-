@@ -86,12 +86,12 @@ const Z = { skin: 0, top: 1, top2: 2, bottom: 3, shoes: 4, hair: 5, dark: 6, whi
 const ZONES = 15;
 
 class Builder {
-  pos: number[] = []; uv: number[] = []; zone: number[] = []; si: number[] = []; sw: number[] = []; idx: number[] = [];
+  pos: number[] = []; uv: number[] = []; zone: number[] = []; zp: number[] = []; si: number[] = []; sw: number[] = []; idx: number[] = [];
   constructor(private bones: Map<string, { i: number; p: THREE.Vector3 }>) {}
   bi(n: string) { return this.bones.get(n)!.i; }
   bp(n: string) { return this.bones.get(n)!.p; }
-  vert(p: THREE.Vector3, w: [string, number][], zone: number, u: number, v: number) {
-    this.pos.push(p.x, p.y, p.z); this.uv.push(u, v); this.zone.push(zone);
+  vert(p: THREE.Vector3, w: [string, number][], zone: number, u: number, v: number, zp = 0) {
+    this.pos.push(p.x, p.y, p.z); this.uv.push(u, v); this.zone.push(zone); this.zp.push(zp);
     const ws = w.slice(0, 4), tot = ws.reduce((a, b) => a + b[1], 0) || 1;
     for (let k = 0; k < 4; k++) { this.si.push(ws[k] ? this.bi(ws[k][0]) : 0); this.sw.push(ws[k] ? ws[k][1] / tot : 0); }
     return this.pos.length / 3 - 1;
@@ -133,6 +133,7 @@ class Builder {
     g.setAttribute("position", new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute("uv", new THREE.Float32BufferAttribute(this.uv, 2));
     g.setAttribute("zone", new THREE.Float32BufferAttribute(this.zone, 1));
+    g.setAttribute("zparam", new THREE.Float32BufferAttribute(this.zp, 1));
     g.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(this.si, 4));
     g.setAttribute("skinWeight", new THREE.Float32BufferAttribute(this.sw, 4));
     g.setIndex(this.idx);
@@ -154,6 +155,7 @@ function restPositions(defs: BoneDef[]) {
 }
 
 function buildBody(L: Look, detail: 0 | 1, vestOnly = false): THREE.BufferGeometry {
+  if (!vestOnly && BASE[L.sex + detail]) return buildModelled(L, detail);
   const defs = skeletonDefs(L.sex), bones = restPositions(defs), b = new Builder(bones);
   const f = L.sex === "f", g = L.build, n = detail === 0 ? 26 : 12, nl = detail === 0 ? 16 : 9;
   const P = (s: string) => bones.get(s)!.p;
@@ -164,7 +166,8 @@ function buildBody(L: Look, detail: 0 | 1, vestOnly = false): THREE.BufferGeomet
   const pantLen = bottom === "shorts" ? 0.42 : bottom === "skirt" ? 0 : 1;
   if (vestOnly) {
     // armour vest over the clothes
-    const rings = [10.3, 11.4, 12.6, 13.8, 14.6].map((y, i) => ({ c: V(0.05, y * (f ? 0.94 : 1), 0), rs: [1.75, 1.7, 1.95, 2.0, 1.7][i] * g, rf: [1.25, 1.2, 1.45, 1.4, 1.1][i] * g, w: torsoW(y * (f ? 0.94 : 1), f), zone: () => Z.vest, v: i / 4, sq: 3 }));
+    const big = BASE[L.sex + "1"] ? 1.1 : 1; // around the modelled body (a little fuller than the old one)
+    const rings = [10.3, 11.4, 12.6, 13.8, 14.6].map((y, i) => ({ c: V(0.05, y * (f ? 0.94 : 1), 0), rs: [1.75, 1.7, 1.95, 2.0, 1.7][i] * g * big, rf: [1.25, 1.2, 1.45, 1.4, 1.1][i] * g * big, w: torsoW(y * (f ? 0.94 : 1), f), zone: () => Z.vest, v: i / 4, sq: 3 }));
     b.tube(rings, SIDE, FRONT, 12, [false, false]);
     return b.build();
   }
@@ -264,6 +267,159 @@ function buildBody(L: Look, detail: 0 | 1, vestOnly = false): THREE.BufferGeomet
   return b.build();
 }
 
+// ----------------------------------------------------------------------------------------------- modelled bodies (Blender)
+// tools/blender/human.py makes a male and a female body in two levels of detail on the same skeleton; the game reads
+// their rest pose, normals, skin weights and face regions once and dresses them here (colour zones, hair, shoes, collars)
+interface BaseBody { pos: Float32Array; nrm: Float32Array; reg: Uint8Array; si: Uint16Array; sw: Float32Array; idx: Uint32Array; dom: Uint8Array }
+const BASE: Record<string, BaseBody> = {};
+export let BODY_GEN = 0; // goes up when the modelled bodies arrive (people built before get rebuilt)
+const REG = { body: 0, head: 1, lips: 2, brow: 3, eye: 4, iris: 5, lowface: 6, hand: 7 } as const;
+export function setModelledBodies(src: { sex: Sex; scene: THREE.Object3D }[]) {
+  for (const { sex, scene } of src) {
+    const meshes: THREE.SkinnedMesh[] = [];
+    scene.traverse((o) => { if ((o as THREE.SkinnedMesh).isSkinnedMesh) meshes.push(o as THREE.SkinnedMesh); });
+    if (meshes.length < 2) continue;
+    meshes.sort((a, b) => b.geometry.attributes.position.count - a.geometry.attributes.position.count); // lod0 has more vertices
+    const order = skeletonDefs(sex).map((d) => d[0]);
+    meshes.slice(0, 2).forEach((m, lod) => {
+      const g = m.geometry, P = g.attributes.position, N = g.attributes.normal, U = g.attributes.uv, J = g.attributes.skinIndex, W = g.attributes.skinWeight;
+      const map = m.skeleton.bones.map((bn) => Math.max(0, order.indexOf(bn.name)));
+      const n = P.count, out: BaseBody = { pos: new Float32Array(n * 3), nrm: new Float32Array(n * 3), reg: new Uint8Array(n), si: new Uint16Array(n * 4), sw: new Float32Array(n * 4), idx: new Uint32Array(g.index ? g.index.count : n), dom: new Uint8Array(n) };
+      for (let i = 0; i < n; i++) {
+        out.pos[i * 3] = P.getX(i); out.pos[i * 3 + 1] = P.getY(i); out.pos[i * 3 + 2] = P.getZ(i);
+        out.nrm[i * 3] = N.getX(i); out.nrm[i * 3 + 1] = N.getY(i); out.nrm[i * 3 + 2] = N.getZ(i);
+        out.reg[i] = Math.floor(U.getX(i) * 10);
+        let best = 0, bw = -1, tot = 0;
+        for (let k = 0; k < 4; k++) { const w = W.getComponent(i, k); tot += w; }
+        for (let k = 0; k < 4; k++) {
+          const w = W.getComponent(i, k) / (tot || 1), j = map[J.getComponent(i, k)];
+          out.si[i * 4 + k] = j; out.sw[i * 4 + k] = w;
+          if (w > bw) { bw = w; best = j; }
+        }
+        out.dom[i] = best;
+      }
+      if (g.index) for (let i = 0; i < g.index.count; i++) out.idx[i] = g.index.getX(i); else for (let i = 0; i < n; i++) out.idx[i] = i;
+      BASE[sex + lod] = out;
+    });
+  }
+  BODY_GEN++;
+  // bodies built from the old shapes are not used any more
+  for (const [k, e] of geoCache) if (e.refs === 0) { e.g.dispose(); geoCache.delete(k); }
+  for (const g of vestCache.values()) g.dispose();
+  vestCache.clear();
+}
+
+// hair on a modelled head: coloured above the hair line (per pixel) and lifted off the scalp a little
+const HAIR_THICK: Partial<Record<Hair, number>> = { buzz: 0.035, short: 0.09, curls: 0.16, long: 0.1, ponytail: 0.08 };
+// centre of the skull in the rest pose (the hair line is measured from it)
+const headC: Partial<Record<Sex, THREE.Vector3>> = {};
+function headCentre(sex: Sex) { return (headC[sex] ??= restPositions(skeletonDefs(sex)).get("head")!.p.clone().add(V(0.12, 0.85, 0))); }
+
+function buildModelled(L: Look, detail: 0 | 1): THREE.BufferGeometry {
+  const B = BASE[L.sex + detail], f = L.sex === "f", g = L.build, k = f ? 0.94 : 1;
+  const defs = skeletonDefs(L.sex), bones = restPositions(defs), b = new Builder(bones), names = defs.map((d) => d[0]);
+  const P = (n: string) => bones.get(n)!.p;
+  const top = L.top, bottom = L.bottom;
+  const jacketOpen = top === "suit" || top === "leather" || top === "jacket" || top === "bomber";
+  const longSleeve = ["shirt", "suit", "hoodie", "leather", "jacket", "track", "swat", "army", "bomber"].includes(top);
+  const sleeve = top === "tank" || top === "dress" ? 0 : longSleeve ? 1 : top === "police" ? 0.42 : 0.36;
+  const pantLen = bottom === "shorts" ? 0.42 : bottom === "skirt" ? 0 : 1;
+  const neckY = (f ? 14.5 : 15.35);
+  const thick = jacketOpen || top === "hoodie" || top === "swat" || top === "army" ? 0.14 : 0.06; // jackets stand off the body more
+  // where the clothes end is decided per pixel in the material (zones 20-23, see personMaterial)
+  const ARM = /^(shoulder|upperArm|foreArm)/, HAND = /^(hand|thumb|index|middle|ring|pinky)/, LEG = /^(upLeg|leg)/, FOOT = /^(foot|toe)/;
+  const n = B.pos.length / 3, start = b.pos.length / 3;
+  const p = V(0, 0, 0), q = V(0, 0, 0), seg = V(0, 0, 0);
+  const nrmOut: number[] = [];
+  const hc0 = headCentre(L.sex);
+  const ramp = (edge: number, t: number) => Math.max(0, Math.min(1, (edge + 0.04 - t) / 0.08)); // 1 well inside the cloth, 0 outside
+  const tAlong = (a0: THREE.Vector3, a1: THREE.Vector3) => seg.subVectors(a1, a0).dot(q.subVectors(p, a0)) / seg.lengthSq();
+  for (let i = 0; i < n; i++) {
+    p.set(B.pos[i * 3], B.pos[i * 3 + 1], B.pos[i * 3 + 2]);
+    const reg = B.reg[i], bone = names[B.dom[i]] ?? "hips", side = p.z < 0 ? "L" : "R";
+    let zone: number = Z.skin, lift = 0, zp = 0;
+    const phi = (Math.atan2(p.x, p.z) + Math.PI * 2) % (Math.PI * 2); // 0 right side, π/2 front
+    if (reg === REG.lips) zone = Z.lips;
+    else if (reg === REG.brow) zone = Z.hair;
+    else if (reg === REG.eye) zone = Z.white;
+    else if (reg === REG.iris) zone = Z.dark;
+    else if (reg === REG.lowface) zone = L.stubble || (L.beard ?? 0) >= 1 ? Z.stubble : Z.skin;
+    else if (reg === REG.head) {
+      zone = 24;
+      // the hair stands off the scalp a little (fades out at the hair line)
+      const th = HAIR_THICK[L.hair];
+      if (th) {
+        const dx = p.x - hc0.x, dy = p.y - hc0.y, dz = p.z - hc0.z, ang = Math.atan2(dz, dx), back = (1 - Math.cos(ang)) / 2;
+        const line = 0.42 - 0.97 * back + 0.3 * Math.sin(ang) ** 2 - (L.hair === "long" || L.hair === "ponytail" ? 0.25 * back : 0);
+        lift = th * Math.max(0, Math.min(1, (dy - line) / 0.12));
+      }
+    } else if (reg === REG.hand || HAND.test(bone)) zone = Z.skin;
+    else if (ARM.test(bone) && !bone.startsWith("shoulder")) {
+      zone = 21; zp = tAlong(P("upperArm" + side), P("hand" + side));
+      lift = thick * 0.7 * ramp(sleeve, zp);
+    } else if (LEG.test(bone) || (bone === "hips" && p.y < 9.4 * k && Math.abs(p.z) > 0.5)) {
+      zone = 22; zp = Math.max(0, tAlong(P("upLeg" + side), P("foot" + side)));
+      lift = 0.05 * ramp(pantLen, zp);
+    } else if (FOOT.test(bone)) zone = 23;
+    else {
+      zone = 20;
+      lift = p.y > neckY - 0.4 ? (top === "tank" || top === "dress" ? 0 : 0.03) : p.y < 10.2 * k ? 0.05 : thick;
+    }
+    // build: fuller or slimmer around the bone the vertex belongs to (not the head, the hands and the feet)
+    if (g !== 1 && reg === REG.body && !HAND.test(bone) && !FOOT.test(bone) && bone !== "head" && bone !== "neck") {
+      let ax: THREE.Vector3, bx: THREE.Vector3;
+      if (ARM.test(bone) && !bone.startsWith("shoulder")) { ax = P("upperArm" + side); bx = P("hand" + side); }
+      else if (LEG.test(bone)) { ax = P("upLeg" + side); bx = P("foot" + side); }
+      else { ax = V(0, 0, 0); bx = V(0, 20, 0); }
+      seg.subVectors(bx, ax); const t = Math.max(0, Math.min(1, q.subVectors(p, ax).dot(seg) / seg.lengthSq()));
+      const c = ax.clone().addScaledVector(seg, t);
+      const gg = ARM.test(bone) ? Math.min(1.15, g) : g;
+      p.sub(c).multiplyScalar(gg).add(c);
+    }
+    // clothes sit on the skin
+    if (lift) { p.x += B.nrm[i * 3] * lift; p.y += B.nrm[i * 3 + 1] * lift; p.z += B.nrm[i * 3 + 2] * lift; }
+    const w: [string, number][] = [];
+    for (let kk = 0; kk < 4; kk++) if (B.sw[i * 4 + kk] > 0) w.push([names[B.si[i * 4 + kk]], B.sw[i * 4 + kk]]);
+    b.vert(p.clone(), w.length ? w : [["hips", 1]], zone, zone >= 20 ? (phi / (Math.PI * 2)) * 0.85 : 0.97, p.y / 18, zp);
+    nrmOut.push(B.nrm[i * 3], B.nrm[i * 3 + 1], B.nrm[i * 3 + 2]);
+  }
+  for (let i = 0; i < B.idx.length; i++) b.idx.push(start + B.idx[i]);
+  const bodyEnd = b.pos.length / 3;
+  // collar, hood, duty belt, skirt, shoes (the old parts fit the new body)
+  const nl = detail === 0 ? 16 : 9, nn = detail === 0 ? 26 : 12;
+  if (top === "shirt" || top === "polo" || top === "suit" || top === "police" || top === "leather" || top === "bomber") {
+    b.tube([0, 1].map((t) => ({ c: V(0.02, neckY - 0.25 + t * 0.55, 0), rs: (f ? 0.68 : 0.78) + t * 0.06, rf: (f ? 0.64 : 0.74) + t * 0.06, w: [["spine2", 0.5], ["neck", 0.5]] as [string, number][], zone: () => (top === "leather" || top === "bomber" ? Z.top : Z.top2), v: t })), SIDE, FRONT, nl, [false, false]);
+  }
+  if (top === "hoodie") b.geo(new THREE.SphereGeometry(1.05, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.8, 0.7, 1.1).rotateZ(1.2).translate(-1.0, -0.3, 0), "spine2", Z.top, [["spine2", 0.7], ["neck", 0.3]]);
+  if (top === "swat" || top === "police") for (const s of [-1, 1]) b.geo(new THREE.BoxGeometry(0.7, 0.8, 0.5).translate(0.6, 0.6, s * 1.75), "hips", Z.dark);
+  if (bottom === "skirt") {
+    const y0 = 10.6 * k;
+    b.tube([0, 0.33, 0.66, 1].map((t, i) => ({ c: V(0, y0 - t * 4.4, 0), rs: lerp(1.95, 2.55, t) * g, rf: lerp(1.25, 2.05, t) * g, w: i === 0 ? [["hips", 1]] as [string, number][] : [["hips", 1 - t * 0.6], ["upLegL", t * 0.3], ["upLegR", t * 0.3]] as [string, number][], zone: () => (top === "dress" ? Z.top : Z.bottom), v: t })), SIDE, FRONT, nn, [false, false]);
+  }
+  for (const [s, S] of [[-1, "L"], [1, "R"]] as const) {
+    if (L.shoes === "sandal") continue; // bare feet with straps (the foot itself)
+    const an = P(`foot${S}`);
+    const sh = (x: number, h: number, w: number, bone: [string, number][], yb = 0) => ({ c: an.clone().add(V(x, -0.62 + h / 2 + yb, 0)), rs: w, rf: h / 2, w: bone, zone: (phi: number) => (Math.sin(phi) < -0.75 ? Z.sole : Z.shoes), v: x });
+    const fw: [string, number][] = [[`foot${S}`, 1]], tw: [string, number][] = [[`toe${S}`, 1]], mw: [string, number][] = [[`foot${S}`, 0.5], [`toe${S}`, 0.5]];
+    const sz = 1.12;
+    b.tube([sh(-0.52, 0.8, 0.36 * sz, fw), sh(-0.32, 1.05, 0.43 * sz, fw), sh(0.25, 1.05, 0.46 * sz, fw, 0.05), sh(0.95, 0.8, 0.5 * sz, fw), sh(1.45, 0.66, 0.5 * sz, mw), sh(1.98, 0.54, 0.46 * sz, tw), sh(2.25, 0.4, 0.36 * sz, tw)], FRONT.clone().negate().cross(V(0, 1, 0)).normalize().negate(), V(0, 1, 0), 10, [true, true]);
+    void s;
+  }
+  if (top === "swat") {
+    const rings = [10.3, 11.4, 12.6, 13.8, 14.6].map((y, i) => ({ c: V(0.05, y, 0), rs: [1.9, 1.85, 2.1, 2.3, 1.95][i] * g, rf: [1.4, 1.35, 1.6, 1.6, 1.3][i] * g, w: torsoW(y, f), zone: () => Z.vest, v: i / 4, sq: 3 }));
+    b.tube(rings, SIDE, FRONT, 12, [false, false]);
+  }
+  if (L.beard === 2) b.geo(new THREE.SphereGeometry(1.0, 14, 8, -Math.PI * 0.5, Math.PI, Math.PI * 0.55, Math.PI * 0.4).scale(1.08, 1.2, 0.86).translate(0.14, 0.83, 0), "head", Z.hair);
+  // hats and helmets from the old shapes (a little bigger); curls, long hair and the ponytail add their extra parts
+  if (HAIR_THICK[L.hair] === undefined) { if (L.hair !== "bald") hair(b, L, P("head"), V(0.12, 0.85, 0), 1.07); }
+  else if (L.hair === "curls" || L.hair === "long" || L.hair === "ponytail") hair(b, L, P("head"), V(0.12, 0.85, 0), 1.07, true);
+  const geo = b.build();
+  // the body keeps the normals of the model (smoother than recomputed ones)
+  const N = geo.attributes.normal as THREE.BufferAttribute;
+  for (let i = start; i < bodyEnd; i++) N.setXYZ(i, nrmOut[(i - start) * 3], nrmOut[(i - start) * 3 + 1], nrmOut[(i - start) * 3 + 2]);
+  return geo;
+}
+
 // spine weights by height (smooth blends between the vertebrae)
 function torsoW(y: number, f: boolean): [string, number][] {
   const k = f ? 0.94 : 1, ys = [9.5 * k, 10.6 * k, 12.1 * k, 13.7 * k, 15.25 * k], names = ["hips", "spine", "spine1", "spine2", "neck"];
@@ -316,9 +472,9 @@ function head(b: Builder, L: Look, hc: THREE.Vector3, detail: 0 | 1) {
   hair(b, L, hc, c0);
 }
 
-function hair(b: Builder, L: Look, hc: THREE.Vector3, c0: THREE.Vector3) {
-  const G = (g: THREE.BufferGeometry, zone: number, w?: [string, number][]) => b.geo(g.translate(c0.x, c0.y, c0.z), "head", zone, w);
-  const cap = (sc: number, down: number, zone: number) => G(new THREE.SphereGeometry(1.0, 16, 10, 0, Math.PI * 2, 0, Math.PI * down).rotateZ(0.5).scale(1.07 * sc, 1.24 * sc, 0.88 * sc).translate(-0.05, 0.02, 0), zone); // rim high on the forehead, low at the nape
+function hair(b: Builder, L: Look, hc: THREE.Vector3, c0: THREE.Vector3, big = 1, extrasOnly = false) {
+  const G = (g: THREE.BufferGeometry, zone: number, w?: [string, number][]) => b.geo(g.scale(big, big, big).translate(c0.x, c0.y, c0.z), "head", zone, w);
+  const cap = (sc: number, down: number, zone: number) => extrasOnly ? undefined : G(new THREE.SphereGeometry(1.0, 16, 10, 0, Math.PI * 2, 0, Math.PI * down).rotateZ(0.5).scale(1.07 * sc, 1.24 * sc, 0.88 * sc).translate(-0.05, 0.02, 0), zone); // rim high on the forehead, low at the nape
   void hc;
   switch (L.hair) {
     case "bald": break;
@@ -358,20 +514,52 @@ const noiseTex = (() => {
   const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
 })();
 
-export function personMaterial(): THREE.MeshStandardMaterial & { userData: { pal: THREE.Color[]; pattern: { value: number }; tattoo: { value: number }; ownCompile: THREE.Material["onBeforeCompile"] } } {
+export function personMaterial(): THREE.MeshStandardMaterial & { userData: { pal: THREE.Color[]; pattern: { value: number }; tattoo: { value: number }; cloth: { value: THREE.Vector4 }; style: { value: THREE.Vector4 }; head: { value: THREE.Vector4 }; ownCompile: THREE.Material["onBeforeCompile"] } } {
   const pal = Array.from({ length: ZONES }, () => new THREE.Color(1, 1, 1));
   const pattern = { value: 0 }, tattoo = { value: 0 };
+  // modelled bodies: where the clothes end is decided per pixel (straight hems): sleeve, trousers, neck line, size factor; top / bottom kind, boots, sandals
+  const cloth = { value: new THREE.Vector4(1, 1, 15.35, 1) }, style = { value: new THREE.Vector4(0, 0, 0, 0) };
+  const headU = { value: new THREE.Vector4(0, 17, 0, 1) }; // centre of the skull, hair: 0 none, 1 short, 2 long
   const m = new THREE.MeshStandardMaterial({ roughness: 0.78, metalness: 0, normalMap: noiseTex, normalScale: new THREE.Vector2(0.6, 0.6) });
   m.onBeforeCompile = (sh) => {
-    sh.uniforms.uPal = { value: pal }; sh.uniforms.uPattern = pattern; sh.uniforms.uTattoo = tattoo;
-    sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nattribute float zone; flat varying float vZone; varying vec2 vPuv; varying vec3 vBind;")
-      .replace("#include <uv_vertex>", "#include <uv_vertex>\nvZone = zone; vPuv = uv; vBind = position;");
+    sh.uniforms.uPal = { value: pal }; sh.uniforms.uPattern = pattern; sh.uniforms.uTattoo = tattoo; sh.uniforms.uCloth = cloth; sh.uniforms.uStyle = style; sh.uniforms.uHead = headU;
+    sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nattribute float zone; attribute float zparam; flat varying float vZone; varying float vZp; varying vec2 vPuv; varying vec3 vBind;")
+      .replace("#include <uv_vertex>", "#include <uv_vertex>\nvZone = zone; vZp = zparam; vPuv = uv; vBind = position;");
     sh.fragmentShader = sh.fragmentShader.replace("#include <common>", `#include <common>
-uniform vec3 uPal[${ZONES}]; uniform float uPattern; uniform float uTattoo; flat varying float vZone; varying vec2 vPuv; varying vec3 vBind;
+uniform vec3 uPal[${ZONES}]; uniform float uPattern; uniform float uTattoo; uniform vec4 uCloth; uniform vec4 uStyle; uniform vec4 uHead; flat varying float vZone; varying float vZp; varying vec2 vPuv; varying vec3 vBind;
 float h21(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
 float n21(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(h21(i), h21(i+vec2(1,0)), f.x), mix(h21(i+vec2(0,1)), h21(i+vec2(1,1)), f.x), f.y); }`)
       .replace("#include <color_fragment>", `#include <color_fragment>
 int zi = int(vZone + 0.5);
+// modelled body: 20 torso, 21 arm, 22 leg, 23 foot -> the clothing zone at this pixel
+if (zi >= 20) {
+  vec3 q = vBind; float phi = atan(q.x, q.z), frontD = abs(phi - 1.5708), k = uCloth.w;
+  int top = int(uStyle.x + 0.5), bot = int(uStyle.y + 0.5);
+  if (zi == 20) {
+    float y = q.y;
+    if (y > uCloth.z + 0.05 && length(q.xz) < 0.95) zi = top == 3 ? 1 : 0;   // the neck (a hoodie covers it)
+    else if (y > uCloth.z - 0.4 && length(q.xz) < 0.95) zi = (top == 1 || top == 2) ? 0 : (top == 3 ? 1 : 2);
+    else if (y < 10.2 * k) {
+      if (bot == 1) zi = top == 2 ? 1 : 3;
+      else if (abs(y - 10.15 * k) < 0.22 && top != 2 && top != 3 && top != 7) zi = 6;
+      else zi = 3;
+    } else {
+      zi = 1;
+      if ((top == 4 || top == 5) && y > 10.6) { float w = 0.12 + (y - 10.6) * 0.09; if (frontD < w) zi = (top == 5 && frontD < 0.07 && y > 11.2) ? 9 : 2; }
+      if (top == 6 && y > 13.0 && y < 13.6 && phi > 1.0 && phi < 1.3) zi = 9;
+      if (top == 7 && abs(cos(phi)) > 0.97) zi = 9;
+      if (top == 1 && y > 13.6 && abs(cos(phi)) > 0.75) zi = 0;
+    }
+  } else if (zi == 21) zi = vZp < uCloth.x ? 1 : 14;
+  else if (zi == 22) zi = (uStyle.z > 0.5 && vZp > 0.85) ? 4 : (vZp < uCloth.y ? ((bot == 2 && abs(cos(phi)) > 0.95) ? 9 : 3) : 0);
+  else if (zi == 23) zi = uStyle.w > 0.5 ? 0 : 4;
+  else {
+    // head: hair above the hair line (high on the forehead, above the ears, low at the nape)
+    vec3 d = q - uHead.xyz; float ang = atan(d.z, d.x), back = (1.0 - cos(ang)) * 0.5, sk = sin(ang) * sin(ang);
+    float line = 0.42 - 0.97 * back + 0.3 * sk - (uHead.w > 1.5 ? 0.25 * back : 0.0);
+    zi = (uHead.w > 0.5 && d.y > line) ? 5 : 0;
+  }
+}
 vec3 zc = uPal[0];
 for (int k = 0; k < ${ZONES}; k++) if (k == zi) zc = uPal[k];
 // patterns: 1 flowers on the shirt (Hawaii), 2 camouflage on shirt and trousers
@@ -389,11 +577,12 @@ if (zi == 14 && uTattoo > 0.5) {
   zc = mix(zc, vec3(0.08, 0.1, 0.16), ink * 0.85);
 }
 diffuseColor.rgb *= zc;`)
+      .replace("#include <normal_fragment_maps>", "if (zi == 1 || zi == 2 || zi == 3 || zi == 10 || zi == 12) {\n#include <normal_fragment_maps>\n}")
       .replace("#include <roughnessmap_fragment>", `#include <roughnessmap_fragment>
 if (zi == 0 || zi == 8 || zi == 11) roughnessFactor = 0.55; if (zi == 7) roughnessFactor = 0.2; if (zi == 4 || zi == 13) roughnessFactor = 0.45;`);
   };
-  m.customProgramCacheKey = () => "person-v2";
-  m.userData = { pal, pattern, tattoo, ownCompile: m.onBeforeCompile };
+  m.customProgramCacheKey = () => "person-v3";
+  m.userData = { pal, pattern, tattoo, cloth, style, head: headU, ownCompile: m.onBeforeCompile };
   return m as ReturnType<typeof personMaterial>;
 }
 export function paintPerson(m: ReturnType<typeof personMaterial>, L: Look) {
@@ -405,6 +594,13 @@ export function paintPerson(m: ReturnType<typeof personMaterial>, L: Look) {
   if (L.shoes === "boot" || L.shoes === "leather") p[Z.sole].set("#121212");
   m.userData.pattern.value = L.top === "hawaii" ? 1 : L.top === "army" ? 2 : 0;
   m.userData.tattoo.value = L.tattoo ?? 0;
+  const t = L.top, f = L.sex === "f";
+  const longSleeve = ["shirt", "suit", "hoodie", "leather", "jacket", "track", "swat", "army", "bomber"].includes(t);
+  m.userData.cloth.value.set(t === "tank" || t === "dress" ? 0 : longSleeve ? 1.02 : t === "police" ? 0.42 : 0.36, L.bottom === "shorts" ? 0.42 : L.bottom === "skirt" ? 0 : 1.02, f ? 14.5 : 15.35, f ? 0.94 : 1);
+  const topCode = t === "tank" ? 1 : t === "dress" ? 2 : t === "hoodie" ? 3 : t === "suit" ? 5 : t === "leather" || t === "jacket" || t === "bomber" ? 4 : t === "police" ? 6 : t === "track" ? 7 : 0;
+  const hc = headCentre(L.sex);
+  m.userData.head.value.set(hc.x, hc.y, hc.z, L.hair === "bald" ? 0 : L.hair === "long" || L.hair === "ponytail" ? 2 : 1);
+  m.userData.style.value.set(topCode, L.bottom === "skirt" ? 1 : L.bottom === "track" ? 2 : 0, L.shoes === "boot" ? 1 : 0, L.shoes === "sandal" ? 1 : 0);
   p[Z.arm].copy(skin);
 }
 
@@ -412,7 +608,7 @@ export function paintPerson(m: ReturnType<typeof personMaterial>, L: Look) {
 // counted references, unused bodies are freed once there are many (people come and go all the time)
 const geoCache = new Map<string, { g: THREE.BufferGeometry; refs: number }>();
 const KEEP = 60;
-function bodyKey(L: Look, detail: number) { return [L.sex, (Math.round(L.build * 10) / 10).toFixed(1), L.top, L.bottom, L.shoes, L.hair, L.stubble ? 1 : 0, L.beard ?? 0, detail].join(); }
+function bodyKey(L: Look, detail: number) { return [L.sex, (Math.round(L.build * 10) / 10).toFixed(1), L.top, L.bottom, L.shoes, L.hair, L.stubble ? 1 : 0, L.beard ?? 0, detail, BODY_GEN].join(); }
 export function bodyGeo(L: Look, detail: 0 | 1) {
   const k = bodyKey(L, detail);
   let e = geoCache.get(k);
