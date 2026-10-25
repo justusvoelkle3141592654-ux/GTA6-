@@ -2102,7 +2102,7 @@ export class Renderer3D {
     this.propMeshes?.update();
     if (this.padMat?.map) this.padMat.map.offset.y = (this.padMat.map.offset.y - dt * 1.6) % 1; // boost pads: chevrons run towards the ramp
     // ragdolls: the ground (with the floors of the rooms) and the walls
-    if (!this.people.ragWorld) this.people.ragWorld = this.ped.ragWorld = {
+    if (!this.people.ragWorld) this.people.ragWorld = this.ped.ragWorld = this.rooms.ragWorld = {
       ground: (x, y, z) => Math.max(g.groundH(x, y, z + 6), interiorFloor(g.interiors, x, y, z + 6)),
       solid: (x, y, z) => g.world.isSolid(x, y, 1.5, z),
     };

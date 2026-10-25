@@ -31,6 +31,7 @@ import { Gangs } from "../ai/gangs";
 import { Craft } from "../vehicles/craft";
 import { HideSeek, SPOT_NAME } from "../gameplay/hide";
 import { Spawner } from "../gameplay/spawner";
+import { IndoorPeople, type IndoorPerson } from "../gameplay/indoor";
 import type { Weather } from "../render/atmosphere";
 
 export type GameState = "menu" | "playing" | "paused" | "over" | "modal";
@@ -98,7 +99,6 @@ export interface HudData {
   swim: boolean;          // swimming in the bay
 }
 export type EndReason = "dead" | "arrested";
-const JAIL_TIME = 30; // seconds in the cell after being busted
 export const END_LABEL: Record<EndReason, string> = { dead: "WASTED", arrested: "BUSTED" };
 
 export interface GameOverData {
@@ -158,6 +158,7 @@ export class Game {
   interiors: Interior[] = buildInteriors(this.world, this.places);
   wanted = new Wanted(MODE_RULES.chase);
   peds = new PedSystem(this.world);
+  indoor = new IndoorPeople(); // clerks, guests and inmates in the walkable rooms
   traffic = new Traffic(this.world);
   missions: Missions = new Missions(this);
   jobs: Jobs = new Jobs(this);
@@ -454,7 +455,7 @@ export class Game {
   private resetWorld() {
     this.cars = []; this.particles = []; this.pickups = []; this.texts = []; this.banners = []; this.flashes = []; this.projs = []; this.bombs = [];
     this.skidHead = 0; this.skidTotal = 0;
-    this.peds.clear();
+    this.peds.clear(); this.indoor.clear();
     const d = this.carDef;
     const p = new Car("player", d.model, d.color);
     p.hp = p.maxHp = d.hp; p.mass = d.mass;
@@ -668,7 +669,8 @@ export class Game {
       if (!this.onFoot && isAircraft(p.model) && Math.hypot(p.x - x, p.y - y, p.z - z) < R * 0.6) this.damagePlayerCar(30 * big);
       return;
     }
-    const knocked = this.peds.blast(x, y, R);
+    const knocked = this.peds.blast(x, y, R) + this.indoor.blast(x, y, z, R);
+    this.indoor.alarm(x, y, 900);
     if (knocked && byPlayer && this.state === "playing" && !this.ending) { this.crime("pedHit", knocked); this.stats.pedsHit += knocked; }
     this.peds.alarm(x, y, 900, "blast");
     for (const c of this.cars) {
@@ -918,9 +920,10 @@ export class Game {
     if (jail?.cell) {
       const c = jail.cell;
       this.ped = newPed(c.spawn.x, c.spawn.y, Math.PI);
-      this.jailT = JAIL_TIME;
+      const jt = currentSettings.jailSec;
+      this.jailT = jt;
       this.r3d.resetCamera(Math.PI); // from the day room into the cell
-      this.banner("HAFT", `${JAIL_TIME} Sekunden Haft · −$${cost.toLocaleString("de-DE")} Kaution · das Gefängnis ist offen, auf der Pritsche schlafen lässt den Tag vergehen`, "#8a9098", 3.6);
+      this.banner("HAFT", `${jt} Sekunden Haft · −$${cost.toLocaleString("de-DE")} Kaution · das Gefängnis ist offen, auf der Pritsche schlafen lässt den Tag vergehen`, "#8a9098", 3.6);
       this.autosaveT = -1;
       return;
     }
@@ -1032,7 +1035,7 @@ export class Game {
     } else if (heli) a = Math.atan2(heli.y - oy, heli.x - ox);
     if (onFoot) { this.ped.a = a; this.ped.shootT = 0.4; }
     this.fireCd = d.cd;
-    if (d.noise > 0) this.peds.alarm(ox, oy, d.noise, "shot");
+    if (d.noise > 0) { this.peds.alarm(ox, oy, d.noise, "shot"); this.indoor.alarm(ox, oy, Math.min(400, d.noise)); }
     if (d.crime) this.crime(d.crime);
     if (d.kind === "gun") {
       this.jobs.onShot();
@@ -1133,6 +1136,14 @@ export class Game {
       else { if (c.tag !== "suspect") this.crime("shot"); if (c.faction) this.gangs.provoked(c.faction); }
       return;
     }
+    // somebody in a shop or in the prison
+    const reach = d.range + 8;
+    const h = this.indoor.hitTest(pd.x + Math.cos(pd.a) * reach * 0.6, pd.y + Math.sin(pd.a) * reach * 0.6, pd.z + 11, reach * 0.6);
+    if (h) {
+      sfx.punch(); this.shake(0.08);
+      this.hitIndoor(h.it, h.p, d.dmg, pd.x, pd.y, d.id === "bat" ? 220 : 120);
+      return;
+    }
     for (const car of this.cars) {
       if (car === this.player || car.dead) continue;
       if (Math.hypot(car.x - (pd.x + Math.cos(pd.a) * 16), car.y - (pd.y + Math.sin(pd.a) * 16)) < 26) {
@@ -1140,6 +1151,17 @@ export class Game {
         return;
       }
     }
+  }
+
+  // a person in a room was hit by the player
+  private hitIndoor(it: Interior, p: IndoorPerson, dmg: number, fx: number, fy: number, push: number) {
+    for (let i = 0; i < 6; i++) this.emit(p.x, p.y, p.z + 12, rnd(-30, 30), rnd(-30, 30), rnd(10, 60), rnd(0.3, 0.6), rnd(2, 4), -200, "#8a0f14", 0, 1);
+    this.indoor.alarm(p.x, p.y, 260);
+    if (!this.indoor.damage(it, p, dmg, fx, fy, push)) { this.crime("shot"); return; }
+    this.stats.pedsHit++;
+    this.crime(p.role === "cop" || p.role === "guard" ? "copTakedown" : "pedShot");
+    if (this.rules.city && Math.random() < 0.6) this.pickups.push({ x: p.x, y: p.y, type: "cash", t: 0, value: Math.round(rnd(10, p.clerk ? 160 : 60)) });
+    if (p.clerk && this.robbery?.it === it) this.robbery = null;
   }
 
   // a pedestrian was knocked out by the player (weapon or fists)
@@ -1239,7 +1261,7 @@ export class Game {
         else { const p = this.player; if (Math.hypot(q.x - p.x, q.y - p.y) < 24 && Math.abs(q.z - p.z) < 30) { this.damagePlayerCar(q.dmg * 0.35); this.sparks(q.x, q.y, q.z, 4, -q.vx, -q.vy, 0.5); hit = true; } }
         // strafing from the air: the bullets kick up dust where they hit the ground
         if (!hit && q.z < gh && q.vz < 0 && Math.hypot(q.x - this.fx, q.y - this.fy) < 900) { this.emit(q.x, q.y, gh + 1, rnd(-20, 20), rnd(-20, 20), rnd(30, 70), rnd(0.3, 0.6), rnd(5, 8), 20, "#8a7a62", 0, 2); this.sparks(q.x, q.y, gh + 1, 2, 0, 0, 0.4); }
-        if (hit || q.life <= 0 || (this.world.isSolid(q.x, q.y, 2) && q.z < this.world.roofAt(q.x, q.y)) || q.z < gh) this.dropProj(i);
+        if (hit || q.life <= 0 || (this.world.shotBlocked(q.x, q.y, q.z) && q.z < this.world.roofAt(q.x, q.y)) || q.z < gh) this.dropProj(i);
         continue;
       }
       let remove = false;
@@ -1302,8 +1324,18 @@ export class Game {
           remove = true;
         }
       }
+      // people in the shops and in the prison
+      if (!remove && q.kind !== "bomb") {
+        for (let s = 1; s <= steps && !remove; s++) {
+          const h = this.indoor.hitTest(q.px + (q.x - q.px) * (s / steps), q.py + (q.y - q.py) * (s / steps), q.z, q.kind === "bullet" ? 7 : 10);
+          if (!h) continue;
+          if (q.kind === "bullet") this.hitIndoor(h.it, h.p, q.dmg, q.px, q.py, 90);
+          else this.explode(h.p.x, h.p.y, 1.1, 4, true, h.p.z);
+          remove = true;
+        }
+      }
       if (!remove) {
-        if (this.world.isSolid(q.x, q.y, 2) || q.z < gh) {
+        if ((q.kind === "bullet" ? this.world.shotBlocked(q.x, q.y, q.z) : this.world.isSolid(q.x, q.y, 2)) || q.z < gh) {
           if (q.kind === "rocket") this.explode(q.x, q.y, 1.1, 4);
           else if (q.kind === "bomb") { this.bombs.push({ car: null, ox: 0, oy: 0, x: q.px, y: q.py, z: gh + 3, t: 0 }); sfx.beep(); }
           else this.sparks(q.px, q.py, q.z, 5, -q.vx, -q.vy, 0.5);
@@ -1407,6 +1439,8 @@ export class Game {
     if (pl.kind === "contact") return this.onContact?.(pl) ?? false;
     if (pl.kind === "park") { this.hide.start(pl); return true; }
     if (pl.kind === "job") { this.jobs.startAt(pl); return true; }
+    const room = this.interiors.find((i) => i.id === pl.id);
+    if (room && this.indoor.clerkDead(room)) { this.setHint("Hier bedient niemand mehr – komm später wieder", 2); return true; }
     this.openModal({ kind: "shop", place: pl });
     return true;
   }
@@ -1839,7 +1873,7 @@ export class Game {
     }
     // a robbery: aim a gun at the clerk, the money lands on the counter, the alarm goes off
     const pl = this.places.find((p) => p.id === it.id);
-    if (!this.robbery && pl?.robbable && this.onFoot && WEAPON_DEFS[this.weapon].kind === "gun" && pd.shootT > 0 && Math.hypot(it.clerk.x - pd.x, it.clerk.y - pd.y) < 110) {
+    if (!this.robbery && pl?.robbable && !this.indoor.clerkDead(it) && this.onFoot && WEAPON_DEFS[this.weapon].kind === "gun" && pd.shootT > 0 && Math.hypot(it.clerk.x - pd.x, it.clerk.y - pd.y) < 110) {
       this.robbery = { it, t: 0, paid: false };
       this.setHint("„Nicht schießen! Nehmen Sie das Geld!“", 2);
     }
@@ -2317,6 +2351,7 @@ export class Game {
     if (playing && this.rules.city) this.checkBorder(dt);
     this.traffic.lights.update(dt);
     if (playing && this.rules.city) { this.peds.update(dt, this); this.traffic.updateParking(this, dt, this.parkedLimit); }
+    if (playing) this.indoor.update(dt, this.fx, this.fy);
     if (playing) this.updateProjs(dt);
     if (playing && !this.ending) {
       this.updatePlaces();

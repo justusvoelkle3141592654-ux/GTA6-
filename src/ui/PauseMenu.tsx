@@ -172,6 +172,20 @@ function Slider({ label, value, min, max, step, fmt, onChange }: { label: string
   );
 }
 
+// time in prison after being busted: any number of seconds (1 to 3600)
+function JailInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [txt, setTxt] = useState(String(value));
+  const commit = () => { const n = Math.round(Number(txt.replace(",", "."))); const v = Number.isFinite(n) ? Math.max(1, Math.min(3600, n)) : value; setTxt(String(v)); onChange(v); };
+  return (
+    <label className="mb-1 mt-2 flex items-center gap-2">
+      <span className="text-white/70">Haftdauer</span>
+      <input type="number" inputMode="numeric" min={1} max={3600} value={txt} onChange={(e) => setTxt(e.target.value)} onBlur={commit} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") commit(); }}
+        className="w-20 rounded-lg border border-white/20 bg-white/10 px-2 py-1 text-right font-bold text-white" />
+      <span className="text-white/60">Sekunden</span>
+    </label>
+  );
+}
+
 export function SettingsTab({ game, isTouch, narrow = false }: { game: Game; isTouch: boolean; narrow?: boolean }) {
   const [s, setS] = useState<Settings>(loadSettings);
   const [waiting, setWaiting] = useState<Action | null>(null);
@@ -205,6 +219,7 @@ export function SettingsTab({ game, isTouch, narrow = false }: { game: Game; isT
         <h3 className="mb-2 mt-4 font-display text-2xl tracking-widest text-pink-300">Spiel</h3>
         <label className="mb-1 flex items-center gap-2"><input type="checkbox" checked={s.tips} onChange={(e) => update({ ...s, tips: e.target.checked })} className="accent-pink-500" /> Tutorial-Hinweise</label>
         <label className="mb-1 flex items-center gap-2"><input type="checkbox" checked={s.shake} onChange={(e) => update({ ...s, shake: e.target.checked })} className="accent-pink-500" /> Kamerawackeln</label>
+        <JailInput value={s.jailSec} onChange={(v) => update({ ...s, jailSec: v })} />
         <button onClick={() => game.tips.reset()} className="mt-2 rounded-lg border border-white/20 px-3 py-1 text-xs text-white/70">Hinweise erneut zeigen</button>
       </div>
       <div className="rounded-2xl border border-white/10 bg-black/50 p-4 text-sm">

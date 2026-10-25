@@ -505,6 +505,19 @@ export class World {
     return false;
   }
 
+  // does a bullet at height z hit something here? Shots fly over the low furniture in the rooms (counters, bars, desks)
+  shotBlocked(x: number, y: number, z: number): boolean {
+    const b = this.blockAt(x, y), pad = 2;
+    if (b) for (const bd of b.buildings) {
+      if (!(x > bd.x - pad && x < bd.x + bd.w + pad && y > bd.y - pad && y < bd.y + bd.h + pad)) continue;
+      if (bd.shell && bd.low && z - (bd.zb ?? 0) > 11) continue;
+      if (bd.zb === undefined || (z + 20 > bd.zb && z < bd.zt! - 4)) return true;
+    }
+    const ex = this.extrasAt(x, y);
+    if (ex) for (const e of ex) if (x > e.x - pad && x < e.x + e.w + pad && y > e.y - pad && y < e.y + e.h + pad && !(e.shell && e.low && z > 11)) return true;
+    return false;
+  }
+
   // tree trunk (and a bit of the canopy) at (x, y)? pedestrians walk around them
   treeHit(x: number, y: number, pad = 0): boolean {
     const b = this.blockAt(x, y);

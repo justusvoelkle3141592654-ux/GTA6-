@@ -7,6 +7,8 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { Reflector } from "three/examples/jsm/objects/Reflector.js";
 import { box, cyl, C, canvasTex, withColor } from "./meshutil";
 import { HumanRig, lookFromSeed } from "../characters/human";
+import { Ragdoll, type RagdollWorld } from "../characters/ragdoll";
+import type { IndoorPerson } from "../gameplay/indoor";
 import { interiorCeil, onRoof, type Guest, type Interior, type Prop } from "../world/interiors";
 import type { Building } from "../world/world";
 import { furniture, floorTex, wallTex, type Parts } from "./furniture";
@@ -15,7 +17,7 @@ import type { Game } from "../core/engine";
 const FLOOR_Y = 2.6;
 const NEAR = 300; // furniture is drawn within this distance of the room (or of the prison yard)
 
-interface Person { rig: HumanRig; anim: string; clerk?: boolean; z: number }
+interface Person { rig: HumanRig; anim: string; clerk?: boolean; z: number; ip: IndoorPerson | null; rag: Ragdoll | null }
 interface Level { z: number; group: THREE.Group }
 interface Room {
   it: Interior; group: THREE.Group; inner: THREE.Group; roof: THREE.Mesh; ceiling: THREE.Mesh; walls: { m: THREE.Mesh; mat: THREE.MeshStandardMaterial; b: Building }[]; tower: THREE.Mesh | null;
@@ -394,19 +396,39 @@ export class InteriorsRenderer {
     return m;
   }
 
-  private spawn(g: Guest, seed: number, list: Person[], clerk = false) {
+  private spawn(g: Guest, seed: number, list: Person[], clerk = false, ip: IndoorPerson | null = null) {
     const rig = new HumanRig(lookFromSeed(seed * 31 + 7, g.role ?? "civ", g.shirt ?? "", g.pants ?? ""), 1);
-    rig.root.position.set(g.x, FLOOR_Y + (g.z ?? 0), g.y); rig.root.rotation.y = -g.a; rig.play(g.anim, 0);
+    rig.root.position.set(g.x, FLOOR_Y + (g.z ?? 0), g.y); rig.root.rotation.y = -g.a; rig.play(ip?.dead ? "lying" : g.anim, 0);
     this.scene.add(rig.root); this.setup(rig.root);
-    list.push({ rig, anim: g.anim, clerk, z: g.z ?? 0 });
+    list.push({ rig, anim: g.anim, clerk, z: g.z ?? 0, ip, rag: null });
     return rig;
   }
-  private people(room: Room) {
-    const it = room.it, list: Person[] = [];
-    let seed = it.id.length * 97;
-    if (it.clerk.x > -1e4) room.clerk = this.spawn({ x: it.clerk.x, y: it.clerk.y, a: it.clerk.a, anim: "idle" }, seed++, list, true);
-    for (const g of it.guests) this.spawn(g, seed++, list);
+  private people(room: Room, g: Game) {
+    const it = room.it, list: Person[] = [], ips = g.indoor.of(it);
+    let seed = it.id.length * 97, k = 0;
+    if (it.clerk.x > -1e4) room.clerk = this.spawn({ x: it.clerk.x, y: it.clerk.y, a: it.clerk.a, anim: "idle" }, seed++, list, true, ips[k++] ?? null);
+    for (const q of it.guests) this.spawn(q, seed++, list, false, ips[k++] ?? null);
     room.people = list;
+  }
+  // the ground and the walls for the bodies of people that were shot (set by the renderer)
+  ragWorld: RagdollWorld | null = null;
+  // one person: shot people fall as ragdolls and stay down, frightened people duck (the clerk puts the hands up)
+  private person(p: Person, dt: number, robbed: boolean) {
+    const ip = p.ip, r = p.rig;
+    if (ip?.dead) {
+      if (!p.rag && this.ragWorld && r.current !== "lying") {
+        r.root.updateMatrixWorld(true);
+        p.rag = new Ragdoll(r, new THREE.Vector3(ip.vx, Math.max(ip.vz, 20), ip.vy), ip.spin);
+        r.ragdoll = true; r.playUpper("");
+      }
+      if (p.rag) { p.rag.step(dt, this.ragWorld!); p.rag.pose(); }
+      r.update(dt);
+      return;
+    }
+    const scared = (ip?.scared ?? 0) > 0;
+    if (p.clerk) r.play(robbed || scared ? "handsUp" : "idle", 0.2);
+    else r.play(scared ? "cower" : p.anim, 0.25);
+    r.update(dt);
   }
   private drop(list: Person[] | null) { for (const p of list ?? []) { this.scene.remove(p.rig.root); p.rig.dispose(); } }
 
@@ -422,25 +444,23 @@ export class InteriorsRenderer {
       const near = inside || d < NEAR;
       room.inner.visible = near;
       // people only when you are close
-      if (d < 420 && !room.people) this.people(room);
+      if (d < 420 && !room.people) this.people(room, g);
       else if (d > 520 && room.people) { this.drop(room.people); room.people = null; room.clerk = null; }
       if (room.people) for (const p of room.people) {
-        if (p.clerk) {
-          const rob = g.robbery?.it === it;
-          p.rig.play(rob ? "handsUp" : "idle", 0.2);
+        if (p.clerk && !p.ip?.dead) {
           // the clerk looks at you
           const rel = Math.atan2(py - it.clerk.y, px - it.clerk.x) - it.clerk.a;
           p.rig.lookYaw = Math.max(-1, Math.min(1, -Math.atan2(Math.sin(rel), Math.cos(rel))));
         }
-        p.rig.update(dt);
+        this.person(p, dt, g.robbery?.it === it);
       }
       // the prison yard: its props and inmates while you are near the prison
       if (room.yard) {
         const yd = Math.hypot(px - cx - 300, py - cy);
         room.yard.visible = yd < 900;
-        if (yd < 700 && !room.yardPeople) { const l: Person[] = []; let s = 501; for (const q of it.yard!.guests) this.spawn(q, s++, l); room.yardPeople = l; }
+        if (yd < 700 && !room.yardPeople) { const l: Person[] = [], ips = g.indoor.yardOf(it); let s = 501, k = 0; for (const q of it.yard!.guests) this.spawn(q, s++, l, false, ips[k++] ?? null); room.yardPeople = l; }
         else if (yd > 800 && room.yardPeople) { this.drop(room.yardPeople); room.yardPeople = null; }
-        if (room.yardPeople) for (const p of room.yardPeople) p.rig.update(dt);
+        if (room.yardPeople) for (const p of room.yardPeople) this.person(p, dt, false);
       }
       // the door opens when somebody comes close
       const dd = Math.hypot(it.door.x - px, it.door.y - py);
