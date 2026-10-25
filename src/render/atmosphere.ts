@@ -164,10 +164,11 @@ export class Atmosphere {
     s.wet = Math.max(s.rain, s.wet - dt * 0.004); // streets dry slowly
     // colours
     const top = this.top, hor = this.horizon, sunC = this.sunColor;
-    mixC(top, "#0a1024", "#3f6fbf", s.day);
-    mixC(hor, "#151a30", "#c9d8ea", s.day);
-    hor.lerp(this.tmp.set("#ff9a5a"), s.dusk * 0.75);
-    top.lerp(this.tmp.set("#5a4a7a"), s.dusk * 0.35);
+    // Realismus Update 2.0: a less saturated, hazier sky (city air), warm but not pink dusk
+    mixC(top, "#0a0f1c", "#4b77ad", s.day);
+    mixC(hor, "#141a28", "#d2d9de", s.day);
+    hor.lerp(this.tmp.set("#f0a46a"), s.dusk * 0.7);
+    top.lerp(this.tmp.set("#4f4a66"), s.dusk * 0.3);
     const grey = this.tmp.set("#8a9099").multiplyScalar(0.4 + s.day * 0.6);
     top.lerp(grey, s.cloud * 0.7); hor.lerp(grey, s.cloud * 0.6);
     hor.lerp(this.tmp.set("#b8bec6").multiplyScalar(0.3 + 0.7 * s.day), s.fog * 0.8);
@@ -189,15 +190,15 @@ export class Atmosphere {
       this.sun.position.set(tx + dir.x * 1500, tz + dir.y * 1500, ty + dir.z * 1500);
       this.sun.target.position.set(tx, tz, ty); this.sun.target.updateMatrixWorld();
     }
-    this.hemi.intensity = 0.12 + s.day * 1.2 - s.cloud * 0.1 * s.day;
-    this.hemi.color.copy(top).lerp(this.tmp.set("#ffffff"), 0.4);
-    this.hemi.groundColor.set("#80705c").multiplyScalar(0.3 + s.day * 0.7);
+    this.hemi.intensity = 0.12 + s.day * 1.0 - s.cloud * 0.1 * s.day;
+    this.hemi.color.copy(top).lerp(this.tmp.set("#ffffff"), 0.45);
+    this.hemi.groundColor.set("#6f6455").multiplyScalar(0.3 + s.day * 0.7);
     // fog follows the horizon colour, thicker in fog and rain
     const fog = this.scene.fog as THREE.Fog;
     fog.color.copy(hor);
     const far = (this.quality === "ultra" ? 6200 : this.quality === "high" ? 5000 : this.quality === "medium" ? 4000 : 3000);
     fog.far = far * currentSettings.viewDist * (1 - s.fog * 0.75) * (1 - s.rain * 0.35);
-    fog.near = 300 * (1 - s.fog * 0.8);
+    fog.near = 220 * (1 - s.fog * 0.8);
     (this.scene.background as THREE.Color | null)?.copy(hor);
     // rain streaks
     this.rainMesh.visible = s.rain > 0.05;

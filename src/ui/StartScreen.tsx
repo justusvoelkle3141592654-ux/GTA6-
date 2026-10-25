@@ -5,97 +5,118 @@ import type { SaveData } from "../core/save";
 import { storageAvailable } from "../core/save";
 import type { ScoreEntry } from "../core/scores";
 import Help from "./Help";
-import { Choice, ScoreTable, Section, StatBar, fmt, fmtDate, fmtTime } from "./ui";
+import { Choice, ScoreTable, Section, StatBar, Toast, fmt, fmtDate, fmtTime } from "./ui";
 import Icon from "./icons";
 
 interface Props {
   name: string; setName: (n: string) => void; scores: ScoreEntry[]; config: GameConfig; update: (p: Partial<GameConfig>) => void;
   onStart: () => void; onNew: () => void; save: SaveData | null; isTouch: boolean; muted: boolean; toggleMute: () => void; bind: Bindings | null;
 }
+type Tab = "setup" | "scores" | "help";
+const TABS: [Tab, string][] = [["setup", "Spiel einrichten"], ["scores", "Bestenliste"], ["help", "Steuerung"]];
+const CAR_STATS = ["Tempo", "Beschl.", "Panzer", "Drift"];
 
+// start screen: the city flies by behind it; on the left the brand and the way into the game,
+// on the right the setup (mode, difficulty, car, camera, graphics, name), the scores and the controls
 export default function StartScreen({ name, setName, scores, config, update, onStart, onNew, save, isTouch, muted, toggleMute, bind }: Props) {
-  const [tab, setTab] = useState<"setup" | "scores" | "help">("setup");
+  const [tab, setTab] = useState<Tab>("setup");
   const [confirmNew, setConfirmNew] = useState(false);
   const cont = config.mode === "open" && !!save;
-  const startLabel = cont ? "WEITERSPIELEN" : "LOS GEHT'S";
-  const saveBox = cont && save && (
-    <div className="rounded-xl border border-green-300/30 bg-green-400/10 p-3 text-sm">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.25em] text-green-200/80">Spielstand</div>
-      <div className="mt-1 text-white/85">${fmt(save.cash)} · Story {save.progress.missions.length} Missionen · Spielzeit {fmtTime(save.stats.playTime)} · gespeichert {fmtDate(save.savedAt)}</div>
-      <button onClick={() => { if (confirmNew) { setConfirmNew(false); onNew(); } else setConfirmNew(true); }} className="mt-2 text-xs font-semibold text-white/60 underline hover:text-white">
-        {confirmNew ? "Wirklich neu anfangen? Der Spielstand wird beim nächsten Speichern überschrieben – nochmal tippen" : "Neues Spiel starten"}
-      </button>
-    </div>
-  );
   return (
-    <div className="absolute inset-0 z-20 overflow-y-auto">
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#0b0614]/95 via-[#0b0614]/55 to-[#0b0614]/80 lg:to-transparent" />
-      <div className="scanlines pointer-events-none absolute inset-0 opacity-50" />
-      <div className="relative mx-auto flex min-h-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 lg:flex-row lg:items-center lg:gap-10">
-        <div className="flex flex-col items-center text-center lg:w-[42%] lg:items-start lg:text-left">
-          <div className="mb-2 rounded-full border border-cyan-300/40 bg-cyan-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-cyan-200">3D Open World · Stadt, Strand & Berge</div>
-          <h1 className="font-display text-[24vw] leading-[0.82] tracking-wide text-white sm:text-[8.5rem]" style={{ textShadow: "0 6px 0 rgba(0,0,0,0.55), 0 0 30px rgba(0,0,0,0.5)" }}>
-            SOLARA<br /><span className="text-[#f2c14e]" style={{ textShadow: "0 6px 0 rgba(0,0,0,0.55), 0 0 30px rgba(0,0,0,0.5)" }}>BAY</span>
+    <div className="absolute inset-0 z-20">
+      <div className="sb-screen pointer-events-none" />
+      <div className="relative flex h-full flex-col gap-3 overflow-y-auto p-3 sb-scroll sm:flex-row sm:gap-5 sm:overflow-hidden sm:p-5"
+        style={{ paddingLeft: "max(0.75rem, var(--sal))", paddingRight: "max(0.75rem, var(--sar))" }}>
+        {/* brand and the way into the game */}
+        <div className="flex shrink-0 flex-col sm:w-[38%] sm:max-w-md sm:overflow-y-auto sm:pr-1 sb-scroll">
+          <div className="sb-eyebrow">Open City · Realismus Update 2.0</div>
+          <h1 className="sb-title mt-1 whitespace-nowrap text-[clamp(3rem,9vw,6.5rem)] [@media(max-height:480px)]:text-[3.4rem]" style={{ textShadow: "0 4px 18px rgba(0,0,0,0.5)" }}>
+            SOLARA <span className="text-sun-500">BAY</span>
           </h1>
-          <p className="mt-3 max-w-md text-sm text-white/75 sm:text-base">Kai Romero kommt nach Jahren zurück nach Solara Bay. Die Stadt hat sich verändert – und jemand schuldet ihm noch etwas. Klau Autos, erledige Aufträge, leg dich mit Banden und Polizei an und arbeite dich nach oben.</p>
-          <div className="mt-5 hidden w-full max-w-sm lg:block">
-            <button onClick={onStart} className="w-full rounded-sm bg-white px-8 py-4 font-display text-4xl tracking-[0.2em] text-black shadow-[0_6px_24px_rgba(0,0,0,0.55)] transition-transform hover:scale-[1.02] hover:bg-sky-100 active:scale-95">{startLabel}</button>
-            <div className="mt-2 text-xs text-white/40">Enter zum Starten</div>
+          <span className="sb-rule mt-2 w-16" />
+          <p className="sb-body mt-3 max-w-sm [@media(max-height:480px)]:hidden">Kai Romero kommt nach Jahren zurück. Die Stadt hat sich verändert – und jemand schuldet ihm noch etwas. Aufträge, Banden, Polizei: arbeite dich nach oben.</p>
+
+          {cont && save && (
+            <div className="sb-card mt-3 py-2">
+              <div className="flex items-baseline justify-between gap-2"><span className="sb-eyebrow">Spielstand</span><span className="sb-note">gespeichert {fmtDate(save.savedAt)}</span></div>
+              <div className="mt-1 grid grid-cols-3 gap-2">
+                <div><div className="sb-num text-xl text-ok-400">${fmt(save.cash)}</div><div className="sb-note">Bargeld</div></div>
+                <div><div className="sb-num text-xl text-fog-100">{save.progress.missions.length}</div><div className="sb-note">Missionen</div></div>
+                <div><div className="sb-num text-xl text-fog-100">{fmtTime(save.stats.playTime)}</div><div className="sb-note">Spielzeit</div></div>
+              </div>
+            </div>
+          )}
+          {config.mode === "open" && !storageAvailable() && <Toast tone="warn" className="mt-3 text-xs">Der lokale Speicher ist blockiert – der Fortschritt bleibt nur bis zum Neuladen erhalten.</Toast>}
+
+          <div className="mt-3 flex flex-col gap-1.5">
+            <button onClick={onStart} className="sb-btn sb-btn-primary sb-btn-lg w-full justify-between">
+              <span>{cont ? "Weiterspielen" : "Spiel starten"}</span><Icon name="arrow" size={20} />
+            </button>
+            {cont && (
+              <button onClick={() => { if (confirmNew) { setConfirmNew(false); onNew(); } else setConfirmNew(true); }} className={"sb-btn w-full justify-between " + (confirmNew ? "sb-btn-danger" : "")}>
+                <span>{confirmNew ? "Wirklich neu anfangen?" : "Neues Spiel"}</span>{confirmNew && <span className="text-[10px] normal-case tracking-normal opacity-80">nochmal tippen</span>}
+              </button>
+            )}
+            {confirmNew && <div className="sb-note">Der alte Spielstand wird beim nächsten Speichern überschrieben.</div>}
+          </div>
+          <div className="mt-auto flex items-center gap-2 pt-3">
+            <button onClick={toggleMute} className="sb-btn sb-btn-ghost sb-btn-sm"><Icon name={muted ? "mute" : "sound"} size={16} />{muted ? "Ton aus" : "Ton an"}</button>
+            {!isTouch && <span className="sb-note">Enter = Start</span>}
           </div>
         </div>
 
-        <div className="w-full rounded-2xl border border-white/10 bg-black/55 p-4 backdrop-blur-md lg:w-[58%]">
-          <div className="mb-4 flex gap-1 rounded-xl bg-white/5 p-1">
-            {([["setup", "Einstellungen"], ["scores", "Bestenliste"], ["help", "Steuerung"]] as const).map(([k, l]) => (
-              <button key={k} onClick={() => setTab(k)} className={"flex-1 rounded-lg py-2 font-display text-lg tracking-widest transition-colors " + (tab === k ? "bg-white text-black" : "text-white/70 hover:text-white")}>{l}</button>
+        {/* setup, scores, controls */}
+        <div className="sb-panel flex min-h-0 flex-1 flex-col">
+          <div className="flex shrink-0 border-b border-white/[0.08]" role="tablist">
+            {TABS.map(([k, l]) => (
+              <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+                className={"relative flex-1 px-2 py-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] transition-colors " + (tab === k ? "text-fog-100" : "text-fog-500 hover:text-fog-300")}>
+                {l}{tab === k && <span className="absolute inset-x-3 bottom-0 h-[2px] bg-sun-500" />}
+              </button>
             ))}
           </div>
-
-          {tab === "setup" && (
-            <div className="space-y-4">
-              {saveBox}
-              {config.mode === "open" && !storageAvailable() && <div className="rounded-xl border border-yellow-300/30 bg-yellow-300/10 p-3 text-xs text-yellow-100">Dein Browser blockiert den lokalen Speicher – der Fortschritt bleibt nur bis zum Neuladen der Seite erhalten.</div>}
-              <Section title="Spielmodus">
-                <Choice<Mode> value={config.mode} onChange={(v) => update({ mode: v })} options={[{ v: "open", label: "Open World", sub: "Story, Jobs, Läden" }, { v: "chase", label: "Verfolgungsjagd", sub: "Cops, Sterne, Takedowns" }, { v: "free", label: "Freie Fahrt", sub: "Keine Cops, kein Schaden" }]} />
-              </Section>
-              <Section title="Schwierigkeit">
-                <Choice<Difficulty> value={config.difficulty} disabled={config.mode === "free"} onChange={(v) => update({ difficulty: v })} options={[{ v: "easy", label: "Leicht", sub: "Wenig Cops, Heilung" }, { v: "normal", label: "Normal", sub: "Ausgewogen" }, { v: "hard", label: "Schwer", sub: "Bis zu 9 Cops" }]} />
-                <div className="mt-1.5 text-xs text-white/50">Hardcore schaltest du im Spiel ein: der rote Stern hinter den Fahndungssternen.</div>
-              </Section>
-              <Section title="Dein Auto (unterwegs klaust du dir einfach ein anderes)">
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {CARS.map((c) => (
-                    <button key={c.id} onClick={() => update({ car: c.id })} className={"rounded-xl border p-2 text-left transition-all active:scale-95 " + (config.car === c.id ? "border-white bg-white/20" : "border-white/15 bg-black/30 hover:border-white/35")}>
-                      <div className="flex items-center gap-2"><span className="h-3 w-3 rounded-full" style={{ background: c.color, boxShadow: `0 0 8px ${c.color}` }} /><span className="font-display text-xl leading-none tracking-wider">{c.name}</span></div>
-                      <div className="mb-1.5 mt-0.5 text-[10px] text-white/55">{c.desc}</div>
-                      <div className="space-y-1">
-                        <StatBar v={(c.maxV - 400) / 280} color="#2bf0ff" /><StatBar v={(c.acc - 450) / 320} color="#ffd23f" /><StatBar v={c.hp / 230} color="#ff3cac" /><StatBar v={1 - (c.grip - 6) / 7} color="#3dff8b" />
-                      </div>
-                    </button>
-                  ))}
-                </div>
-                <div className="mt-1 flex gap-3 text-[10px] text-white/45"><span><b className="text-cyan-300">■</b> Tempo</span><span><b className="text-yellow-300">■</b> Beschl.</span><span><b className="text-pink-400">■</b> Panzerung</span><span><b className="text-green-400">■</b> Drift</span></div>
-              </Section>
-              <Section title="Kamera (im Spiel mit C oder dem Kameraknopf wechselbar, im Auto auch Motorhaube, von vorne, seitlich)">
-                <Choice<CameraMode> value={config.camera} onChange={(v) => update({ camera: v })} options={[{ v: "chase", label: "3D Verfolger" }, { v: "fp", label: "Ego-Sicht", sub: "Im Auto sitzen" }, { v: "top", label: "Vogelperspektive" }]} />
-              </Section>
-              <Section title="Grafik">
-                <Choice<Quality> value={config.quality} onChange={(v) => update({ quality: v })} options={[{ v: "low", label: "Schnell", sub: "Für Handys" }, { v: "medium", label: "Mittel", sub: "2 Schattenstufen" }, { v: "high", label: "Hoch", sub: "Spiegelungen + Bloom" }, { v: "ultra", label: "Ultra", sub: "Weite Sicht, scharfe Spiegelung" }]} />
-              </Section>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                <div className="flex-1">
-                  <Section title="Dein Name">
-                    <input value={name} maxLength={12} onChange={(e) => setName(e.target.value.toUpperCase())} onKeyDown={(e) => { if (e.key === "Enter") onStart(); }} className="w-full rounded-xl border border-white/20 bg-black/40 px-4 py-2.5 font-display text-2xl tracking-widest text-white outline-none focus:border-white" />
-                  </Section>
-                </div>
-                <button onClick={toggleMute} className="rounded-xl border border-white/15 bg-black/30 px-4 py-3 text-sm text-white/70 hover:text-white"><span className="inline-flex items-center gap-2"><Icon name={muted ? "mute" : "sound"} size={18} />{muted ? "Ton aus" : "Ton an"}</span></button>
+          <div className="min-h-0 flex-1 overflow-y-auto p-3 sb-scroll sm:p-4">
+            {tab === "setup" && (
+              <div className="space-y-4">
+                <Section title="Spielmodus">
+                  <Choice<Mode> value={config.mode} onChange={(v) => update({ mode: v })} options={[{ v: "open", label: "Open World", sub: "Story, Jobs, Läden" }, { v: "chase", label: "Verfolgungsjagd", sub: "Cops, Sterne, Takedowns" }, { v: "free", label: "Freie Fahrt", sub: "Keine Cops, kein Schaden" }]} />
+                </Section>
+                <Section title="Schwierigkeit">
+                  <Choice<Difficulty> value={config.difficulty} disabled={config.mode === "free"} onChange={(v) => update({ difficulty: v })} options={[{ v: "easy", label: "Leicht", sub: "Wenig Cops, Heilung" }, { v: "normal", label: "Normal", sub: "Ausgewogen" }, { v: "hard", label: "Schwer", sub: "Bis zu 9 Cops" }]} />
+                  <div className="sb-note mt-1.5">Hardcore schaltest du im Spiel ein: das rote HC hinter den Fahndungssternen.</div>
+                </Section>
+                <Section title="Startfahrzeug">
+                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                    {CARS.map((c) => (
+                      <button key={c.id} onClick={() => update({ car: c.id })} aria-pressed={config.car === c.id} className={"sb-option " + (config.car === c.id ? "is-on" : "")}>
+                        <div className="flex items-center gap-2"><span className="h-3 w-5 rounded-[2px] ring-1 ring-white/25" style={{ background: c.color }} /><span className="font-display text-lg leading-none tracking-wider text-fog-100">{c.name}</span></div>
+                        <div className="mb-1.5 mt-0.5 text-[10px] text-fog-500">{c.desc}</div>
+                        <div className="space-y-[3px]">
+                          {[(c.maxV - 400) / 280, (c.acc - 450) / 320, c.hp / 230, 1 - (c.grip - 6) / 7].map((v, i) => (
+                            <div key={i} className="flex items-center gap-1.5"><span className="w-10 text-[9px] uppercase tracking-wider text-fog-500">{CAR_STATS[i]}</span><StatBar v={v} color={config.car === c.id ? "var(--color-sun-400)" : "var(--color-fog-300)"} /></div>
+                          ))}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="sb-note mt-1">Unterwegs klaust du dir einfach ein anderes.</div>
+                </Section>
+                <Section title="Kamera">
+                  <Choice<CameraMode> value={config.camera} onChange={(v) => update({ camera: v })} options={[{ v: "chase", label: "Verfolger", sub: "3D hinter dir" }, { v: "fp", label: "Ego-Sicht", sub: "Im Auto sitzen" }, { v: "top", label: "Von oben", sub: "Vogelperspektive" }]} />
+                  <div className="sb-note mt-1">Im Spiel wechselbar (C oder Kameraknopf), im Auto auch Motorhaube, von vorne und seitlich.</div>
+                </Section>
+                <Section title="Grafik">
+                  <Choice<Quality> value={config.quality} onChange={(v) => update({ quality: v })} options={[{ v: "low", label: "Schnell", sub: "Für Handys" }, { v: "medium", label: "Mittel", sub: "Schatten, Farbkorrektur" }, { v: "high", label: "Hoch", sub: "Spiegelungen, Glanz" }, { v: "ultra", label: "Ultra", sub: "Weite Sicht" }]} />
+                </Section>
+                <Section title="Dein Name">
+                  <input value={name} maxLength={12} onChange={(e) => setName(e.target.value.toUpperCase())} onKeyDown={(e) => { if (e.key === "Enter") onStart(); }}
+                    className="sb-input w-full font-display text-xl tracking-widest sm:max-w-xs" aria-label="Dein Name" />
+                </Section>
               </div>
-              <button onClick={onStart} className="w-full rounded-sm bg-white px-8 py-4 font-display text-4xl tracking-[0.2em] text-black shadow-[0_6px_24px_rgba(0,0,0,0.55)] transition-transform active:scale-95 lg:hidden">{startLabel}</button>
-            </div>
-          )}
-
-          {tab === "scores" && <ScoreTable scores={scores} />}
-          {tab === "help" && <Help isTouch={isTouch} bind={bind} />}
+            )}
+            {tab === "scores" && <ScoreTable scores={scores} />}
+            {tab === "help" && <Help isTouch={isTouch} bind={bind} />}
+          </div>
         </div>
       </div>
     </div>

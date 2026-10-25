@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- app icon: a palm in front of a pink sun -->
+<!-- app icon: a palm in front of the gold Solara sun -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#FF3CAC" android:pathData="M54,30a24,24 0 1,1 -0.1,0z" />
-    <path android:fillColor="#120A1F" android:pathData="M30,60h48v3h-48zM33,66h42v3h-42zM37,72h34v3h-34z" />
-    <path android:fillColor="#2BF0FF" android:pathData="M52,84l2,-30 2,0 2,30z" />
-    <path android:fillColor="#2BF0FF" android:pathData="M55,54c-6,-8 -16,-8 -22,-3c7,-2 14,0 22,3zM55,54c6,-8 16,-8 22,-3c-7,-2 -14,0 -22,3zM55,54c-2,-9 -10,-14 -18,-12c7,1 13,6 18,12zM55,54c2,-9 10,-14 18,-12c-7,1 -13,6 -18,12z" />
+    <path android:fillColor="#E6A536" android:pathData="M54,30a24,24 0 1,1 -0.1,0z" />
+    <path android:fillColor="#0C1015" android:pathData="M30,60h48v3h-48zM33,66h42v3h-42zM37,72h34v3h-34z" />
+    <path android:fillColor="#EEF1F4" android:pathData="M52,84l2,-30 2,0 2,30z" />
+    <path android:fillColor="#EEF1F4" android:pathData="M55,54c-6,-8 -16,-8 -22,-3c7,-2 14,0 22,3zM55,54c6,-8 16,-8 22,-3c-7,-2 -14,0 -22,3zM55,54c-2,-9 -10,-14 -18,-12c7,1 13,6 18,12zM55,54c2,-9 10,-14 18,-12c-7,1 -13,6 -18,12z" />
 </vector>

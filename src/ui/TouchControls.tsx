@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import type { TouchInput, Weapon } from "../core/engine";
 import { WeaponIcon } from "./ui";
 import Icon from "./icons";
+import { currentSettings } from "../core/settings";
 
 interface Props {
   input: TouchInput;
@@ -18,12 +19,15 @@ interface Props {
   onDetonate: () => void;
   onLook: (dx: number, dy: number) => void; // swiping on the right half turns the camera
   jump?: boolean;   // springs in the shoes (code): a jump button on foot
+  canEnter?: boolean; // on foot next to a vehicle
+  onToggleCar: () => void;
 }
 
 const RADIUS = 60;
 const LONG_PRESS = 420; // ms: holding the weapon button opens the wheel
 
-export default function TouchControls({ input, nitro01, relative = false, onFoot, flying = false, jet = false, weapon, ammo, bombsPlaced, onCycleWeapon, onWheel, onDetonate, onLook, jump = false }: Props) {
+export default function TouchControls({ input, nitro01, relative = false, onFoot, flying = false, jet = false, weapon, ammo, bombsPlaced, onCycleWeapon, onWheel, onDetonate, onLook, jump = false, canEnter = false, onToggleCar }: Props) {
+  const hs = currentSettings.hudScale; // the HUD size setting scales the touch controls too
   // camera: one finger swiping over the free right half of the screen
   const look = useRef<{ id: number; x: number; y: number } | null>(null);
   const lookDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -72,60 +76,73 @@ export default function TouchControls({ input, nitro01, relative = false, onFoot
     input.active = false; input.jx = 0; input.jy = 0;
   };
 
-  const btn = (label: string, active: boolean, set: (v: boolean) => void, key: "drift" | "nitro" | "fire", color: string, size = "h-20 w-20", extra?: React.ReactNode) => (
+  // round action button: dark glass, gold when pressed (fire: red); pointer capture keeps it pressed while the finger slides
+  const btn = (label: string, active: boolean, set: (v: boolean) => void, key: "drift" | "nitro" | "fire", size = "h-16 w-16", extra?: React.ReactNode) => (
     <div
-      className={`relative flex ${size} select-none items-center justify-center rounded-full border-2 font-display text-xl tracking-wider text-white transition-transform`}
-      style={{ borderColor: color, background: active ? color + "88" : "rgba(10,6,20,0.45)", boxShadow: active ? `0 0 26px ${color}` : `0 0 10px ${color}55`, transform: active ? "scale(0.92)" : "scale(1)" }}
+      className={`relative flex ${size} select-none items-center justify-center rounded-full border font-display text-lg tracking-[0.1em] transition-[transform,background-color] duration-100`}
+      style={{
+        borderColor: key === "fire" ? "rgba(224,70,75,0.75)" : active ? "var(--color-sun-400)" : "rgba(255,255,255,0.24)",
+        background: active ? (key === "fire" ? "rgba(224,70,75,0.85)" : "rgba(230,165,54,0.88)") : "rgba(9,12,16,0.55)",
+        color: active && key !== "fire" ? "var(--color-ink-950)" : "var(--color-fog-100)",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.35)", transform: active ? "scale(0.93)" : "scale(1)",
+      }}
       onPointerDown={(e) => { e.stopPropagation(); (e.target as HTMLElement).setPointerCapture?.(e.pointerId); input[key] = true; set(true); }}
       onPointerUp={() => { input[key] = false; set(false); }}
       onPointerCancel={() => { input[key] = false; set(false); }}
+      onLostPointerCapture={() => { input[key] = false; set(false); }}
     >
       {extra}
       <span className="relative">{label}</span>
     </div>
   );
+  const square = "flex h-14 w-14 flex-col items-center justify-center rounded-[6px] border border-white/25 bg-ink-950/55 shadow-[0_4px_14px_rgba(0,0,0,0.35)] active:scale-[0.93]";
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10">
       <div className="pointer-events-auto absolute bottom-0 left-0 top-24 w-[55%]" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         {!stick && (
-          <div className="absolute bottom-10 left-8 flex h-32 w-32 items-center justify-center rounded-full border-2 border-white/15 bg-white/5">
-            <div className="h-12 w-12 rounded-full border-2 border-pink-400/50 bg-pink-500/20" />
-            <span className="absolute -top-6 whitespace-nowrap text-[11px] font-semibold uppercase tracking-widest text-white/40">{onFoot ? "Laufen" : relative ? "↑ Gas · ↔ Lenken" : "Lenken"}</span>
+          <div className="absolute flex h-32 w-32 items-center justify-center rounded-full border border-white/20 bg-ink-950/25"
+            style={{ left: "calc(var(--sal) + 26px)", bottom: "calc(var(--sab) + 30px)", transform: `scale(${hs})`, transformOrigin: "bottom left" }}>
+            <div className="h-12 w-12 rounded-full border border-white/40 bg-fog-100/15" />
+            <span className="sb-hud-text absolute -top-5 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.16em] text-fog-500">{onFoot ? "Laufen" : relative ? "Gas · Lenken" : "Lenken"}</span>
           </div>
         )}
         {stick && (
-          <div className="fixed flex h-32 w-32 items-center justify-center rounded-full border-2 border-white/25 bg-white/5" style={{ left: stick.x - 64, top: stick.y - 64 }}>
-            <div className="h-14 w-14 rounded-full border-2 border-pink-300 bg-pink-500/50 shadow-[0_0_20px_rgba(255,60,172,0.8)]" style={{ transform: `translate(${stick.kx}px, ${stick.ky}px)` }} />
+          <div className="fixed flex h-32 w-32 items-center justify-center rounded-full border border-white/25 bg-ink-950/25" style={{ left: stick.x - 64, top: stick.y - 64, transform: `scale(${hs})` }}>
+            <div className="h-14 w-14 rounded-full border-2 border-sun-400 bg-fog-100/80" style={{ transform: `translate(${stick.kx / hs}px, ${stick.ky / hs}px)` }} />
           </div>
         )}
       </div>
 
       <div className="pointer-events-auto absolute bottom-0 right-0 top-24 w-[45%] touch-none" onPointerDown={lookDown} onPointerMove={lookMove} onPointerUp={lookUp} onPointerCancel={lookUp}>
-        <span className="absolute left-1/2 top-3 -translate-x-1/2 whitespace-nowrap text-[11px] font-semibold uppercase tracking-widest text-white/30">↔ Wischen: Kamera</span>
+        <span className="sb-hud-text absolute left-1/2 top-3 -translate-x-1/2 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.16em] text-fog-500/80">Wischen: Kamera</span>
       </div>
-      <div className="pointer-events-auto absolute bottom-6 right-4 flex items-end gap-3">
-        <div className="flex flex-col items-center gap-3">
+      <div className="pointer-events-auto absolute flex items-end gap-2.5" style={{ right: "calc(var(--sar) + 14px)", bottom: "calc(var(--sab) + 18px)", transform: `scale(${hs})`, transformOrigin: "bottom right" }}>
+        <button onPointerDown={(e) => { e.stopPropagation(); onToggleCar(); }} className={square + (onFoot && canEnter ? " border-sun-400 bg-sun-500/25" : "")} aria-label={onFoot ? "Einsteigen" : "Aussteigen"}>
+          <Icon name={onFoot ? "car" : "exit"} size={22} />
+          <span className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-fog-300">{onFoot ? "Rein" : "Raus"}</span>
+        </button>
+        <div className="flex flex-col items-center gap-2.5">
           {jet && (
-            <button onPointerDown={(e) => { e.stopPropagation(); onDetonate(); }} className="flex h-16 w-16 flex-col items-center justify-center rounded-full border-2 border-orange-300 bg-orange-600/70 font-display text-[11px] tracking-wider shadow-[0_0_24px_rgba(255,140,40,0.8)] active:scale-90" aria-label="Rakete"><Icon name="boom" size={22} />RAKETE</button>
+            <button onPointerDown={(e) => { e.stopPropagation(); onDetonate(); }} className={square + " border-alert-500/80 bg-alert-500/30"} aria-label="Rakete"><Icon name="boom" size={22} /><span className="text-[9px] font-bold tracking-wider">RAKETE</span></button>
           )}
           {bombsPlaced > 0 && (
-            <button onPointerDown={(e) => { e.stopPropagation(); onDetonate(); }} className="flex h-16 w-16 animate-pulse items-center justify-center rounded-full border-2 border-red-400 bg-red-600/70 text-2xl shadow-[0_0_24px_rgba(255,40,60,0.9)] active:scale-90" aria-label="Zünden"><Icon name="boom" size={26} /></button>
+            <button onPointerDown={(e) => { e.stopPropagation(); onDetonate(); }} className={square + " sb-blink border-alert-500 bg-alert-500/40"} aria-label="Zünden"><Icon name="boom" size={24} /><span className="text-[9px] font-bold tracking-wider">ZÜNDEN</span></button>
           )}
-          <button onPointerDown={weaponDown} onPointerUp={weaponUp} onPointerCancel={weaponUp} className="flex h-16 w-16 flex-col items-center justify-center rounded-2xl border-2 border-white/30 bg-black/50 active:scale-90">
-            <WeaponIcon w={weapon} size={26} />
-            <span className="mt-0.5 font-display text-xs tracking-wider text-white/80">{ammo}</span>
+          <button onPointerDown={weaponDown} onPointerUp={weaponUp} onPointerCancel={weaponUp} className={square} aria-label="Waffe wechseln, halten für Waffenrad">
+            <WeaponIcon w={weapon} size={24} />
+            <span className="sb-num mt-0.5 text-xs text-fog-300">{ammo}</span>
           </button>
-          {(!onFoot || flying || jump) && btn(flying ? "HOCH" : onFoot ? "SPRUNG" : "DRIFT", drift, setDrift, "drift", "#ff3cac", "h-16 w-16")}
+          {(!onFoot || flying || jump) && btn(flying ? "HOCH" : onFoot ? "SPRUNG" : "DRIFT", drift, setDrift, "drift")}
         </div>
-        <div className="flex flex-col items-center gap-3">
-          {btn(flying ? "RUNTER" : onFoot ? "SPRINT" : "NITRO", nitro, setNitro, "nitro", "#2bf0ff", "h-16 w-16",
+        <div className="flex flex-col items-center gap-2.5">
+          {btn(flying ? "RUNTER" : onFoot ? "SPRINT" : "NITRO", nitro, setNitro, "nitro", "h-16 w-16",
             !onFoot && !flying ? (
               <svg className="absolute inset-0 -rotate-90" viewBox="0 0 80 80">
-                <circle cx="40" cy="40" r="36" fill="none" stroke="#2bf0ff" strokeWidth="4" strokeDasharray={`${nitro01 * 226} 226`} opacity="0.9" />
+                <circle cx="40" cy="40" r="37" fill="none" stroke="var(--color-sun-400)" strokeWidth="3" strokeDasharray={`${nitro01 * 232} 232`} opacity="0.95" />
               </svg>
             ) : undefined)}
-          {btn("FEUER", fire, setFire, "fire", "#ff5a2a", "h-24 w-24")}
+          {btn("FEUER", fire, setFire, "fire", "h-[5.5rem] w-[5.5rem]")}
         </div>
       </div>
     </div>

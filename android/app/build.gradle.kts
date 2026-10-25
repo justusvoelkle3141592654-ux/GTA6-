@@ -8,8 +8,8 @@ android {
         applicationId = "de.solarabay.game"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "3.3"
+        versionCode = 8
+        versionName = "3.4"
     }
     // a fixed key in the project (from version 3.3): every build gets the same signature, so an update installs over the
     // installed app and keeps its save games. Only meant for sideloading, not for a store (the key is not secret).

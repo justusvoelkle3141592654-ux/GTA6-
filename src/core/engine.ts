@@ -34,6 +34,7 @@ import { Spawner } from "../gameplay/spawner";
 import { IndoorPeople, type IndoorPerson } from "../gameplay/indoor";
 import { FLAG_NAME, runCheat, type CheatFlag } from "../gameplay/cheats";
 import type { Weather } from "../render/atmosphere";
+import { PAL, tone } from "../ui/palette";
 
 export type GameState = "menu" | "playing" | "paused" | "over" | "modal";
 // overlays that stop the game while open (shops, dialogs, weapon wheel)
@@ -88,7 +89,7 @@ export interface HudData {
   kmh: number; time: number; drift: number; bust01: number; takedowns: number;
   weapon: Weapon; ammo: number; reserve: number; reloading: boolean; owned: Weapon[];
   bombsPlaced: number; jet: boolean; onFoot: boolean;
-  ending: EndReason | null; endT: number; // WASTED / BUSTED screen (grey picture, big letters)
+  ending: EndReason | null; endT: number; // end screen: grey picture, big letters (NIEDERGESTRECKT / FESTGENOMMEN)
   jailT: number;                          // seconds left in the cell (-1: free)
   canEnter: boolean; hint: string; air: boolean;
   armor01: number; district: string; districtColor: string;
@@ -104,7 +105,7 @@ export interface HudData {
   jump: boolean;          // springs in the shoes: a jump button on phones
 }
 export type EndReason = "dead" | "arrested";
-export const END_LABEL: Record<EndReason, string> = { dead: "WASTED", arrested: "BUSTED" };
+export const END_LABEL: Record<EndReason, string> = { dead: "NIEDERGESTRECKT", arrested: "FESTGENOMMEN" };
 
 export interface GameOverData {
   score: number; time: number; takedowns: number; maxStars: number; reason: EndReason | "finished";
@@ -310,7 +311,7 @@ export class Game {
   private autosaveT = AUTOSAVE_EVERY;
   private acc = 0;
   private glCanvas: HTMLCanvasElement;
-  private raf = 0; private last = 0; private hudT = 0; private tmpB: Building[] = [];
+  private raf = 0; private last = 0; private idleN = 0; private hudT = 0; private tmpB: Building[] = [];
 
   constructor(glCanvas: HTMLCanvasElement, overlay: HTMLCanvasElement, cb: Callbacks, config: GameConfig) {
     this.overlay = overlay;
@@ -483,7 +484,8 @@ export class Game {
   };
 
   // ---------- state ----------
-  private setState(s: GameState) { this.state = s; this.cb.onState(s); }
+  // leaving the running game (pause, phone, shop, dialog, end): nothing stays pressed, the touch controls disappear
+  private setState(s: GameState) { if (s !== "playing") this.releaseInput(); this.state = s; this.cb.onState(s); }
 
   private resetWorld() {
     this.cars = []; this.particles = []; this.pickups = []; this.texts = []; this.banners = []; this.flashes = []; this.projs = []; this.bombs = [];
@@ -624,7 +626,7 @@ export class Game {
     return writeSave(d);
   }
 
-  pause() { if (this.state === "playing") { this.setState("paused"); this.releaseInput(); } }
+  pause() { if (this.state === "playing") this.setState("paused"); }
   // nothing stays pressed: keys, mouse and the touch controls (they disappear while paused and get no "finger up")
   private releaseInput() {
     this.keys.clear(); this.fireHeld = false;
@@ -802,7 +804,7 @@ export class Game {
   private endRun(reason: EndReason) {
     if (this.ending) return;
     this.ending = { reason, t: 0 };
-    // the big WASTED / BUSTED letters come from the HUD (see Hud.tsx); here only the line under them
+    // the big end letters come from the HUD (see Hud.tsx); here only the line under them
     if (!this.rules.respawn) this.banner(END_LABEL[reason], reason === "dead" ? (this.onFoot ? "Du bist draufgegangen" : "Dein Wagen ist Schrott") : "Die Cops haben dich", reason === "dead" ? "#ff2a3a" : "#4da3ff", 3, true);
     sfx.gameOver();
     this.bankDrift();
@@ -1928,8 +1930,9 @@ export class Game {
       this.updateFall(dt);
       this.updateFx(dt);
     } else if (this.state === "over" || this.state === "modal") this.updateFx(dt);
-    this.r3d.render(this, dt);
-    this.renderOverlay();
+    // paused: the nearly opaque menu covers the city, so the 3D picture is redrawn only a few times a second (battery)
+    this.idleN = this.state === "paused" ? (this.idleN + 1) % 8 : 0;
+    if (this.idleN === 0) { this.r3d.render(this, dt); this.renderOverlay(); }
     this.radio.update(sfx.ctx, sfx.radioOut, (this.state === "playing" || this.state === "modal") && (!this.onFoot || this.has("headphones")) && !this.ending);
 
     this.hudT -= dt;
@@ -3359,7 +3362,7 @@ export class Game {
     if (this.player.nitro && this.state === "playing" && !this.onFoot) this.drawSpeedLines(ctx);
     if (this.config.camera === "fp" && !this.onFoot && this.state !== "menu") this.drawWindshield(ctx);
     if (this.state === "playing" && !this.ending && this.config.camera !== "top") this.drawCrosshair(ctx);
-    if (this.state !== "menu") { this.drawSeekers(ctx); this.drawMinimap(ctx); this.drawBanners(ctx); }
+    if (this.state !== "menu" && this.state !== "paused") { this.drawSeekers(ctx); this.drawMinimap(ctx); this.drawBanners(ctx); } // the pause menu has its own header
     if (this.fade > 0) { ctx.fillStyle = `rgba(0,0,0,${this.fade})`; ctx.fillRect(0, 0, cw, ch); }
   }
 
@@ -3374,7 +3377,7 @@ export class Game {
       const t = hs.mode === "tag" ? (i === hs.it ? "ES" : "") : sk.saw ? "!" : "?";
       if (!t) return;
       ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.strokeText(t, s.x, s.y);
-      ctx.fillStyle = t === "?" ? "#ffd23f" : "#ff4d4d"; ctx.fillText(t, s.x, s.y);
+      ctx.fillStyle = t === "?" ? PAL.sun3 : PAL.alert4; ctx.fillText(t, s.x, s.y);
     });
   }
 
@@ -3385,17 +3388,22 @@ export class Game {
     if (!t) return;
     const s = this.r3d.project(t.x, t.y, t.z + 14);
     if (!s.ok) return;
-    const r = 22 + Math.sin(this.t * 10) * 3;
-    ctx.strokeStyle = this.weapon === "rocket" ? "#ff9a2a" : this.weapon === "bomb" ? "#ff4d6d" : "#ff3cac";
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * TAU + Math.PI / 4;
-      ctx.moveTo(s.x + Math.cos(a) * r * 0.55, s.y + Math.sin(a) * r * 0.55);
-      ctx.lineTo(s.x + Math.cos(a) * r, s.y + Math.sin(a) * r);
-    }
-    ctx.stroke();
-    ctx.beginPath(); ctx.arc(s.x, s.y, 3, 0, TAU); ctx.fillStyle = ctx.strokeStyle; ctx.fill();
+    // target lock: four light corner ticks with a dark rim (explosives: red)
+    const r = 20, col = this.weapon === "rocket" || this.weapon === "bomb" ? PAL.alert4 : PAL.fog;
+    const ticks = () => {
+      ctx.beginPath();
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * TAU + Math.PI / 4;
+        ctx.moveTo(s.x + Math.cos(a) * r * 0.55, s.y + Math.sin(a) * r * 0.55);
+        ctx.lineTo(s.x + Math.cos(a) * r, s.y + Math.sin(a) * r);
+      }
+      ctx.stroke();
+    };
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "rgba(0,0,0,0.55)"; ctx.lineWidth = 4.5; ticks();
+    ctx.strokeStyle = col; ctx.lineWidth = 2; ticks();
+    ctx.lineCap = "butt";
+    ctx.beginPath(); ctx.arc(s.x, s.y, 2.2, 0, TAU); ctx.fillStyle = col; ctx.fill();
   }
 
   private drawTexts(ctx: CanvasRenderingContext2D) {
@@ -3406,10 +3414,10 @@ export class Game {
       const age = 1 - t.life / t.max;
       const pop = age < 0.15 ? 0.5 + (age / 0.15) * 0.8 : age < 0.25 ? 1.3 - ((age - 0.15) / 0.1) * 0.3 : 1;
       ctx.globalAlpha = Math.min(1, t.life * 2.5);
-      ctx.font = `${Math.round(t.size * pop * 1.15)}px "Bebas Neue", Impact, sans-serif`;
-      ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,0.7)";
+      ctx.font = `${Math.round(t.size * pop * 1.05)}px "Bebas Neue", Impact, sans-serif`;
+      ctx.lineWidth = 3.5; ctx.lineJoin = "round"; ctx.strokeStyle = "rgba(7,9,12,0.75)";
       ctx.strokeText(t.text, s.x, s.y);
-      ctx.fillStyle = t.color;
+      ctx.fillStyle = tone(t.color);
       ctx.fillText(t.text, s.x, s.y);
     }
     ctx.globalAlpha = 1;
@@ -3469,11 +3477,11 @@ export class Game {
       const k = Math.min(1, (mw / 2 - inset) / Math.max(1e-6, Math.abs(dx)), (mh / 2 - inset) / Math.max(1e-6, Math.abs(dy)));
       return [dx * k, dy * k];
     };
-    const r = 10 * hs;
+    const r = 6 * hs;
     const frame = () => { ctx.beginPath(); ctx.roundRect(x, y, mw, mh, r); };
     ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.beginPath(); ctx.roundRect(x - 3, y - 3, mw + 6, mh + 6 + below, r + 2); ctx.fill();
-    frame(); ctx.fillStyle = "#1b2633"; ctx.fill(); ctx.clip();
+    ctx.fillStyle = "rgba(7,9,12,0.55)"; ctx.beginPath(); ctx.roundRect(x - 3, y - 3, mw + 6, mh + 6 + below, r + 2); ctx.fill();
+    frame(); ctx.fillStyle = PAL.ink2; ctx.fill(); ctx.clip();
     // turning map: your heading points up (everything below is drawn in the turned frame)
     if (currentSettings.mapRotate) { ctx.translate(cxm, cym); ctx.rotate(-this.fa - Math.PI / 2); ctx.translate(-cxm, -cym); }
     // a square that covers the frame in any rotation
@@ -3485,25 +3493,25 @@ export class Game {
       ctx.globalAlpha = 0.95;
       ctx.drawImage(this.minimap, sx0, sy0, sx1 - sx0, sy1 - sy0, ox + (sx0 - sx) * f, oy + (sy0 - sy) * f, (sx1 - sx0) * f, (sy1 - sy0) * f);
       ctx.globalAlpha = 1;
-      // a slight blue-grey tint (the GTA map look)
-      ctx.fillStyle = "rgba(40,60,85,0.22)"; ctx.fillRect(cxm - R * m, cym - R * m, R * 2 * m, R * 2 * m);
+      // a dark night-asphalt tint keeps the symbols on top readable
+      ctx.fillStyle = "rgba(12,16,21,0.3)"; ctx.fillRect(cxm - R * m, cym - R * m, R * 2 * m, R * 2 * m);
     }
     for (const pk of this.pickups) {
       const dx = (pk.x - fx) * m, dy = (pk.y - fy) * m;
       if (!inRect(dx, dy, 0)) continue;
-      ctx.fillStyle = pk.type === "cash" ? "#3dff8b" : pk.type === "nitro" ? "#2bf0ff" : pk.type === "rocket" ? "#ff9a2a" : pk.type === "bomb" ? "#ff4d6d" : "#fff";
+      ctx.fillStyle = pk.type === "cash" ? PAL.ok4 : pk.type === "nitro" ? PAL.cop4 : pk.type === "rocket" || pk.type === "bomb" ? PAL.alert4 : PAL.fog;
       ctx.fillRect(cxm + dx - 2, cym + dy - 2, 4, 4);
     }
     for (const c of this.cars) {
       if (c.kind !== "cop" || c.dead) continue;
       const [dx, dy] = toEdge((c.x - fx) * m, (c.y - fy) * m, 5);
-      ctx.fillStyle = Math.sin(this.t * 14 + c.siren) > 0 ? "#ff2244" : "#3d7bff";
+      ctx.fillStyle = Math.sin(this.t * 14 + c.siren) > 0 ? PAL.alert : PAL.cop;
       ctx.beginPath(); ctx.arc(cxm + dx, cym + dy, 3.5, 0, TAU); ctx.fill();
     }
     if (this.rules.respawn) {
       // GPS route to the current goal
       if (this.routeN > 1) {
-        ctx.strokeStyle = this.nav?.color ?? "#ff3cac"; ctx.lineWidth = 3; ctx.lineJoin = "round"; ctx.globalAlpha = 0.85;
+        ctx.strokeStyle = this.nav ? tone(this.nav.color) : PAL.sun; ctx.lineWidth = 3; ctx.lineJoin = "round"; ctx.globalAlpha = 0.9;
         ctx.beginPath();
         for (let i = 0; i < this.routeN; i++) {
           const px = cxm + (this.route[i * 2] - fx) * m, py = cym + (this.route[i * 2 + 1] - fy) * m;
@@ -3535,12 +3543,13 @@ export class Game {
       if (sa) { ctx.strokeStyle = "rgba(157,77,255,0.85)"; ctx.lineWidth = 2; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.arc(cxm + (sa.x - fx) * m, cym + (sa.y - fy) * m, sa.r * m, 0, TAU); ctx.stroke(); ctx.setLineDash([]); }
       for (const list of [this.missions.markers, this.jobs.markers, this.hide.markers]) for (const mk of list) {
         const [dx, dy] = toEdge((mk.x - fx) * m, (mk.y - fy) * m, 7);
-        ctx.fillStyle = mk.color; ctx.beginPath(); ctx.arc(cxm + dx, cym + dy, mk.kind === "enemy" ? 4 : 6, 0, TAU); ctx.fill();
-        if (mk.label) { ctx.fillStyle = "#fff"; ctx.fillText(mk.label, cxm + dx, cym + dy + 0.5); }
+        ctx.fillStyle = tone(mk.color); ctx.strokeStyle = "rgba(7,9,12,0.8)"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(cxm + dx, cym + dy, mk.kind === "enemy" ? 4 : 6, 0, TAU); ctx.fill(); ctx.stroke();
+        if (mk.label) { ctx.fillStyle = PAL.ink; ctx.fillText(mk.label, cxm + dx, cym + dy + 0.5); }
       }
       // search area while the police looks for you, helicopter
       if (this.wanted.searching) {
-        ctx.strokeStyle = Math.sin(this.t * 8) > 0 ? "rgba(255,40,70,0.75)" : "rgba(60,120,255,0.75)"; ctx.lineWidth = 2;
+        ctx.strokeStyle = Math.sin(this.t * 8) > 0 ? "rgba(224,70,75,0.75)" : "rgba(74,134,240,0.75)"; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(cxm + (this.police.lastX - fx) * m, cym + (this.police.lastY - fy) * m, this.police.searchRadius * m, 0, TAU); ctx.stroke();
       }
       const h = this.police.heli;
@@ -3550,26 +3559,26 @@ export class Game {
       }
       if (this.waypoint) {
         const [dx, dy] = toEdge((this.waypoint.x - fx) * m, (this.waypoint.y - fy) * m, 7);
-        ctx.strokeStyle = "#ff3cac"; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(cxm + dx, cym + dy, 5, 0, TAU); ctx.stroke();
+        ctx.strokeStyle = PAL.sun; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(cxm + dx, cym + dy, 5, 0, TAU); ctx.stroke();
       }
       // own markers from the big map (only while they are on the minimap)
       for (const mk of this.markers) {
         const dx = (mk.x - fx) * m, dy = (mk.y - fy) * m;
         if (!inRect(dx, dy, 6)) continue;
-        ctx.fillStyle = "#2bf0ff"; ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.lineWidth = 1.5;
+        ctx.fillStyle = PAL.cop4; ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.moveTo(cxm + dx, cym + dy); ctx.lineTo(cxm + dx - 3.5, cym + dy - 6); ctx.arc(cxm + dx, cym + dy - 7.5, 4, Math.PI * 0.8, Math.PI * 0.2); ctx.closePath(); ctx.fill(); ctx.stroke();
       }
     }
     if (this.onFoot && !this.player.dead && !this.playerCarStored) {
       const dx = (this.player.x - fx) * m, dy = (this.player.y - fy) * m;
-      ctx.fillStyle = "#ffd23f"; ctx.fillRect(cxm + dx - 3, cym + dy - 3, 6, 6);
+      ctx.fillStyle = PAL.sun3; ctx.fillRect(cxm + dx - 3, cym + dy - 3, 6, 6);
     }
     // you: a white arrow with a dark rim
     ctx.translate(cxm, cym); ctx.rotate(this.fa); ctx.scale(hs, hs);
     ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "rgba(0,0,0,0.8)"; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-6, -6); ctx.lineTo(-3, 0); ctx.lineTo(-6, 6); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.restore();
-    ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 1.5; frame(); ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.16)"; ctx.lineWidth = 1; frame(); ctx.stroke();
     // north marker on the edge
     const na = currentSettings.mapRotate ? -this.fa - Math.PI : -Math.PI / 2;
     const [nx, ny] = toEdge(Math.cos(na) * mw, Math.sin(na) * mw, 8 * hs);
@@ -3579,44 +3588,57 @@ export class Game {
     // health | vest (in a vehicle also: vehicle | nitro) - the bars under the map
     if (bars) {
       const pd = this.ped, p = this.player, low = pd.hp / pd.maxHp < 0.25 && Math.sin(this.t * 10) > 0;
+      // two bars per row with a small gap; the track is a dark line, the filled part a palette colour
       const row = (yy: number, a: number, ca: string, b: number, cb: string) => {
-        const wa = mw * 0.62 - 2 * hs, wb = mw * 0.38 - 2 * hs, xb = x + mw * 0.62 + 2 * hs;
-        ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(x, yy, wa, barH); ctx.fillRect(xb, yy, wb, barH);
+        const wa = mw * 0.64 - 2 * hs, wb = mw * 0.36 - 2 * hs, xb = x + mw * 0.64 + 2 * hs;
+        ctx.fillStyle = "rgba(7,9,12,0.7)"; ctx.fillRect(x, yy, wa, barH); ctx.fillRect(xb, yy, wb, barH);
         ctx.fillStyle = ca; ctx.fillRect(x, yy, wa * clamp(a, 0, 1), barH);
         ctx.fillStyle = cb; ctx.fillRect(xb, yy, wb * clamp(b, 0, 1), barH);
       };
       const y0 = y + mh + 4 * hs;
-      row(y0, pd.hp / pd.maxHp, low ? "#e8473c" : "#5cb85c", pd.armor / MAX_ARMOR, "#4a90d9");
-      if (bars > 1) row(y0 + barH + 3 * hs, p.dead ? 0 : p.hp / p.maxHp, p.hp / p.maxHp < 0.3 ? "#e8473c" : "#e0913a", this.nitro, "#3fd0e0");
+      row(y0, pd.hp / pd.maxHp, low ? PAL.alert : PAL.ok, pd.armor / MAX_ARMOR, PAL.cop);
+      if (bars > 1) row(y0 + barH + 3 * hs, p.dead ? 0 : p.hp / p.maxHp, p.hp / p.maxHp < 0.3 ? PAL.alert : PAL.fog3, this.nitro, PAL.sun);
     }
   }
   // safe area of phones with a notch (CSS env values, read on resize)
   safe = { t: 0, r: 0, b: 0, l: 0 };
 
+  // announcements (mission passed / failed, wanted level, places): a dark band across the screen that fades out
+  // at the sides, a short line in the colour of the message, the title and the line under it
   private drawBanners(ctx: CanvasRenderingContext2D) {
     const { cw, ch } = this;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    let yy = ch * 0.3;
+    let yy = ch * 0.4;
     for (let i = this.banners.length - 1; i >= 0; i--) {
       const b = this.banners[i];
       const age = b.max - b.life;
-      const pop = age < 0.12 ? 0.4 + (age / 0.12) * 0.8 : age < 0.22 ? 1.2 - ((age - 0.12) / 0.1) * 0.2 : 1;
-      const alpha = Math.min(1, b.life * 3);
+      const alpha = Math.min(1, b.life * 3, age * 6);
+      const rise = age < 0.2 ? (1 - age / 0.2) * 8 : 0;
       const big = b.big;
-      const fs = Math.min(cw * (big ? 0.2 : 0.11), big ? 140 : 72) * pop;
-      const by = big ? ch * 0.42 : yy;
+      const fs = Math.min(cw * (big ? 0.12 : 0.075), big ? 96 : 56);
+      const subFs = Math.round(Math.max(12, fs * 0.26));
+      const bandH = fs * 1.05 + (b.sub ? subFs * 1.6 : 0) + 14;
+      const top = (big ? ch * 0.45 : yy) - fs * 0.5 - 7 + rise;
+      const col = tone(b.color);
+      ctx.globalAlpha = alpha * 0.9;
+      const gr = ctx.createLinearGradient(0, 0, cw, 0);
+      gr.addColorStop(0, "rgba(7,9,12,0)"); gr.addColorStop(0.25, "rgba(7,9,12,0.66)"); gr.addColorStop(0.75, "rgba(7,9,12,0.66)"); gr.addColorStop(1, "rgba(7,9,12,0)");
+      ctx.fillStyle = gr; ctx.fillRect(0, top, cw, bandH);
       ctx.globalAlpha = alpha;
+      ctx.fillStyle = col; ctx.fillRect(cw / 2 - 26, top, 52, 2);
       ctx.font = `${Math.round(fs)}px "Bebas Neue", Impact, sans-serif`;
-      ctx.lineWidth = 6; ctx.strokeStyle = "rgba(0,0,0,0.75)";
-      ctx.strokeText(b.text, cw / 2, by);
-      ctx.fillStyle = b.color; ctx.fillText(b.text, cw / 2, by);
+      ctx.letterSpacing = `${Math.round(fs * 0.06)}px`;
+      ctx.fillStyle = col === PAL.fog ? PAL.fog : col;
+      ctx.fillText(b.text, cw / 2, top + 7 + fs * 0.55);
+      ctx.letterSpacing = "0px";
       if (b.sub) {
-        ctx.font = `600 ${Math.round(Math.max(13, fs * 0.24))}px Inter, sans-serif`;
-        ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.lineWidth = 4;
-        ctx.strokeText(b.sub, cw / 2, by + fs * 0.55); ctx.fillText(b.sub, cw / 2, by + fs * 0.55);
+        ctx.font = `600 ${subFs}px Inter, sans-serif`;
+        ctx.fillStyle = PAL.fog3;
+        ctx.fillText(b.sub, cw / 2, top + 7 + fs * 1.05 + subFs * 0.7);
       }
-      yy += fs * 0.95;
+      yy += bandH + 6;
     }
     ctx.globalAlpha = 1;
   }
+
 }

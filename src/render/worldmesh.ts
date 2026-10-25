@@ -124,9 +124,9 @@ export function roadsMesh(world: World): THREE.Group {
   };
   for (const rd of net.roads) {
     const hw = rd.hw;
-    strip(rd, -hw, hw, 0.35, "#3c3846");
-    strip(rd, -2, 2, 0.6, "#e0a82a", 3);
-    strip(rd, -hw + 6, -hw + 8, 0.6, "#c8c8d2"); strip(rd, hw - 8, hw - 6, 0.6, "#c8c8d2");
+    strip(rd, -hw, hw, 0.35, "#3e3f43");
+    strip(rd, -2, 2, 0.6, "#d4a43c", 3);
+    strip(rd, -hw + 6, -hw + 8, 0.6, "#d5d4cf"); strip(rd, hw - 8, hw - 6, 0.6, "#d5d4cf");
     // reflector posts along the edges
     for (let p = 6; p < rd.n - 2; p += 10) for (const side of [-1, 1]) {
       const q = net.point(rd, p, side * (hw + 8));

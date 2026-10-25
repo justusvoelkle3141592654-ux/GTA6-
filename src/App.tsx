@@ -172,32 +172,33 @@ export default function App() {
   const rules = MODE_RULES[config.mode];
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-[#0b0614] font-sans text-white">
+    <div className="relative h-full w-full overflow-hidden bg-ink-900 font-sans text-fog-100">
       <canvas ref={glRef} className="absolute inset-0 block h-full w-full" />
       <canvas ref={ovRef} className="pointer-events-none absolute inset-0 block" />
-      <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(ellipse at center, transparent 60%, rgba(5,0,15,0.6) 100%)" }} />
-      <div ref={hurtRef} className="pointer-events-none absolute inset-0 opacity-0" style={{ background: "radial-gradient(ellipse at center, transparent 35%, rgba(255,20,50,0.75) 100%)" }} />
+      <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(ellipse at center, transparent 62%, rgba(7,9,12,0.5) 100%)" }} />
+      <div ref={hurtRef} className="pointer-events-none absolute inset-0 opacity-0" style={{ background: "radial-gradient(ellipse at center, transparent 35%, rgba(200,40,48,0.7) 100%)" }} />
       {((hud.onFoot ? hud.health01 : hud.carHealth01) < 0.3) && playing && rules.damage && (
-        <div className="pointer-events-none absolute inset-0 animate-pulse" style={{ background: "radial-gradient(ellipse at center, transparent 50%, rgba(255,0,40,0.3) 100%)" }} />
+        <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(ellipse at center, transparent 50%, rgba(224,70,75,0.28) 100%)" }} />
       )}
 
       {glError && (
         <Overlay>
-          <h2 className="font-display text-5xl text-pink-400">WebGL nicht verfügbar</h2>
-          <p className="mt-2 max-w-sm text-center text-white/70">Dein Browser unterstützt kein 3D (WebGL). Bitte aktiviere die Hardwarebeschleunigung oder nutze einen aktuellen Browser.</p>
+          <h2 className="sb-title text-5xl text-alert-400">WebGL nicht verfügbar</h2>
+          <p className="sb-body mt-2 max-w-sm text-center">Dein Browser unterstützt kein 3D (WebGL). Bitte aktiviere die Hardwarebeschleunigung oder nutze einen aktuellen Browser.</p>
         </Overlay>
       )}
 
       {/* "fast" graphics have no post effects: the dark corners of the colour grade come from CSS */}
       {(playing || state === "paused") && config.quality === "low" && <div className="pointer-events-none absolute inset-0 z-[5]" style={{ background: "radial-gradient(ellipse at center, transparent 58%, rgba(0,0,0,0.32) 100%)" }} />}
-      {(playing || state === "paused") && g && (
+      {playing && g && (
         <Hud hud={hud} isTouch={isTouch} rules={rules} camera={config.camera} onPause={() => g.pause()} onCam={cycleCam} onZoom={() => g.toggleZoom()} onToggleCar={() => g.toggleCar()}
           onInteract={() => g.interact()} onRadio={() => g.cycleRadio()} onJob={() => g.toggleJob()} onPhone={() => g.openModal({ kind: "phone" })} onDetonate={() => g.detonate()} onWeapon={(w) => g.setWeapon(w)} onWheel={() => g.openModal({ kind: "wheel" })}
           hardcore={config.difficulty === "hardcore"} onHardcore={toggleHardcore} />
       )}
       {playing && isTouch && touchInput && g && (
         <TouchControls jump={hud.jump} input={touchInput} nitro01={hud.nitro01} flying={hud.alt >= 0 || hud.fly} jet={hud.jet} relative={config.camera !== "top"} onFoot={hud.onFoot} weapon={hud.weapon} ammo={hud.reloading ? "…" : ammoText(hud.ammo, hud.reserve)} bombsPlaced={hud.bombsPlaced}
-          onCycleWeapon={() => g.cycleWeapon()} onWheel={() => g.openModal({ kind: "wheel" })} onDetonate={() => g.detonate()} onLook={(dx, dy) => g.lookDrag(dx, dy)} />
+          onCycleWeapon={() => g.cycleWeapon()} onWheel={() => g.openModal({ kind: "wheel" })} onDetonate={() => g.detonate()} onLook={(dx, dy) => g.lookDrag(dx, dy)}
+          canEnter={hud.canEnter} onToggleCar={() => g.toggleCar()} />
       )}
 
       {state === "modal" && g && modal?.kind === "shop" && <ShopMenu key={modal.place.id} game={g} place={modal.place} onClose={() => g.closeModal()} />}

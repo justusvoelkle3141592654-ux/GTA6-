@@ -532,8 +532,25 @@ class PointsLayer {
 
 // ---------------------------------------------------------------- renderer
 // colour grade in the style of the sunny crime games: warmer light, a little more contrast and saturation, dark corners
+// Realismus Update 2.0: a filmic colour grade inside the tone mapping, so every quality level gets it without
+// an extra render pass: the ACES curve, calmer colours, cool shadows, warm light and a slightly lifted black.
+// The post pass below (from "medium" up) only adds a little contrast and the vignette.
+const TONE_SRC = THREE.ShaderChunk.tonemapping_pars_fragment;
+THREE.ShaderChunk.tonemapping_pars_fragment = TONE_SRC.replace(
+  "vec3 CustomToneMapping( vec3 color ) { return color; }",
+  `vec3 CustomToneMapping( vec3 color ) {
+    vec3 c = ACESFilmicToneMapping( color );
+    float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
+    c = mix( vec3( l ), c, 0.86 );
+    c *= mix( vec3( 0.95, 0.99, 1.06 ), vec3( 1.04, 1.0, 0.94 ), smoothstep( 0.03, 0.5, l ) );
+    return clamp( c * 0.985 + 0.003, 0.0, 1.0 );
+  }`,
+);
+// another three.js version might word the chunk differently: then plain ACES (never an untouched, far too bright picture)
+const GRADED = THREE.ShaderChunk.tonemapping_pars_fragment !== TONE_SRC;
+
 const GRADE = {
-  uniforms: { tDiffuse: { value: null }, uSat: { value: 1.12 }, uCon: { value: 1.07 }, uTint: { value: new THREE.Vector3(1.03, 1.0, 0.955) }, uVig: { value: 0.32 } },
+  uniforms: { tDiffuse: { value: null }, uSat: { value: 1.0 }, uCon: { value: 1.04 }, uTint: { value: new THREE.Vector3(1.0, 1.0, 1.0) }, uVig: { value: 0.28 } },
   vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
   fragmentShader: `uniform sampler2D tDiffuse; uniform float uSat, uCon, uVig; uniform vec3 uTint; varying vec2 vUv;
     void main() {
@@ -548,6 +565,8 @@ const GRADE = {
       gl_FragColor = vec4(clamp(col, 0.0, 1.0), c.a);
     }`,
 };
+
+const ASPHALT = 0x3f4044; // neutral dark asphalt (no purple cast)
 
 export class Renderer3D {
   renderer: THREE.WebGLRenderer;
@@ -611,7 +630,7 @@ export class Renderer3D {
     this.interiorList = interiors;
     this.world = world; this.quality = quality; this.camMode = camMode;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: quality === "high" || quality === "ultra", powerPreference: "high-performance" });
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMapping = GRADED ? THREE.CustomToneMapping : THREE.ACESFilmicToneMapping; // ACES plus the colour grade above
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
@@ -697,7 +716,7 @@ export class Renderer3D {
     noise.wrapS = noise.wrapT = THREE.RepeatWrapping;
     noise.repeat.set(WORLD / 160, WORLD / 160);
     noise.anisotropy = 4;
-    this.asphaltMat = new THREE.MeshStandardMaterial({ color: 0x46464b, map: noise, roughness: 0.55, metalness: 0.15, envMapIntensity: 0.6 });
+    this.asphaltMat = new THREE.MeshStandardMaterial({ color: ASPHALT, map: noise, roughness: 0.62, metalness: 0.1, envMapIntensity: 0.55 });
     const asphalt = new THREE.Mesh(new THREE.PlaneGeometry(WORLD, WORLD).rotateX(-Math.PI / 2).translate(WORLD / 2, 0, WORLD / 2), this.asphaltMat);
     asphalt.receiveShadow = true;
     this.scene.add(asphalt);
@@ -707,26 +726,26 @@ export class Renderer3D {
       const cy = j * BLOCK + ROAD / 2;
       for (let i = 0; i < GRID; i++) {
         const sx = i * BLOCK + ROAD + 26, ex = (i + 1) * BLOCK - 26, mx = (sx + ex) / 2, L = ex - sx;
-        M.push(flat(L, 2.4, mx, cy - 3, "#e0a82a"), flat(L, 2.4, mx, cy + 3, "#e0a82a"), flat(L, 2, mx, cy - ROAD / 2 + 8, "#c8c8d2"), flat(L, 2, mx, cy + ROAD / 2 - 8, "#c8c8d2"));
-        for (let k = sx + 10; k < ex - 20; k += 50) M.push(flat(22, 1.6, k + 11, cy - 34, "#9a9aa6"), flat(22, 1.6, k + 11, cy + 34, "#9a9aa6"));
+        M.push(flat(L, 2.4, mx, cy - 3, "#d4a43c"), flat(L, 2.4, mx, cy + 3, "#d4a43c"), flat(L, 2, mx, cy - ROAD / 2 + 8, "#d5d4cf"), flat(L, 2, mx, cy + ROAD / 2 - 8, "#d5d4cf"));
+        for (let k = sx + 10; k < ex - 20; k += 50) M.push(flat(22, 1.6, k + 11, cy - 34, "#bdbcb6"), flat(22, 1.6, k + 11, cy + 34, "#bdbcb6"));
       }
     }
     for (let i = 0; i <= GRID; i++) {
       const cx = i * BLOCK + ROAD / 2;
       for (let j = 0; j < GRID; j++) {
         const sy = j * BLOCK + ROAD + 26, ey = (j + 1) * BLOCK - 26, my = (sy + ey) / 2, L = ey - sy;
-        M.push(flat(2.4, L, cx - 3, my, "#e0a82a"), flat(2.4, L, cx + 3, my, "#e0a82a"), flat(2, L, cx - ROAD / 2 + 8, my, "#c8c8d2"), flat(2, L, cx + ROAD / 2 - 8, my, "#c8c8d2"));
-        for (let k = sy + 10; k < ey - 20; k += 50) M.push(flat(1.6, 22, cx - 34, k + 11, "#9a9aa6"), flat(1.6, 22, cx + 34, k + 11, "#9a9aa6"));
+        M.push(flat(2.4, L, cx - 3, my, "#d4a43c"), flat(2.4, L, cx + 3, my, "#d4a43c"), flat(2, L, cx - ROAD / 2 + 8, my, "#d5d4cf"), flat(2, L, cx + ROAD / 2 - 8, my, "#d5d4cf"));
+        for (let k = sy + 10; k < ey - 20; k += 50) M.push(flat(1.6, 22, cx - 34, k + 11, "#bdbcb6"), flat(1.6, 22, cx + 34, k + 11, "#bdbcb6"));
       }
     }
     for (let j = 0; j <= GRID; j++) for (let i = 0; i <= GRID; i++) {
       const x = i * BLOCK, y = j * BLOCK;
       for (let k = 0; k < 7; k++) {
         const o = 14 + k * 18 + 4.5;
-        if (i < GRID) M.push(flat(18, 9, x + ROAD + 13, y + o, "#b8b8c4", 0.13));
-        if (i > 0) M.push(flat(18, 9, x - 13, y + o, "#b8b8c4", 0.13));
-        if (j < GRID) M.push(flat(9, 18, x + o, y + ROAD + 13, "#b8b8c4", 0.13));
-        if (j > 0) M.push(flat(9, 18, x + o, y - 13, "#b8b8c4", 0.13));
+        if (i < GRID) M.push(flat(18, 9, x + ROAD + 13, y + o, "#d0cfc9", 0.13));
+        if (i > 0) M.push(flat(18, 9, x - 13, y + o, "#d0cfc9", 0.13));
+        if (j < GRID) M.push(flat(9, 18, x + o, y + ROAD + 13, "#d0cfc9", 0.13));
+        if (j > 0) M.push(flat(9, 18, x + o, y - 13, "#d0cfc9", 0.13));
       }
     }
     const marks = new THREE.Mesh(mergeGeometries(M)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -2 }));
@@ -797,26 +816,37 @@ export class Renderer3D {
   private buildCity() {
     const N = 8, S = 512, cell = S / N;
     const rr = mulberry32(99);
+    // facade: weathered concrete with floor slabs, recessed window frames, glass that mirrors the sky in
+    // different strengths, curtains, dark rooms and dirt streaks under the sills (one 512 px tile, drawn once)
     const map = canvasTex(S, S, (g) => {
-      g.fillStyle = "#d9d6cf"; g.fillRect(0, 0, S, S);
+      g.fillStyle = "#cdc8be"; g.fillRect(0, 0, S, S);
+      const id = g.getImageData(0, 0, S, S), px = id.data;
+      for (let i = 0; i < px.length; i += 4) { const v = (rr() - 0.5) * 16; px[i] += v; px[i + 1] += v; px[i + 2] += v * 0.9; }
+      g.putImageData(id, 0, 0);
       for (let j = 0; j < N; j++) {
-        g.fillStyle = "#c2beb6"; g.fillRect(0, j * cell, S, 5);
+        g.fillStyle = "#b1aa9f"; g.fillRect(0, j * cell, S, 5);
+        g.fillStyle = "rgba(0,0,0,0.13)"; g.fillRect(0, j * cell + 5, S, 2);
         for (let i = 0; i < N; i++) {
           const x = i * cell + 9, y = j * cell + 11, w = cell - 18, h = cell - 22;
-          g.fillStyle = "#b3afa7"; g.fillRect(x - 2, y - 2, w + 4, h + 4);
-          const gr = g.createLinearGradient(0, y, 0, y + h);
-          const t = rr();
-          gr.addColorStop(0, t < 0.5 ? "#6f8aa6" : "#5f7b98"); gr.addColorStop(1, t < 0.5 ? "#26364a" : "#1b2838");
+          const streak = g.createLinearGradient(0, y + h, 0, y + h + 20);
+          streak.addColorStop(0, `rgba(58,52,44,${0.1 + rr() * 0.12})`); streak.addColorStop(1, "rgba(58,52,44,0)");
+          g.fillStyle = streak; g.fillRect(x + 2, y + h, w - 4, 20);
+          g.fillStyle = "#8e887e"; g.fillRect(x - 2, y - 2, w + 4, h + 4);
+          const t = rr(), gr = g.createLinearGradient(0, y, 0, y + h);
+          if (t < 0.12) { gr.addColorStop(0, "#2a3138"); gr.addColorStop(1, "#14181d"); }           // dark room
+          else if (t < 0.6) { gr.addColorStop(0, "#7d93a6"); gr.addColorStop(0.55, "#4a5f73"); gr.addColorStop(1, "#202b37"); } // sky mirrored
+          else { gr.addColorStop(0, "#66798a"); gr.addColorStop(1, "#1c2631"); }
           g.fillStyle = gr; g.fillRect(x, y, w, h);
-          g.fillStyle = "rgba(255,255,255,0.18)"; g.beginPath(); g.moveTo(x, y + h); g.lineTo(x + w * 0.55, y); g.lineTo(x + w * 0.8, y); g.lineTo(x + w * 0.25, y + h); g.fill();
-          g.fillStyle = "#b3afa7"; g.fillRect(x + w / 2 - 1, y, 2, h);
-          if (rr() < 0.18) { g.fillStyle = "rgba(230,220,200,0.55)"; g.fillRect(x, y, w, h * (0.3 + rr() * 0.4)); }
+          g.fillStyle = "rgba(255,255,255,0.09)"; g.beginPath(); g.moveTo(x, y + h); g.lineTo(x + w * 0.55, y); g.lineTo(x + w * 0.75, y); g.lineTo(x + w * 0.2, y + h); g.fill();
+          g.fillStyle = "#8e887e"; g.fillRect(x + w / 2 - 1, y, 2, h);
+          if (rr() < 0.2) { g.fillStyle = `rgba(${200 + rr() * 30},${190 + rr() * 25},${170 + rr() * 20},0.5)`; g.fillRect(x, y, w, h * (0.3 + rr() * 0.45)); } // curtains
+          g.fillStyle = "rgba(0,0,0,0.18)"; g.fillRect(x, y, w, 3); // shadow of the lintel
         }
       }
     });
     const emi = canvasTex(S, S, (g) => {
       g.fillStyle = "#000"; g.fillRect(0, 0, S, S);
-      const pal = ["#ffcf87", "#ffd9a0", "#ffe7c2", "#bfe8ff", "#ff9ad5", "#ffb36b"];
+      const pal = ["#ffcf87", "#ffd9a0", "#ffe7c2", "#fff1dc", "#cfe2ff", "#ffb36b"]; // warm lamps, now and then a cool TV light
       for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
         if (rr() < 0.42) {
           g.globalAlpha = 0.45 + rr() * 0.55; g.fillStyle = pal[Math.floor(rr() * pal.length)];
@@ -1029,7 +1059,7 @@ export class Renderer3D {
     if (this.lampPoolMat) this.lampPoolMat.opacity = 0.02 + n * 0.3;
     this.poolMat.opacity = 0.04 + n * 0.3; this.poolMatP.opacity = 0.1 + n * 0.4;
     this.head.intensity = n * 30 + (s.fog + s.rain) * 6;
-    if (this.asphaltMat) { this.asphaltMat.roughness = 0.55 - s.wet * 0.42; this.asphaltMat.metalness = 0.15 + s.wet * 0.35; this.asphaltMat.color.setHex(0x46464b).multiplyScalar(1 - s.wet * 0.35); }
+    if (this.asphaltMat) { this.asphaltMat.roughness = 0.62 - s.wet * 0.48; this.asphaltMat.metalness = 0.1 + s.wet * 0.38; this.asphaltMat.color.setHex(ASPHALT).multiplyScalar(1 - s.wet * 0.35); }
     this.renderer.toneMappingExposure = 1 - n * 0.15;
     void g;
   }

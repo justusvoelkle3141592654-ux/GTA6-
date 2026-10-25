@@ -28,7 +28,7 @@ public class MainActivity extends Activity {
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
         s.setSupportZoom(false);
-        web.setBackgroundColor(0xFF0B0614);
+        web.setBackgroundColor(0xFF0C1015);
         web.setOverScrollMode(View.OVER_SCROLL_NEVER);
         setContentView(web);
         if (state != null) web.restoreState(state);

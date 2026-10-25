@@ -101,15 +101,19 @@ export const WALKABLE = new Set(["gunshop", "clothes", "food", "food2", "worksho
   "house1", "house2", "house3", "house4", "house5", "house6", "house7", "house8"]);
 
 // a place on a map: coloured circle with its letter; walkable shops get a door in the circle
+// map symbol of a place: a dark disc with a ring in the place colour and a light symbol (door = walkable shop),
+// so every place reads the same way on the light and dark parts of the map
 export function drawPlaceIcon(g: CanvasRenderingContext2D, pl: { id: string; color: string; icon: string }, x: number, y: number, r: number) {
-  g.fillStyle = pl.color; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  const lw = Math.max(1.2, r * 0.26);
+  g.fillStyle = "#11161d"; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = pl.color; g.lineWidth = lw; g.beginPath(); g.arc(x, y, r - lw / 2, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = "#eef1f4";
   if (WALKABLE.has(pl.id)) {
-    g.strokeStyle = "rgba(0,0,0,0.55)"; g.lineWidth = Math.max(1, r * 0.18); g.stroke();
-    const w = r * 0.8, h = r * 1.25;
-    g.fillStyle = "#ffffff"; g.fillRect(x - w / 2, y - h / 2, w, h);
-    g.fillStyle = pl.color; g.fillRect(x - w / 2 + r * 0.14, y - h / 2 + r * 0.14, w - r * 0.28, h - r * 0.14);
-    g.fillStyle = "#ffffff"; g.beginPath(); g.arc(x + w * 0.22, y + h * 0.06, Math.max(0.8, r * 0.1), 0, Math.PI * 2); g.fill();
-  } else { g.fillStyle = "#fff"; g.fillText(pl.icon, x, y + 1); }
+    const w = r * 0.62, h = r * 0.95;
+    g.fillRect(x - w / 2, y - h / 2, w, h);
+    g.fillStyle = "#11161d"; g.fillRect(x - w / 2 + r * 0.12, y - h / 2 + r * 0.12, w - r * 0.24, h - r * 0.12);
+    g.fillStyle = "#eef1f4"; g.beginPath(); g.arc(x + w * 0.2, y + h * 0.06, Math.max(0.8, r * 0.09), 0, Math.PI * 2); g.fill();
+  } else g.fillText(pl.icon, x, y + 1);
 }
 
 // what you lose when you are taken to a place after a run ends (open world)

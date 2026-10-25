@@ -16,7 +16,7 @@ const COLOR: Partial<Record<CarModel, string>> = {
   limo: "#15161b", classic: "#8a1f2b", electric: "#e8e8ec", polsport: "#f4f6fa", gtav: "#d4a017", camper: "#f4f2ea",
   tractor: "#2f7d32", forklift: "#f2b200", mixer: "#f2a21a", tank: "#4f5a37", plane: "#f4f4f6", seaplane: "#f4f4f6", sailboat: "#f4f4f6", yacht: "#f6f6f8", hovercraft: "#c0392b",
 };
-const PAINT = ["#ff2d95", "#2bf0ff", "#ffd23f", "#ff8a1f", "#3dff8b", "#9d4dff", "#f4f4f6", "#15161b"];
+const PAINT = ["#b3192f", "#2c68ad", "#d9b44a", "#cf7a2a", "#3c6e47", "#5b4b8a", "#e9e9ec", "#15161b", "#7c8288", "#8a1c2b"]; // factory paints
 const CASH_MAX = 1e8;
 
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
