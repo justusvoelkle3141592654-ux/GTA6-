@@ -76,7 +76,7 @@ export default function StartScreen({ name, setName, scores, config, update, onS
                 </div>
                 <div className="mt-1 flex gap-3 text-[10px] text-white/45"><span><b className="text-cyan-300">■</b> Tempo</span><span><b className="text-yellow-300">■</b> Beschl.</span><span><b className="text-pink-400">■</b> Panzerung</span><span><b className="text-green-400">■</b> Drift</span></div>
               </Section>
-              <Section title="Kamera (im Spiel mit C oder dem Kameraknopf wechselbar)">
+              <Section title="Kamera (im Spiel mit C oder dem Kameraknopf wechselbar, im Auto auch Motorhaube, von vorne, seitlich)">
                 <Choice<CameraMode> value={config.camera} onChange={(v) => update({ camera: v })} options={[{ v: "chase", label: "3D Verfolger" }, { v: "fp", label: "Ego-Sicht", sub: "Im Auto sitzen" }, { v: "top", label: "Vogelperspektive" }]} />
               </Section>
               <Section title="Grafik">

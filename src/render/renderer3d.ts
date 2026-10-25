@@ -1987,6 +1987,7 @@ export class Renderer3D {
   flyCam: { pos: THREE.Vector3; look: THREE.Vector3 } | null = null;
   // the player turns the camera (right stick / right mouse button); it swings back after lookT seconds
   lookYaw = 0; lookPitch = 0; lookT = 0;
+  manualT = 0; // on foot: you turned the camera yourself, it does not swing behind you for a while
   private viewDist = 1;
   private updateCamera(g: Game, dt: number) {
     const p = g.player;
@@ -2014,6 +2015,25 @@ export class Renderer3D {
       const lxx = cr(c0[3], a[3], b[3], c3[3]), lyy = cr(c0[4], a[4], b[4], c3[4]);
       tgt.set(px, ph, py); lx = lxx; ly = 30; lz = lyy; fov = 55; kp = 1.2;
       this.camYaw = p.a;
+    } else if (!g.onFoot && (this.camMode === "hood" || this.camMode === "front" || this.camMode === "side")) {
+      // extra vehicle views: on the bonnet looking ahead, in front of the car looking back at it, beside it
+      this.camYaw += wrapA(p.a - this.camYaw) * Math.min(1, dt * 10);
+      const cx = Math.cos(p.a), cy = Math.sin(p.a), rx = -cy, ry = cx;
+      const roof = getCarGeo(p.model, p.color).roofY * VEH_SCALE, gr = terrainH(p.x, p.y);
+      if (this.camMode === "hood") {
+        tgt.set(p.x + cx * p.hl * 0.3, p.z + roof * 0.78 + 1.5, p.y + cy * p.hl * 0.3);
+        lx = p.x + cx * 320; ly = p.z + roof * 0.7 + (p.air ? p.vz * 0.05 : 0); lz = p.y + cy * 320;
+        fov = 72 + clamp(sp / 700, 0, 1) * 12;
+      } else if (this.camMode === "front") {
+        const d = p.hl + 62 + sp * 0.02;
+        tgt.set(p.x + cx * d, Math.max(p.z + 20, gr + 8), p.y + cy * d);
+        lx = p.x; ly = p.z + roof * 0.5; lz = p.y; fov = 60;
+      } else {
+        const d = p.hw + 70;
+        tgt.set(p.x + rx * d + cx * 6, Math.max(p.z + 18, gr + 8), p.y + ry * d + cy * 6);
+        lx = p.x + cx * 10; ly = p.z + roof * 0.45; lz = p.y + cy * 10; fov = 60;
+      }
+      kp = 30; instant = true;
     } else if (this.camMode === "fp") {
       if (g.onFoot) {
         this.camYaw = g.ped.a;
@@ -2033,12 +2053,13 @@ export class Renderer3D {
       }
       fov = 78 + clamp(sp / 700, 0, 1) * 10 + (p.nitro && !g.onFoot ? 6 : 0);
       kp = 40; instant = true;
-    } else if (this.camMode === "chase") {
+    } else if (this.camMode !== "top") {
       this.lookT -= dt;
       if (this.lookT <= 0) { const k = 1 - Math.exp(-dt * 2); this.lookYaw -= wrapA(this.lookYaw) * k; this.lookPitch -= this.lookPitch * k; }
       if (g.onFoot) {
         const pd = g.ped;
-        if (Math.hypot(pd.vx, pd.vy) > 30) this.camYaw += wrapA(Math.atan2(pd.vy, pd.vx) - this.camYaw) * (1 - Math.exp(-dt * 2.5));
+        this.manualT -= dt;
+        if (Math.hypot(pd.vx, pd.vy) > 30 && this.manualT <= 0) this.camYaw += wrapA(Math.atan2(pd.vy, pd.vx) - this.camYaw) * (1 - Math.exp(-dt * 2.5));
         const cx = Math.cos(this.camYaw + this.lookYaw), cy = Math.sin(this.camYaw + this.lookYaw);
         // inside a shop: closer, the walls on the camera side become see-through (interiors3d)
         // "near" (setting / zoom button): about half the distance, people look twice as big

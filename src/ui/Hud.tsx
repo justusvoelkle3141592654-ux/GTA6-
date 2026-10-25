@@ -27,6 +27,7 @@ function Zone({ at, children, className = "", y = 0 }: { at: Corner; children: R
   if (at === "bc") Object.assign(st, { bottom, left: "50%", transform: `translateX(-50%) scale(${s})`, transformOrigin: "bottom center", textAlign: "center" });
   return <div style={st} className={className}>{children}</div>;
 }
+const CAM_SHORT: Record<CameraMode, string> = { chase: "3D", fp: "EGO", hood: "HAUBE", front: "VORNE", side: "SEITE", top: "TOP" };
 const pill = "flex h-10 items-center justify-center gap-1.5 rounded-full border border-white/15 bg-black/45 px-3 text-xs font-bold tracking-wider backdrop-blur-md active:scale-90";
 
 export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onZoom, onToggleCar, onInteract, onRadio, onJob, onPhone, onDetonate, onWeapon, onWheel, hardcore, onHardcore }: Props) {
@@ -76,8 +77,8 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onZoo
       <Zone at="tc">
         <div className="pointer-events-auto flex gap-2">
           <button onClick={onPause} className={pill + " w-10 px-0"} aria-label="Pause"><Icon name="pause" size={18} /></button>
-          <button onClick={onCam} className={pill} aria-label="Kamera wechseln"><Icon name="camera" size={16} />{camera === "chase" ? "3D" : camera === "fp" ? "EGO" : "TOP"}</button>
-          {camera !== "fp" && <button onClick={onZoom} className={pill} aria-label="Kamera nah oder weit">{hud.camNear ? "NAH" : "WEIT"}</button>}
+          <button onClick={onCam} className={pill} aria-label="Kamera wechseln"><Icon name="camera" size={16} />{CAM_SHORT[camera]}</button>
+          {(camera === "chase" || camera === "top") && <button onClick={onZoom} className={pill} aria-label="Kamera nah oder weit">{hud.camNear ? "NAH" : "WEIT"}</button>}
           <button onClick={onToggleCar} className={pill + (hud.onFoot && hud.canEnter ? " animate-pulse border-yellow-300 bg-yellow-400/30" : "")}>
             <Icon name={hud.onFoot ? "car" : "exit"} size={16} />{hud.onFoot ? "EINSTEIGEN" : "AUSSTEIGEN"}
           </button>

@@ -17,12 +17,17 @@ export interface Settings {
   traffic: number;            // multiplier for the number of cars driving around 0 .. 3
   camNear: boolean;           // the follow camera stays close (people and cars look bigger)
   jailSec: number;            // seconds in the cell after being busted 1 .. 3600
+  runSpeed: number;           // multiplier for your running and sprinting speed 0.5 .. 3 (1: about 20 / 32 km/h)
+  fireMode: "cooldown" | "auto"; // cooldown: each gun has its fire rate and reloads; auto: no pause between shots
 }
+
+// your speed on foot (units per second, 10 units = 1 m) before the setting: about 20 and 32 km/h
+export const RUN_V = { run: 56, sprint: 89 };
 
 const KEY = "solarabay.settings.v1";
 export const defaultSettings = (): Settings => ({
   volume: { master: 1, effects: 1, engine: 1, radio: 0.7 }, tips: true, shake: true,
-  dayMinutes: 24, weather: true, viewDist: 1, shadows: true, hudScale: 1, subtitle: 1, camSens: 1, invertY: false, mapRotate: false, seekerCones: true, vehSpeed: 1, traffic: 1, camNear: true, jailSec: 30,
+  dayMinutes: 24, weather: true, viewDist: 1, shadows: true, hudScale: 1, subtitle: 1, camSens: 1, invertY: false, mapRotate: false, seekerCones: true, vehSpeed: 1, traffic: 1, camNear: true, jailSec: 30, runSpeed: 1, fireMode: "cooldown",
 });
 
 export function loadSettings(): Settings {
@@ -37,7 +42,8 @@ export function loadSettings(): Settings {
     if (d.dayMinutes === 12 || d.dayMinutes === 24 || d.dayMinutes === 48) s.dayMinutes = d.dayMinutes;
     const num = (v: unknown, a: number, b: number, def: number) => (typeof v === "number" && Number.isFinite(v) ? Math.max(a, Math.min(b, v)) : def);
     s.viewDist = num(d.viewDist, 0.6, 1.4, 1); s.hudScale = num(d.hudScale, 0.8, 1.3, 1); s.subtitle = num(d.subtitle, 0.8, 1.4, 1); s.camSens = num(d.camSens, 0.5, 2, 1);
-    s.vehSpeed = num(d.vehSpeed, 1, 5, 1); s.traffic = num(d.traffic, 0, 3, 1); s.jailSec = Math.round(num(d.jailSec, 1, 3600, 30));
+    s.vehSpeed = num(d.vehSpeed, 1, 5, 1); s.traffic = num(d.traffic, 0, 3, 1); s.jailSec = Math.round(num(d.jailSec, 1, 3600, 30)); s.runSpeed = num(d.runSpeed, 0.5, 3, 1);
+    if (d.fireMode === "auto" || d.fireMode === "cooldown") s.fireMode = d.fireMode;
     for (const k of ["weather", "shadows", "invertY", "mapRotate", "seekerCones", "camNear"] as const) if (typeof d[k] === "boolean") s[k] = d[k] as boolean;
   } catch { /* ignore */ }
   return s;

@@ -7,6 +7,7 @@ import { VEH_SCALE } from "../vehicles/vehicles";
 import { OUTFITS, type Style } from "../gameplay/economy";
 import { WEAPONS, WEAPON_DEFS, type Weapon } from "../gameplay/weapons";
 import type { Game } from "../core/engine";
+import { RUN_V, currentSettings } from "../core/settings";
 import type { Civilian } from "../ai/peds";
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
@@ -142,7 +143,8 @@ export class PlayerFigure {
     } else if (pd.air && !this.wasAir && pd.vz > 0) {
       r.play("jump", 0.1, 1, true);
     } else if (!pd.air || r.done("jump")) {
-      locomote(r, sp, pd.sprint);
+      // your gait follows your own top speed (setting): the sprint animation at full sprint
+      r.move(sp, false, 0.25, g.flyMode ? 1 : (RUN_V.sprint * currentSettings.runSpeed) / 200);
     }
     this.wasAir = pd.air;
     if (!act) this.actKey = "";

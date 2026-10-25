@@ -16,12 +16,27 @@ interface Props {
   onCycleWeapon: () => void;
   onWheel: () => void;
   onDetonate: () => void;
+  onLook: (dx: number, dy: number) => void; // swiping on the right half turns the camera
 }
 
 const RADIUS = 60;
 const LONG_PRESS = 420; // ms: holding the weapon button opens the wheel
 
-export default function TouchControls({ input, nitro01, relative = false, onFoot, flying = false, jet = false, weapon, ammo, bombsPlaced, onCycleWeapon, onWheel, onDetonate }: Props) {
+export default function TouchControls({ input, nitro01, relative = false, onFoot, flying = false, jet = false, weapon, ammo, bombsPlaced, onCycleWeapon, onWheel, onDetonate, onLook }: Props) {
+  // camera: one finger swiping over the free right half of the screen
+  const look = useRef<{ id: number; x: number; y: number } | null>(null);
+  const lookDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (look.current) return;
+    look.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const lookMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const l = look.current;
+    if (!l || l.id !== e.pointerId) return;
+    onLook((e.clientX - l.x) * 1.6, (e.clientY - l.y) * 1.2);
+    l.x = e.clientX; l.y = e.clientY;
+  };
+  const lookUp = (e: React.PointerEvent<HTMLDivElement>) => { if (look.current?.id === e.pointerId) look.current = null; };
   const pressT = useRef<number | null>(null);
   const weaponDown = (e: React.PointerEvent) => {
     e.stopPropagation();
@@ -85,6 +100,9 @@ export default function TouchControls({ input, nitro01, relative = false, onFoot
         )}
       </div>
 
+      <div className="pointer-events-auto absolute bottom-0 right-0 top-24 w-[45%] touch-none" onPointerDown={lookDown} onPointerMove={lookMove} onPointerUp={lookUp} onPointerCancel={lookUp}>
+        <span className="absolute left-1/2 top-3 -translate-x-1/2 whitespace-nowrap text-[11px] font-semibold uppercase tracking-widest text-white/30">↔ Wischen: Kamera</span>
+      </div>
       <div className="pointer-events-auto absolute bottom-6 right-4 flex items-end gap-3">
         <div className="flex flex-col items-center gap-3">
           {jet && (

@@ -22,7 +22,7 @@ import { Bindings, type Action } from "./input";
 import { Gamepads } from "./gamepad";
 import { Missions } from "../gameplay/missions";
 import { Jobs, JOB_DEFS, JOB_KINDS, type JobKind } from "../gameplay/jobs";
-import { applySettings, currentSettings, saveSettings } from "./settings";
+import { RUN_V, applySettings, currentSettings, saveSettings } from "./settings";
 import { findRoute, MAX_ROUTE } from "../world/route";
 import { Tips } from "./tips";
 import { Police } from "../ai/police";
@@ -64,7 +64,9 @@ export type { Mode } from "./modes";
 export { Car, CARS, LEGACY_CAR_IDS } from "../vehicles/vehicles";
 export type { CarDef, CarModel } from "../vehicles/vehicles";
 export type Difficulty = "easy" | "normal" | "hard" | "hardcore";
-export type CameraMode = "chase" | "fp" | "top";
+// hood / front / side: extra views for vehicles (on foot they act like "chase")
+export type CameraMode = "chase" | "fp" | "hood" | "front" | "side" | "top";
+export const CAM_MODES: CameraMode[] = ["chase", "fp", "hood", "front", "side", "top"];
 export type Quality = "low" | "medium" | "high" | "ultra"; // Schnell, Mittel, Hoch, Ultra
 export { WEAPONS } from "../gameplay/weapons";
 export type { Weapon } from "../gameplay/weapons";
@@ -150,7 +152,7 @@ const segDist = (ax: number, ay: number, bx: number, by: number, x: number, y: n
   return Math.hypot(ax + dx * t - x, ay + dy * t - y);
 };
 // a thing the auto aim can lock onto (cars and people that attack you)
-export interface AimTarget { x: number; y: number; z: number; vx: number; vy: number; car: Car | null; ped: Civilian | null; }
+export interface AimTarget { x: number; y: number; z: number; vx: number; vy: number; car: Car | null; ped: Civilian | null; air?: boolean; }
 
 const DIGITS = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8"];
 const MAX_PARTICLES = 560;
@@ -357,6 +359,7 @@ export class Game {
   get fz() { return this.onFoot ? this.ped.z : this.player.z; }
   get fa() { return this.onFoot ? this.ped.a : this.player.a; }
   // on foot with a gun in the hand (passers-by put their hands up when it points at them)
+  get runTop() { return RUN_V.sprint * currentSettings.runSpeed; }
   get gunOut() { return this.onFoot && WEAPON_DEFS[this.inv.current].kind === "gun" && !this.ped.dead; }
   get fvx() { return this.onFoot ? this.ped.vx : this.player.vx; }
   get fvy() { return this.onFoot ? this.ped.vy : this.player.vy; }
@@ -377,7 +380,22 @@ export class Game {
     this.setHint(s.camNear ? "Kamera nah" : "Kamera weit", 1.5);
     return s.camNear;
   }
-  cycleCamera() { const o: CameraMode[] = ["chase", "fp", "top"]; this.setCamera(o[(o.indexOf(this.config.camera) + 1) % 3]); }
+  // on foot the vehicle views are skipped
+  cycleCamera() {
+    const o = this.onFoot ? CAM_MODES.filter((m) => m === "chase" || m === "fp" || m === "top") : CAM_MODES;
+    const i = o.indexOf(this.config.camera);
+    this.setCamera(o[(i + 1) % o.length]);
+  }
+  // turn the camera around you: dragging with the right mouse button, swiping on the screen, the right stick
+  lookDrag(dx: number, dy: number) {
+    if (this.state !== "playing") return;
+    const k = 0.005 * currentSettings.camSens, r = this.r3d;
+    if (this.onFoot && this.config.camera === "fp") { this.ped.a += dx * k; return; }
+    if (this.onFoot) { r.camYaw += dx * k; r.manualT = 3; } // on foot the camera stays where you turned it
+    else { r.lookYaw += dx * k; r.lookT = 2.5; }
+    r.lookPitch = clamp(r.lookPitch + dy * k * (currentSettings.invertY ? -1 : 1), -0.6, 0.9);
+    if (!this.onFoot) r.lookT = 2.5; else r.lookT = Math.max(r.lookT, 3);
+  }
 
   // ---------- input ----------
   private onKeyDown = (e: KeyboardEvent) => {
@@ -429,11 +447,9 @@ export class Game {
   pad = new Gamepads((a) => this.onKeyDown(this.padKey(a)), (a) => this.onKeyUp(this.padKey(a)));
   // free camera: right mouse button dragged (or the right stick)
   private onMouseMove = (e: MouseEvent) => {
-    if (!(e.buttons & 2) || this.state !== "playing") return;
-    const k = 0.005 * currentSettings.camSens;
-    this.r3d.lookYaw += e.movementX * k;
-    this.r3d.lookPitch = clamp(this.r3d.lookPitch + e.movementY * k * (currentSettings.invertY ? -1 : 1), -0.6, 0.9);
-    this.r3d.lookT = 2.5;
+    // right button (or the middle one) held: turn the camera
+    if (!(e.buttons & 6) || this.state !== "playing") return;
+    this.lookDrag(e.movementX, e.movementY);
   };
   private onContext = (e: MouseEvent) => { if (this.state === "playing") e.preventDefault(); };
   private onBlur = () => { this.keys.clear(); this.fireHeld = false; if (this.state === "playing") this.pause(); };
@@ -971,7 +987,7 @@ export class Game {
   reload() { if (this.inv.startReload()) sfx.reload(); }
 
   // auto aim: everything that attacks you (police with a wanted level, angry gangs, mission targets), cars and people
-  private aim: AimTarget = { x: 0, y: 0, z: 0, vx: 0, vy: 0, car: null, ped: null };
+  private aim: AimTarget = { x: 0, y: 0, z: 0, vx: 0, vy: 0, car: null, ped: null, air: false };
   private findTarget(originX: number, originY: number, facing: number, cone: number): AimTarget | null {
     let bestCar: Car | null = null, bestPed: Civilian | null = null, bd = Infinity;
     const score = (x: number, y: number, max: number) => {
@@ -981,24 +997,34 @@ export class Game {
       if (da > cone) return Infinity;
       return d * (1 + da); // closer and more in front wins
     };
+    // aim assist: without a wanted level it locks on to everybody (people and cars); while the police hunts you
+    // only on police vehicles of any kind (cars, boats, the helicopter, jets) and mission targets
+    const hunted = this.wanted.stars > 0;
     for (const c of this.cars) {
       if (c.dead || c === this.player || (c.kind === "civ" && c.parked && !c.tag)) continue;
       const enemy = !this.rules.cops ? c.kind !== "player" // arcade: anything
-        : (c.kind === "cop" && !c.calm) || (!!c.faction && (c.hunt || this.gangs.hostile(c.faction))) || c.tag === "target" || c.flee;
+        : hunted ? c.kind === "cop" || c.tag === "target" : c.kind !== "player";
       if (!enemy) continue;
       const sc = score(c.x, c.y, 700);
       if (sc >= bd || !this.world.lineClear(originX, originY, c.x, c.y, 50)) continue;
       bestCar = c; bestPed = null; bd = sc;
     }
     if (this.rules.city) for (const p of this.peds.list) {
-      if (!p.active || p.state === "down") continue;
-      const enemy = (p.state === "attack" && p.target < 0) || p.tag === "target" || p.tag === "suspect";
+      if (!p.active || p.state === "down" || p.tag === "hiding") continue;
+      const enemy = hunted ? p.tag === "target" || p.tag === "suspect" : true;
       if (!enemy) continue;
       const sc = score(p.x, p.y, 500);
       if (sc >= bd || !this.world.lineClear(originX, originY, p.x, p.y, 40)) continue;
       bestPed = p; bestCar = null; bd = sc;
     }
     const t = this.aim;
+    // the police helicopter and jets (shot from the street or out of a car: the bullets fly up to them)
+    const air = this.rules.cops ? this.police.airTarget(originX, originY, facing, cone, 1100) : null;
+    if (air) {
+      const sc = score(air.x, air.y, 1100) * 0.9;
+      if (sc < bd) { t.x = air.x; t.y = air.y; t.z = air.z; t.vx = air.vx; t.vy = air.vy; t.car = null; t.ped = null; t.air = true; return t; }
+    }
+    t.air = false;
     if (bestCar) { t.x = bestCar.x; t.y = bestCar.y; t.z = bestCar.z; t.vx = bestCar.vx; t.vy = bestCar.vy; t.car = bestCar; t.ped = null; return t; }
     if (bestPed) { t.x = bestPed.x; t.y = bestPed.y; t.z = bestPed.z - 4; t.vx = bestPed.vx; t.vy = bestPed.vy; t.car = null; t.ped = bestPed; return t; }
     return null;
@@ -1019,6 +1045,7 @@ export class Game {
       this.melee();
       return;
     }
+    if (currentSettings.fireMode === "auto" && this.inv.reloadT > 0) this.inv.update(this.inv.reloadT + 0.01); // no reloading pause
     if (this.inv.reloadT > 0) return;
     if (d.kind === "sticky" && this.bombs.length >= 30) { this.setHint("Max. 30 Bomben – erst zünden (G)", 1.5); sfx.empty(); this.fireCd = 0.3; return; }
     if (!this.inv.consume()) {
@@ -1035,27 +1062,33 @@ export class Game {
     const speed = d.speed;
     const target = this.findTarget(ox, oy, facing, onFoot ? Math.PI : 1.75);
     let a = facing;
-    const heli = target ? null : this.police.heliTarget(ox, oy, facing, onFoot ? Math.PI : 1.75);
+    // up and down: towards an aircraft you aim at; without a target the camera decides (look up = shoot up into the air)
+    let pitch = this.config.camera === "top" ? 0 : clamp(-this.r3d.lookPitch * 1.3, 0, 0.9);
     if (target) {
       const dist = Math.hypot(target.x - ox, target.y - oy);
       const lead = dist / speed;
       a = Math.atan2(target.y + target.vy * lead - oy, target.x + target.vx * lead - ox);
-    } else if (heli) a = Math.atan2(heli.y - oy, heli.x - ox);
+      pitch = target.air ? Math.atan2(target.z + 6 - oz, Math.max(1, dist)) : 0;
+    }
+    const cp = Math.cos(pitch), spz = Math.sin(pitch) * speed;
     if (onFoot) { this.ped.a = a; this.ped.shootT = 0.4; }
-    this.fireCd = d.cd;
+    // fire mode (settings): "auto" has no pause between shots and no reloading pause
+    const auto = currentSettings.fireMode === "auto";
+    this.fireCd = auto ? Math.min(d.cd, d.kind === "gun" ? 0.06 : 0.2) : d.cd;
+    if (auto && this.inv.reloadT > 0) this.inv.update(this.inv.reloadT + 0.01);
     if (d.noise > 0) { this.peds.alarm(ox, oy, d.noise, "shot"); this.indoor.alarm(ox, oy, Math.min(400, d.noise)); }
     if (d.crime) this.crime(d.crime);
     if (d.kind === "gun") {
       this.jobs.onShot();
       for (let i = 0; i < d.pellets; i++) {
         const aa = a + rnd(-d.spread, d.spread);
-        this.addProj("bullet", "player", "player", -1, d.dmg, ox, oy, oz, Math.cos(aa) * speed * rnd(0.92, 1) + bvx * 0.3, Math.sin(aa) * speed * rnd(0.92, 1) + bvy * 0.3, 0, aa, d.range);
+        this.addProj("bullet", "player", "player", -1, d.dmg, ox, oy, oz, Math.cos(aa) * speed * cp * rnd(0.92, 1) + bvx * 0.3, Math.sin(aa) * speed * cp * rnd(0.92, 1) + bvy * 0.3, spz, aa, d.range * (pitch > 0.05 ? 1.6 : 1));
       }
       if (w === "shotgun") { sfx.shotgun(); this.shake(0.14); } else { sfx.shot(); this.shake(0.05); }
       this.flashes.push({ x: ox + Math.cos(a) * 18, y: oy + Math.sin(a) * 18, z: oz, life: 0.06, max: 0.06, size: w === "shotgun" ? 140 : 90 });
       this.emit(ox + Math.cos(a) * 20, oy + Math.sin(a) * 20, oz, bvx * 0.5, bvy * 0.5, 0, 0.06, 7, 60, "#ffd36b", 2, 1);
     } else if (d.kind === "rocket") {
-      this.addProj("rocket", "player", "player", -1, 500, ox, oy, oz, Math.cos(a) * speed + bvx * 0.5, Math.sin(a) * speed + bvy * 0.5, 0, a, d.range);
+      this.addProj("rocket", "player", "player", -1, 500, ox, oy, oz, Math.cos(a) * speed * cp + bvx * 0.5, Math.sin(a) * speed * cp + bvy * 0.5, spz, a, d.range, target?.air ? (this.police.heli && Math.hypot(this.police.heli.x - target.x, this.police.heli.y - target.y) < 1 ? this.police.heli : this.police.jets.find((j) => Math.hypot(j.x - target.x, j.y - target.y) < 1) ?? null) as HomingTarget | null : null);
       sfx.rocket();
       this.shake(0.25);
       this.flashes.push({ x: ox, y: oy, z: oz, life: 0.12, max: 0.12, size: 200 });
@@ -2074,7 +2107,8 @@ export class Game {
     if ((this.act || this.approach) && this.steerAct(dt, m > 0.15)) return;
     if (this.seat) { if (m > 0.15) this.seat = null; else { pd.vx = pd.vy = 0; pd.moving = false; pd.x = this.seat.x; pd.y = this.seat.y; pd.a = this.seat.a; return; } }
     const L = Math.hypot(dx, dy);
-    const spd = this.flyMode ? 420 * currentSettings.vehSpeed : (pd.swim ? 75 : pd.sprint ? 250 : 165) * (this.energyT > 0 && !pd.swim ? 1.15 : 1);
+    // running about 20 km/h, sprinting about 32 km/h (a bit faster than a real person), times the setting
+    const spd = this.flyMode ? 420 * currentSettings.vehSpeed : pd.swim ? 75 : (pd.sprint ? RUN_V.sprint : RUN_V.run) * currentSettings.runSpeed * (this.energyT > 0 ? 1.15 : 1);
     const tvx = L > 0 ? (dx / L) * spd * Math.min(1, m / 0.8) : 0, tvy = L > 0 ? (dy / L) * spd * Math.min(1, m / 0.8) : 0;
     const kk = Math.min(1, dt * 10);
     pd.vx += (tvx - pd.vx) * kk; pd.vy += (tvy - pd.vy) * kk;

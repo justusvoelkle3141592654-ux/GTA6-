@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Game, LEGACY_CAR_IDS,
-  type CameraMode, type GameConfig, type GameOverData, type GameState, type HudData, type ModalInfo, type TouchInput,
+  CAM_MODES, type CameraMode, type GameConfig, type GameOverData, type GameState, type HudData, type ModalInfo, type TouchInput,
 } from "./core/engine";
 import { sfx } from "./audio/audio";
 import { MODE_RULES } from "./core/modes";
@@ -37,6 +37,7 @@ function loadConfig(): GameConfig {
       const cfg: GameConfig = { ...def, ...JSON.parse(raw) };
       cfg.car = LEGACY_CAR_IDS[cfg.car] ?? cfg.car;
       if (!(cfg.mode in MODE_RULES)) cfg.mode = def.mode;
+      if (!CAM_MODES.includes(cfg.camera)) cfg.camera = def.camera;
       return cfg;
     }
   } catch { /* ignore */ }
@@ -179,7 +180,7 @@ export default function App() {
       )}
       {playing && isTouch && touchInput && g && (
         <TouchControls input={touchInput} nitro01={hud.nitro01} flying={hud.alt >= 0 || hud.fly} jet={hud.jet} relative={config.camera !== "top"} onFoot={hud.onFoot} weapon={hud.weapon} ammo={hud.reloading ? "…" : ammoText(hud.ammo, hud.reserve)} bombsPlaced={hud.bombsPlaced}
-          onCycleWeapon={() => g.cycleWeapon()} onWheel={() => g.openModal({ kind: "wheel" })} onDetonate={() => g.detonate()} />
+          onCycleWeapon={() => g.cycleWeapon()} onWheel={() => g.openModal({ kind: "wheel" })} onDetonate={() => g.detonate()} onLook={(dx, dy) => g.lookDrag(dx, dy)} />
       )}
 
       {state === "modal" && g && modal?.kind === "shop" && <ShopMenu key={modal.place.id} game={g} place={modal.place} onClose={() => g.closeModal()} />}

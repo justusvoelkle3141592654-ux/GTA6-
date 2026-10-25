@@ -891,7 +891,11 @@ export class HumanRig {
   private locoSpeed = 0; private locoPhase = 0; private locoFade = 1; private locoFadeT = 0.2; private panic = false;
   private gaits() { return ["walk", this.panic ? "panic" : "run", "sprint"]; }
   // speed in world units per second (0: stand); panic: run with raised arms
-  move(speed: number, panic = false, fade = 0.25) {
+  // gait: the speed at which the full sprint is reached scales the blend points (your figure is slower than the
+  // people's flee speed but still sprints at its top speed)
+  private gait = 1;
+  move(speed: number, panic = false, fade = 0.25, gait = 1) {
+    this.gait = gait;
     if (speed < 6) { this.play("idle", fade); return; }
     if (panic !== this.panic && this.current === "loco") { this.panic = panic; this.current = ""; }
     this.panic = panic;
@@ -901,7 +905,7 @@ export class HumanRig {
   private updateLoco(dt: number) {
     const v = this.locoSpeed, k = this.root.scale.x || 1; // bigger people take longer steps
     const ramp = (a: number, b: number) => Math.max(0, Math.min(1, (v - a) / (b - a)));
-    const toRun = ramp(45, 80), toSprint = ramp(175, 215);
+    const g = this.gait, toRun = ramp(45 * g, 80 * g), toSprint = ramp(175 * g, 215 * g);
     const w = [1 - toRun, toRun * (1 - toSprint), toSprint];
     const len = [14, 24, 30].map((l) => l * k); // distance of one full step cycle (two steps)
     const L = w[0] * len[0] + w[1] * len[1] + w[2] * len[2];

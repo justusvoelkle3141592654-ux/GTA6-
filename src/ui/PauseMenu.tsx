@@ -15,7 +15,7 @@ import { fmt, fmtTime } from "./ui";
 import Icon from "./icons";
 
 export type PauseTab = "menu" | "map" | "jobs" | "hide" | "contacts" | "progress" | "garage" | "flight" | "spawn" | "cheats" | "settings" | "help";
-export const CAM_LABEL: Record<CameraMode, string> = { chase: "3D Verfolger", fp: "Ego (im Auto)", top: "Vogelperspektive" };
+export const CAM_LABEL: Record<CameraMode, string> = { chase: "3D Verfolger", fp: "Ego (im Auto)", hood: "Motorhaube", front: "Von vorne", side: "Seitlich", top: "Vogelperspektive" };
 export const SAVE_MSG: Record<SaveResult, string> = {
   saved: "Gespeichert", memory: "Nur vorübergehend gespeichert – der Browser blockiert den lokalen Speicher",
   wanted: "Speichern geht nur ohne Fahndung (keine Sterne)", busy: "Gerade nicht möglich", mode: "",
@@ -249,6 +249,11 @@ export function SettingsTab({ game, isTouch, narrow = false }: { game: Game; isT
         <label className="mb-1 flex items-center gap-2"><input type="checkbox" checked={s.tips} onChange={(e) => update({ ...s, tips: e.target.checked })} className="accent-sky-500" /> Tutorial-Hinweise</label>
         <label className="mb-1 flex items-center gap-2"><input type="checkbox" checked={s.shake} onChange={(e) => update({ ...s, shake: e.target.checked })} className="accent-sky-500" /> Kamerawackeln</label>
         <JailInput value={s.jailSec} onChange={(v) => update({ ...s, jailSec: v })} />
+        <Slider label="Lauftempo" value={s.runSpeed} min={0.5} max={3} step={0.1} fmt={(v) => `${Math.round(20 * v)} / ${Math.round(32 * v)} km/h`} onChange={(v) => update({ ...s, runSpeed: v })} />
+        <div className="mb-2 mt-1 flex items-center gap-2"><span className="w-28 text-white/70">Feuermodus</span>
+          {([["cooldown", "Cooldown"], ["auto", "Dauerfeuer"]] as const).map(([m, l]) => <button key={m} onClick={() => update({ ...s, fireMode: m })} className={"rounded-lg border px-2 py-1 text-xs font-bold " + (s.fireMode === m ? "border-white bg-white/25" : "border-white/15 bg-white/5")}>{l}</button>)}
+        </div>
+        <div className="mb-1 text-[11px] text-white/45">Lauftempo: Laufen / Sprinten. Dauerfeuer: keine Pause zwischen den Schüssen und kein Nachladen-Warten.</div>
         <button onClick={() => game.tips.reset()} className="mt-2 rounded-lg border border-white/20 px-3 py-1 text-xs text-white/70">Hinweise erneut zeigen</button>
       </div>
       <div className="rounded-sm border border-white/5 bg-black/65 p-4 text-sm">

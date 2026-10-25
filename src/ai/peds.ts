@@ -44,7 +44,8 @@ export interface PedHost {
   readonly fvx: number; readonly fvy: number;
   readonly onFoot: boolean;
   readonly ped: { x: number; y: number; a: number; vx: number; vy: number; sprint: boolean };
-  readonly gunOut: boolean; // on foot with a gun in the hand (people put their hands up when it points at them)
+  readonly gunOut: boolean;
+  readonly runTop: number;  // your sprint speed on foot (police and gangs on foot are not faster than you) // on foot with a gun in the hand (people put their hands up when it points at them)
   readonly stars: number;
   pedHit(c: Civilian, by: Car, speed: number): void;
   enemyShot(x: number, y: number, z: number, a: number, dmg: number, team: Team, src: number): void;
@@ -559,7 +560,7 @@ export class PedSystem {
     const foe = c.target >= 0 ? this.list[c.target] : null;
     const fx = foe ? foe.x : h.fx, fy = foe ? foe.y : h.fy, fz = foe ? foe.z : h.fz;
     const dx = fx - c.x, dy = fy - c.y, d = foe ? Math.max(1, Math.hypot(dx, dy)) : dPlayer;
-    const speed = c.role === "swat" || c.role === "army" ? 125 : cop ? 135 : 115;
+    const speed = Math.min(c.role === "swat" || c.role === "army" ? 125 : cop ? 135 : 115, foe ? Infinity : h.runTop * (cop ? 0.92 : 0.85));
     const arrest = cop && !foe && h.stars <= 1; // 1 star: they want to cuff you, not shoot
     const sees = this.world.lineClear(c.x, c.y, fx, fy, 30);
     if (cop && !arrest) {
