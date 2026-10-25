@@ -125,3 +125,64 @@ Getestet wurde automatisiert in einem Headless-Chromium mit Software-Rendering (
   - Fahrgefühl: die Karosserie taucht beim Bremsen ein, hebt beim Beschleunigen die Nase und neigt sich in Kurven; bei hohem Tempo bricht das Heck bei starkem Lenken leicht aus.
 - Neue Fahrzeuge (Spawn-Menü, Autohaus): Hypercar „Vortex X“ (mit Heckflügel), Formel-Rennwagen (freistehende Räder, Front- und Heckflügel), Monstertruck (riesige Räder, Rahmen, Überrollbügel), Lowrider „Cruzado“ (langes Cabrio, Chromleisten; Handbremse im Stand lässt ihn hüpfen).
 - Nicht umgesetzt: echte Gelenkphysik für Personen (weiterhin Animation plus Flugbahn und Drehung), Ampeln lassen sich nicht umfahren.
+
+## Nachtrag 3: Realismus-Update
+
+- Wohnturm Bayview:
+  - Erdgeschoss mit Lobby, Fitnessraum, Spielraum, Kino und Lounge.
+  - Etagen 1–5 mit je 4 Wohnungen zum Kaufen, oben das Penthouse mit Dachterrasse, Pool und Bar.
+  - Aufzug und Treppenhaus, alle Etagen begehbar.
+- Karte: mehrere eigene Markierungen; zu jeder Markierung „Hinfliegen“, „Sofort hin“, GPS-Route oder Löschen.
+- Handy: alle Funktionen des Pausenmenüs als Apps (auch Spawnen, Flug, Einstellungen, Speichern, Hauptmenü), dazu die App „Cheats“.
+- Läden:
+  - Bucht-Elektro im Kaufhaus.
+  - Neu: Tankstelle 24/7, Bar, Apotheke, Bootshandel, Flugzeughandel.
+  - Die bestehenden Läden haben mehr Ware.
+- Fahrzeuge: 17 neue, darunter das „GTA V“ mit rund 1000 km/h (gemessen: 1008 km/h), Panzer, Traktor, Gabelstapler, Betonmischer, Flugzeug, Wasserflugzeug, Segelboot, Yacht und Luftkissenboot.
+- Menschen und Ragdoll:
+  - Mann und Frau sind als eigene Blender-Modelle auf dem Spielskelett aufgebaut.
+  - Umfallen ist jetzt echte Gelenkphysik: 18 Punkte mit Gelenkgrenzen, Boden- und Wandkollision.
+  - Aufstehen aus Rücken- oder Bauchlage.
+- Brücke: Man fiel durch die Fahrbahn.
+  - Ursachen: Sehr schnelle Autos blieben an den steilen Rampen unter der Fahrbahn hängen, und ein Teleport auf die Brücke setzte einen ins Wasser darunter.
+  - Behoben, die Geländer sind außerdem dicker.
+  - Geprüft auf allen 7 Brücken zu Fuß, mit einem normalen Auto und mit dem GTA V bei 940–1000 km/h.
+- Haft: Die Dauer gibt man unter Einstellungen als Zahl ein (1–3600 Sekunden, Standard 30).
+- Alle abschießbar:
+  - Verkäufer, Gäste in Läden und Bars und die Häftlinge im Gefängnishof lassen sich jetzt treffen.
+  - Getroffene fallen als Ragdoll um, die Umstehenden ducken sich, Verkäufer heben die Hände.
+  - Ist der Verkäufer tot, bleibt der Laden zu, bis man eine Weile weg war.
+  - Schüsse fliegen über Theken hinweg.
+- Ausrauben: Neben Boutique, Imbissen, Supermarkt, Tankstelle, Bar und Apotheke kann man jetzt auch Waffenladen, Autohaus, Friseur, Boots- und Flugzeughandel ausrauben.
+- TNT:
+  - Es gibt TNT nur über den Cheat „TNT“ (Pausenmenü oder Handy → Cheats), genau 1 Block pro Eingabe.
+  - Unter „Alle Waffen“ im Spawn-Menü ist es nicht enthalten.
+  - Abgelegt wird es mit Feuer, nach 5 Sekunden explodiert es deutlich stärker als eine Granate.
+  - In einem Laden sterben alle Personen darin, der Laden ist zerstört (Rauch aus der Tür, 2 Minuten geschlossen).
+- Polizei:
+  - Stärker: mehr Leben für Polizisten, SWAT und Armee sowie für Streifenwagen, etwas mehr Schaden.
+  - Klüger: Beamte umzingeln dich von verschiedenen Seiten statt in einem Haufen, weichen beim Schießen seitlich aus und gehen um Hindernisse herum, wenn sie keine Schusslinie haben.
+  - Schüsse: Sie halten vor (zielen dorthin, wo du gleich bist). In den ersten Sekunden streuen sie mehr, auf ein laufendes Ziel ebenfalls.
+  - Streifenwagen schneiden ab 3 Sternen alle den Weg ab.
+  - Nebenbei behoben: Gegnerische Kugeln konnten bei kurzem Abstand durch den Spieler hindurchfliegen.
+- Hardcore: Nicht mehr im Startmenü, sondern als roter Stern „HC“ hinter den Fahndungssternen im HUD; antippen schaltet ihn an und aus.
+- Passanten:
+  - Hände hoch, wenn die Waffe kurz auf sie zeigt, danach rennen sie weg.
+  - Sie springen vor schnellen Autos zur Seite und stehen wieder auf.
+  - Beim Anrempeln im Sprint fallen sie hin.
+  - Liegt jemand am Boden, rufen einige mit dem Handy die Polizei, andere fliehen.
+  - Unterwegs bleiben sie kurz stehen (Handy, Zigarette), halten Abstand zueinander und schauen dich an, wenn du nah vorbeigehst.
+- GTA-V-Design:
+  - Minikarte rechteckig unten links (auf dem Handy oben links) mit Lebens- und Westenbalken (im Fahrzeug auch Fahrzeug und Nitro).
+  - Geld, Waffe und Sterne oben rechts, Hilfetexte in einer schwarzen Box oben links, Stadtteil und Tempo unten rechts.
+  - Karte und Minikarte in GTA-Farben.
+  - Pausenmenü mit Kopfleiste (Uhrzeit, Geld) und eckigen Reitern; Startbildschirm und Knöpfe in Weiß/Schwarz.
+  - Farbabstimmung ab Grafikstufe „Mittel“ (wärmer, mehr Kontrast und Farbe, dunkle Ränder), auf „Schnell“ nur die dunklen Ränder.
+- Geprüft im Browser (Playwright mit Software-Grafik), nicht auf einem echten Handy:
+  - Brücke, Schießen in Bar und Gefängnishof, TNT im Supermarkt, Überfall im Waffenladen.
+  - Polizei-Taktik, Passanten-Reaktionen, HUD am Desktop (1280 x 720) und im Handy-Format (860 x 400), Menüs.
+  - Die fertige Spieldatei startet ohne Fehler.
+- Nicht umgesetzt:
+  - Läden werden beim Sprengen nicht sichtbar zerstört (nur Rauch und geschlossen).
+  - Verkäufer und Gäste fliehen nicht aus dem Laden, sie ducken sich am Platz.
+  - Es gibt nur einen Cheat (TNT).
