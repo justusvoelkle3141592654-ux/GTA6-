@@ -113,9 +113,9 @@ export const PHONE_CASES: { id: string; name: string; color: string; price: numb
 ];
 // car dealer: these are for sale (they go into the garage)
 // boat dealer and aircraft dealer (bought ones wait at the jetty / the heliport)
-export const BOAT_DEALER: CarModel[] = ["jetski", "boat", "fishboat"];
-export const AIR_DEALER: CarModel[] = ["heli", "jet"];
-export const DEALER_CARS: CarModel[] = ["compact", "sedan", "wagon", "suv", "pickup", "offroad", "roadster", "sport", "muscle", "super", "lowrider", "monster", "hyper", "formula"];
+export const BOAT_DEALER: CarModel[] = ["jetski", "boat", "fishboat", "sailboat", "hovercraft", "yacht"];
+export const AIR_DEALER: CarModel[] = ["plane", "seaplane", "heli", "jet"];
+export const DEALER_CARS: CarModel[] = ["mini", "compact", "sedan", "wagon", "classic", "suv", "pickup", "offroad", "camper", "roadster", "sport", "rally", "muscle", "electric", "limo", "super", "lowrider", "monster", "hyper", "formula", "gtav"];
 // barber and tattoo studio
 export const HAIR_STYLES: { hair: Hair; name: string; price: number }[] = [
   { hair: "short", name: "Kurz", price: 30 }, { hair: "buzz", name: "Raspel", price: 25 }, { hair: "curls", name: "Locken", price: 45 },

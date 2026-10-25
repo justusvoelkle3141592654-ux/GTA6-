@@ -11,7 +11,13 @@ const SPOT_FREE = 300;                    // ... and none of its kind is closer 
 export const HELI_CEIL = 900;             // highest flying altitude
 const HELI_CLIMB = 230, HELI_TURN = 1.9, HELI_LAND_HIT = 260;
 export const JET_CEIL = 1600;
-const JET_TAKEOFF = 330, JET_STALL = 300, JET_CLIMB = 320, JET_TURN = 1.3, JET_LAND_V = 480, JET_LAND_VZ = 240, JET_GROUND_MAX = 620;
+// flight figures per plane: take-off and stall speed, climb, turn rate, softest landing, top speed on the ground, slowest cruise
+interface PlaneSpec { takeoff: number; stall: number; climb: number; turn: number; landV: number; landVz: number; groundMax: number; cruise: number; water: boolean }
+const PLANES: Record<string, PlaneSpec> = {
+  jet: { takeoff: 330, stall: 300, climb: 320, turn: 1.3, landV: 480, landVz: 240, groundMax: 620, cruise: 520, water: false },
+  plane: { takeoff: 240, stall: 190, climb: 190, turn: 1.0, landV: 380, landVz: 220, groundMax: 400, cruise: 380, water: false },
+  seaplane: { takeoff: 250, stall: 200, climb: 170, turn: 0.95, landV: 380, landVz: 220, groundMax: 380, cruise: 360, water: true },
+};
 const SINK_TIME = 1.1;                    // seconds until a car in the water is lost
 const FLEE_TRY = [0, 0.5, -0.5, 1, -1, 1.6, -1.6, 2.3, -2.3, 3.1];
 
@@ -51,7 +57,8 @@ export class Craft {
   // ---------- speedboat: only moves in the water, gets stuck on the shore ----------
   boat(c: Car, dt: number, acc: number, maxV: number) {
     const g = this.g;
-    const wet = isWater(c.x, c.y);
+    const hover = c.model === "hovercraft";
+    const wet = isWater(c.x, c.y) || hover; // the hovercraft rides its air cushion on land as well
     const ca = Math.cos(c.a), sa = Math.sin(c.a);
     let vF = c.vx * ca + c.vy * sa, vR = -c.vx * sa + c.vy * ca;
     // on land a boat has no drive: it runs aground and stops (push it back into the water on foot)
@@ -67,11 +74,12 @@ export class Craft {
     c.vx = ca * vF - sa * vR; c.vy = sa * vF + ca * vR;
     c.x += c.vx * dt; c.y += c.vy * dt;
     c.vF = vF; c.vR = vR;
-    const z = wet ? WATER_Y + Math.sin(g.t * 2.3 + c.x * 0.013) * 0.8 : Math.max(WATER_Y, terrainH(c.x, c.y));
+    const z = hover ? Math.max(isWater(c.x, c.y) ? WATER_Y : -Infinity, g.groundH(c.x, c.y, c.z + 8)) + 1.5 + Math.sin(g.t * 5) * 0.3
+      : wet ? WATER_Y + Math.sin(g.t * 2.3 + c.x * 0.013) * 0.8 : Math.max(WATER_Y, terrainH(c.x, c.y));
     c.z += (z - c.z) * Math.min(1, dt * 6);
     c.air = false; c.vz = 0;
     // wake behind the boat
-    if (wet && sp > 90 && Math.random() < 42 * dt) g.spray(c.x - ca * 26, c.y - sa * 26, WATER_Y + 1, -ca * sp * 0.2, -sa * sp * 0.2);
+    if (wet && isWater(c.x, c.y) && sp > 90 && Math.random() < 42 * dt) g.spray(c.x - ca * 26, c.y - sa * 26, WATER_Y + 1, -ca * sp * 0.2, -sa * sp * 0.2);
   }
 
   // police boat: straight at you
@@ -149,7 +157,9 @@ export class Craft {
 
   // rolls on the ground until it is fast enough, then climbs; lift: +1 climb, -1 descend; engine: somebody flies it
   jet(c: Car, dt: number, lift: number, engine: boolean) {
-    const g = this.g, st = MODEL_STATS.jet;
+    const g = this.g, st = MODEL_STATS[c.model], P = PLANES[c.model] ?? PLANES.jet;
+    const JET_TAKEOFF = P.takeoff, JET_STALL = P.stall, JET_CLIMB = P.climb, JET_TURN = P.turn, JET_LAND_V = P.landV, JET_LAND_VZ = P.landVz, JET_GROUND_MAX = P.groundMax;
+    const onWater = P.water && isWater(c.x, c.y);
     const ca = Math.cos(c.a), sa = Math.sin(c.a);
     let vF = c.vx * ca + c.vy * sa, vR = -c.vx * sa + c.vy * ca;
     const thr = engine ? c.throttle : 0;
@@ -158,8 +168,8 @@ export class Craft {
     if (!c.air) {
       // rolling: accelerate, brake, steer like a slow car; pull up (climb) when fast enough
       if (thr > 0) vF += thr * st.acc * 0.8 * dt;
-      else if (thr < 0) vF = vF > 0 ? Math.max(0, vF - 520 * -thr * dt) : Math.max(-70, vF - 120 * -thr * dt);
-      vF -= vF * 0.25 * dt;
+      else if (thr < 0) vF = vF > 0 ? Math.max(0, vF - (onWater ? 160 : 520) * -thr * dt) : Math.max(-70, vF - 120 * -thr * dt);
+      vF -= vF * (onWater ? 0.45 : 0.25) * dt;
       vF = clamp(vF, -70, JET_GROUND_MAX);
       vR *= Math.exp(-8 * dt);
       c.av += ((engine ? c.steer * 1.1 * Math.min(1, Math.abs(vF) / 90) * (vF < 0 ? -1 : 1) : 0) - c.av) * Math.min(1, dt * 6);
@@ -170,7 +180,7 @@ export class Craft {
       c.airT += dt;
       if (thr > 0) vF += thr * st.acc * dt;
       else if (thr < 0) vF -= 260 * -thr * dt;
-      else vF += (Math.max(vF, 520) - vF) * 0.3 * dt;
+      else vF += (Math.max(vF, P.cruise) - vF) * 0.3 * dt;
       vF = clamp(vF, engine ? 220 : 160, st.maxV);
       vR *= Math.exp(-3 * dt);
       let turn = engine ? c.steer * JET_TURN * Math.min(1, vF / 400) : 0;
@@ -200,7 +210,8 @@ export class Craft {
       if (c.z <= gh) {
         // touch down on something flat and dry, slow and gently enough; anything else (a wall, a hillside, the bay) is a crash
         const gr = terrainGrad(c.x, c.y, 12);
-        const soft = lift <= 0 && vF < JET_LAND_V && -c.vz < JET_LAND_VZ && zPrev >= gh - 6 && Math.hypot(gr.x, gr.y) < 0.18 && !isWater(c.x, c.y);
+        const wet = isWater(c.x, c.y);
+        const soft = lift <= 0 && vF < JET_LAND_V && -c.vz < JET_LAND_VZ && zPrev >= gh - 6 && (wet ? P.water : Math.hypot(gr.x, gr.y) < 0.18);
         c.z = gh;
         c.air = false;
         if (soft) { c.vz = 0; if (c.kind === "player") sfx.land(); }
@@ -212,7 +223,8 @@ export class Craft {
       if (c.z - gh > 25) { c.air = true; c.vz = 0; }
       else c.z = gh;
     }
-    if (engine && Math.random() < dt * 9) sfx.jet(0.4 + 0.6 * Math.min(1, Math.abs(vF) / 700));
+    if (onWater && !c.air && Math.abs(vF) > 60 && Math.random() < dt * 30) g.spray(c.x - ca * 20, c.y - sa * 20, WATER_Y + 1, -ca * 40, -sa * 40);
+    if (engine && Math.random() < dt * 9) { if (c.model === "jet") sfx.jet(0.4 + 0.6 * Math.min(1, Math.abs(vF) / 700)); else sfx.rotor(0.5 + 0.5 * Math.min(1, Math.abs(vF) / 500)); }
   }
 
   // a car that drove into the bay sinks (true when it is lost this frame)

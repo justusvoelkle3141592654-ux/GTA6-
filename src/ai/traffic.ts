@@ -140,7 +140,9 @@ export class Traffic {
     // arcade modes keep the original traffic mix
     const model: CarModel = !h.rules.city ? (r < 0.15 ? "taxi" : r < 0.3 ? "van" : r < 0.4 ? "suv" : r < 0.5 ? "muscle" : "sedan")
       : isGang ? (r < 0.5 ? "muscle" : "suv")
-      : r < 0.12 ? "taxi" : r < 0.24 ? "van" : r < 0.32 ? "suv" : r < 0.4 ? "muscle" : r < 0.47 ? "bike" : r < 0.52 ? "truck" : r < 0.56 ? "bus" : "sedan";
+      : r < 0.12 ? "taxi" : r < 0.24 ? "van" : r < 0.32 ? "suv" : r < 0.4 ? "muscle" : r < 0.47 ? "bike" : r < 0.52 ? "truck" : r < 0.56 ? "bus"
+      : r < 0.62 ? "compact" : r < 0.67 ? "wagon" : r < 0.71 ? "pickup" : r < 0.74 ? "mini" : r < 0.77 ? "classic" : r < 0.8 ? "electric"
+      : r < 0.82 ? "limo" : r < 0.84 ? "camper" : r < 0.855 ? "mixer" : r < 0.865 ? "tractor" : "sedan";
     const color = isGang ? GANG_COLORS[gang!] : model === "taxi" ? "#ffc21a" : model === "bus" ? "#2bb3ff" : CIV_COLORS[Math.floor(Math.random() * CIV_COLORS.length)];
     const c = new Car("civ", model, color);
     if (isGang) c.faction = gang;

@@ -5,16 +5,21 @@ export type CarModel = "sport" | "super" | "muscle" | "suv" | "sedan" | "van" | 
   | "roadster" | "pickup" | "compact" | "wagon" | "offroad" | "tow" | "garbage" | "ambulance" | "fire" | "icecream" | "policebike" | "unmarked"
   | "scooter" | "bicycle" | "jetski" | "fishboat" | "policeboat" | "policeheli"
   | "hyper" | "formula" | "monster" | "lowrider"
-  | "interceptor" | "polsuv" | "jet";
+  | "interceptor" | "polsuv" | "jet"
+  // Realism update
+  | "limo" | "classic" | "electric" | "mini" | "rally" | "polsport" | "gtav" | "camper"
+  | "tractor" | "forklift" | "mixer" | "tank" | "plane" | "seaplane" | "sailboat" | "yacht" | "hovercraft";
 export const CAR_MODELS: CarModel[] = ["sport", "super", "muscle", "suv", "sedan", "van", "police", "taxi", "bike", "truck", "bus", "swat", "armor", "boat", "heli",
   "roadster", "pickup", "compact", "wagon", "offroad", "tow", "garbage", "ambulance", "fire", "icecream", "policebike", "unmarked", "scooter", "bicycle", "jetski", "fishboat", "policeboat", "policeheli",
-  "hyper", "formula", "monster", "lowrider", "interceptor", "polsuv", "jet"];
-export const isBoat = (m: CarModel) => m === "boat" || m === "jetski" || m === "fishboat" || m === "policeboat";
+  "hyper", "formula", "monster", "lowrider", "interceptor", "polsuv", "jet",
+  "limo", "classic", "electric", "mini", "rally", "polsport", "gtav", "camper", "tractor", "forklift", "mixer", "tank", "plane", "seaplane", "sailboat", "yacht", "hovercraft"];
+export const isBoat = (m: CarModel) => m === "boat" || m === "jetski" || m === "fishboat" || m === "policeboat" || m === "sailboat" || m === "yacht" || m === "hovercraft";
 export const isHeli = (m: CarModel) => m === "heli" || m === "policeheli";
-export const isJet = (m: CarModel) => m === "jet";
-export const isAircraft = (m: CarModel) => isHeli(m) || isJet(m);
+export const isJet = (m: CarModel) => m === "jet";                        // the fighter (guns and missiles)
+export const isPlane = (m: CarModel) => m === "jet" || m === "plane" || m === "seaplane"; // flies with wings: takes off and lands
+export const isAircraft = (m: CarModel) => isHeli(m) || isPlane(m);
 export const isTwoWheel = (m: CarModel) => m === "bike" || m === "policebike" || m === "scooter" || m === "bicycle";
-export const isPoliceModel = (m: CarModel) => m === "police" || m === "swat" || m === "policebike" || m === "unmarked" || m === "policeboat" || m === "policeheli" || m === "interceptor" || m === "polsuv";
+export const isPoliceModel = (m: CarModel) => m === "police" || m === "swat" || m === "policebike" || m === "unmarked" || m === "policeboat" || m === "policeheli" || m === "interceptor" || m === "polsuv" || m === "polsport";
 // not a car: drives on water / flies (own physics, no garage, no traffic)
 export const isCraft = (m: CarModel) => isBoat(m) || isAircraft(m);
 export const MODEL_NAME: Record<CarModel, string> = {
@@ -25,6 +30,9 @@ export const MODEL_NAME: Record<CarModel, string> = {
   scooter: "Roller", bicycle: "Fahrrad", jetski: "Jetski", fishboat: "Fischerboot", policeboat: "Polizeiboot", policeheli: "Polizeihubschrauber",
   hyper: "Vortex X", formula: "Formel-Rennwagen", monster: "Monstertruck", lowrider: "Cruzado",
   interceptor: "Abfangjäger", polsuv: "Polizei-SUV", jet: "Kampfjet",
+  limo: "Stretch-Limousine", classic: "Oldtimer Belmont", electric: "Volta E-GT", mini: "Bambino", rally: "Rallye Sterrato", polsport: "Polizei-Sportwagen",
+  gtav: "GTA V", camper: "Wohnmobil", tractor: "Traktor", forklift: "Gabelstapler", mixer: "Betonmischer", tank: "Kampfpanzer",
+  plane: "Kleinflugzeug", seaplane: "Wasserflugzeug", sailboat: "Segelboot", yacht: "Motoryacht", hovercraft: "Luftkissenboot",
 };
 
 export interface CarDef { id: string; name: string; model: CarModel; color: string; maxV: number; acc: number; grip: number; hp: number; mass: number; desc: string; }
@@ -80,6 +88,23 @@ export const MODEL_STATS: Record<CarModel, ModelStats> = {
   interceptor: { maxV: 700, acc: 820, grip: 12, hp: 160, mass: 1.45, price: 5000 },
   polsuv: { maxV: 540, acc: 620, grip: 12, hp: 260, mass: 2.1, price: 4000 },
   jet: { maxV: 1150, acc: 520, grip: 2, hp: 300, mass: 2, price: 40000 },
+  limo: { maxV: 440, acc: 420, grip: 10, hp: 150, mass: 2.2, price: 8000 },
+  classic: { maxV: 430, acc: 460, grip: 9, hp: 110, mass: 1.3, price: 5500 },
+  electric: { maxV: 640, acc: 900, grip: 12, hp: 100, mass: 1.5, price: 11000 },
+  mini: { maxV: 420, acc: 520, grip: 12, hp: 70, mass: 0.7, price: 1500 },
+  rally: { maxV: 560, acc: 720, grip: 13, hp: 130, mass: 1.1, price: 6500 },
+  polsport: { maxV: 680, acc: 800, grip: 12, hp: 140, mass: 1.3, price: 9000 },
+  gtav: { maxV: 2778, acc: 3000, grip: 18, hp: 160, mass: 1.2, price: 250000 }, // 1000 km/h
+  camper: { maxV: 380, acc: 340, grip: 11, hp: 200, mass: 2.8, price: 4500 },
+  tractor: { maxV: 200, acc: 300, grip: 14, hp: 220, mass: 2.5, price: 3000 },
+  forklift: { maxV: 140, acc: 260, grip: 14, hp: 120, mass: 1.6, price: 2000 },
+  mixer: { maxV: 330, acc: 280, grip: 12, hp: 300, mass: 3.6, price: 5000 },
+  tank: { maxV: 240, acc: 360, grip: 15, hp: 1600, mass: 7, price: 120000 },
+  plane: { maxV: 700, acc: 300, grip: 2, hp: 180, mass: 1.4, price: 25000 },
+  seaplane: { maxV: 640, acc: 280, grip: 2, hp: 180, mass: 1.5, price: 30000 },
+  sailboat: { maxV: 260, acc: 160, grip: 2, hp: 160, mass: 1.6, price: 9000 },
+  yacht: { maxV: 420, acc: 260, grip: 1.6, hp: 400, mass: 4, price: 85000 },
+  hovercraft: { maxV: 520, acc: 480, grip: 2.2, hp: 180, mass: 1.4, price: 15000 },
 };
 
 // half length / half width of each model (collision boxes match the drawn models)
@@ -96,6 +121,10 @@ export const MODEL_DIM: Record<CarModel, { hl: number; hw: number }> = {
   jetski: { hl: 14, hw: 6 }, fishboat: { hl: 34, hw: 13 }, policeboat: { hl: 30, hw: 12 }, policeheli: { hl: 30, hw: 12 },
   hyper: { hl: 23.5, hw: 10.3 }, formula: { hl: 25, hw: 11.5 }, monster: { hl: 26, hw: 14 }, lowrider: { hl: 28, hw: 9.9 },
   interceptor: { hl: 23.5, hw: 10.2 }, polsuv: { hl: 24.5, hw: 10.2 }, jet: { hl: 32, hw: 13 },
+  limo: { hl: 36, hw: 9.6 }, classic: { hl: 25, hw: 9.6 }, electric: { hl: 23.5, hw: 10.2 }, mini: { hl: 17.5, hw: 8.2 }, rally: { hl: 21, hw: 9.2 },
+  polsport: { hl: 23.5, hw: 10.2 }, gtav: { hl: 24, hw: 10.6 }, camper: { hl: 31, hw: 10.8 }, tractor: { hl: 20, hw: 11 }, forklift: { hl: 15, hw: 6.5 },
+  mixer: { hl: 40, hw: 12.5 }, tank: { hl: 36, hw: 18 }, plane: { hl: 41, hw: 10 }, seaplane: { hl: 41, hw: 12 }, sailboat: { hl: 45, hw: 13.5 },
+  yacht: { hl: 70, hw: 22 }, hovercraft: { hl: 25, hw: 13 },
 };
 
 export type CarKind = "player" | "cop" | "civ";

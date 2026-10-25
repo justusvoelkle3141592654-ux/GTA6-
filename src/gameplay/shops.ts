@@ -322,7 +322,7 @@ export class Shops {
     if (!g.crafts.includes(model)) return "Erst kaufen";
     if (g.missions.active || g.hide.active) return "Nicht während einer Mission oder des Versteckspiels";
     const boat = isCraft(model) && (BOAT_DEALER as string[]).includes(model);
-    const spot = boat ? DOCK_SPOT : HELI_SPOT;
+    const spot = boat ? { ...DOCK_SPOT, x: DOCK_SPOT.x - (model === "yacht" ? 130 : model === "sailboat" ? 70 : 0) } : HELI_SPOT;
     if (g.modal) g.closeModal();
     g.teleportOnFoot(boat ? JETTY.x1 - 20 : spot.x + 60, boat ? JETTY.y : spot.y + 40);
     const r = g.spawner.vehicleAt(model, spot.x, spot.y, spot.a);

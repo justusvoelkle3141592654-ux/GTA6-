@@ -21,7 +21,7 @@ import { buildHideFields } from "../gameplay/hide";
 const inStuntPark = (x: number, y: number) => (x > STUNT_PARK.x0 - 60 && x < STUNT_PARK.x1 + 60 && y > STUNT_PARK.y0 - 60 && y < STUNT_PARK.y1 + 60)
   || (x > PRISON.x0 - 80 && x < PRISON.x1 + 80 && y > PRISON.y0 - 80 && y < PRISON.y1 + 80)
   || (x > GAS_STATION.x - GAS_STATION.w / 2 - 70 && x < GAS_STATION.x + 260 && Math.abs(y - GAS_STATION.y) < GAS_STATION.h / 2 + 70);
-import { isCraft, isBoat, isHeli, isJet, isAircraft, isTwoWheel, VEH_SCALE } from "../vehicles/vehicles";
+import { isCraft, isBoat, isHeli, isJet, isPlane, isAircraft, isTwoWheel, VEH_SCALE } from "../vehicles/vehicles";
 import { CarRig, carMaterials, hasRig, topAt, type CarMats } from "../vehicles/carmodel";
 import { JETTY, HELI_SPOT, WALKABLE, type Place } from "../world/places";
 import { interiorCeil, onRoof, type Interior } from "../world/interiors";
@@ -138,6 +138,11 @@ const SPECS: Record<CarModel, CarSpec> = {
   interceptor: { L: 50, W: 25, y0: 2.5, noseY: 6, beltY: 10.5, deckY: 11.5, xCowl: 10, xRoofF: 1, xRoofR: -8, xDeck: -14, roofY: 16, r: 6, wx: 16, wxr: -15, wd: 5 },
   polsuv: { L: 50, W: 26, y0: 5, noseY: 13, beltY: 17.5, deckY: 18, xCowl: 12, xRoofF: 8, xRoofR: -19, xDeck: -22, roofY: 27, r: 7.5, wx: 16, wxr: -16, wd: 5 },
   jet: SEDAN, // own geometry (jetGeo)
+  // Realism update: realistic rigs (cars) or Blender models; these simple shapes are only a fallback
+  limo: { L: 72, W: 24, y0: 3.5, noseY: 8.5, beltY: 12.5, deckY: 13, xCowl: 22, xRoofF: 10, xRoofR: -24, xDeck: -28, roofY: 20, r: 6, wx: 25, wxr: -24, wd: 4 },
+  classic: SEDAN, electric: SEDAN, mini: SEDAN, rally: SEDAN, polsport: SEDAN, gtav: SEDAN,
+  camper: { L: 62, W: 26, y0: 4, noseY: 11, beltY: 15, deckY: 15, xCowl: 25, xRoofF: 17, xRoofR: 15, xDeck: 15, roofY: 29, r: 6.5, wx: 20, wxr: -20, wd: 4 },
+  tractor: SEDAN, forklift: SEDAN, mixer: SEDAN, tank: SEDAN, plane: SEDAN, seaplane: SEDAN, sailboat: SEDAN, yacht: SEDAN, hovercraft: SEDAN,
 };
 
 // two wheelers: frame, tank, seat, handlebar; the rider goes into the "glass" mesh so it can be hidden
@@ -256,8 +261,11 @@ function heliGeo(color: string, police = false): CarGeo {
 }
 
 // vehicles drawn from a Blender model (render/models.ts) once it is loaded
+// big vehicles: the chase camera stays further back
+const BIG_CAM: Partial<Record<CarModel, number>> = { tank: 50, mixer: 50, camper: 30, limo: 30, sailboat: 90, yacht: 130, hovercraft: 20, bus: 30, fire: 30 };
+const GLB_MODELS = new Set<string>(["tank", "tractor", "forklift", "mixer", "plane", "seaplane", "sailboat", "yacht", "hovercraft"]);
 const glbIdFor = (c: { model: CarModel; kind: string }): ModelId | null =>
-  c.model === "armor" ? "armor" : c.model === "jet" ? (c.kind === "cop" ? "jet_police" : "jet") : c.model === "heli" ? "heli" : c.model === "policeheli" ? "heli_police" : null;
+  GLB_MODELS.has(c.model) ? c.model as ModelId : c.model === "armor" ? "armor" : c.model === "jet" ? (c.kind === "cop" ? "jet_police" : "jet") : c.model === "heli" ? "heli" : c.model === "policeheli" ? "heli_police" : null;
 
 interface CarWheel { x: number; z: number; r: number; wd: number; front: boolean; }
 interface CarGeo { body: THREE.BufferGeometry; glass: THREE.BufferGeometry; lights: THREE.BufferGeometry; wheels: CarWheel[]; roofY: number; }
@@ -449,7 +457,7 @@ function neonTex() {
   neonTexC = new THREE.CanvasTexture(c); return neonTexC;
 }
 interface CarObj {
-  neon?: THREE.Mesh;
+  neon?: THREE.Mesh; props?: THREE.Object3D[]; drum?: THREE.Object3D; // propellers / fans, the mixer drum (Blender models)
   group: THREE.Group; tilt: THREE.Group; body: THREE.Mesh; glass: THREE.Mesh; lights: THREE.Mesh; pool: THREE.Mesh; glow?: THREE.Mesh; rotor?: THREE.Object3D;
   wheels: { pivot: THREE.Object3D; spin: THREE.Object3D; front: boolean; r: number; y: number }[];
   bar?: { reds: THREE.MeshBasicMaterial; blues: THREE.MeshBasicMaterial; white: THREE.MeshBasicMaterial };
@@ -1221,7 +1229,7 @@ export class Renderer3D {
     const obj: CarObj = { group, tilt, body: rig.body, glass: rig.body, lights: rig.lights.head, pool, wheels, model: c.model, color: c.color, wreck: false, pitch: 0, roll: 0, spinA: 0, steerA: 0,
       rig, dentN: 0, glassV: -1, bumpers: 0, doorsOff: 0, lonV: c.vF, prevV: c.vF, brakeT: 0, wipe: 0, bounce: 0, bounceV: 0 };
     if (c.kind === "player") { obj.glow = new THREE.Mesh(this.glowGeo, this.glowMat); obj.glow.renderOrder = 2; group.add(obj.glow); }
-    if (c.model === "police" || c.model === "interceptor" || c.model === "polsuv" || c.model === "swat" || c.model === "ambulance" || c.model === "fire") {
+    if (c.model === "police" || c.model === "interceptor" || c.model === "polsuv" || c.model === "polsport" || c.model === "swat" || c.model === "ambulance" || c.model === "fire") {
       const reds = new THREE.MeshBasicMaterial({ color: this.copRed.clone(), toneMapped: false });
       const blues = new THREE.MeshBasicMaterial({ color: this.copBlue.clone(), toneMapped: false });
       const white = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1, 1), toneMapped: false });
@@ -1234,7 +1242,7 @@ export class Renderer3D {
         seg.position.set(bx, top + 1.3, z);
         tilt.add(seg);
       }
-      if (c.model === "police" || c.model === "interceptor" || c.model === "polsuv") {
+      if (c.model === "police" || c.model === "interceptor" || c.model === "polsuv" || c.model === "polsport") {
         const sy = s.belt - 3.2, sz = s.W / 2 + 0.12;
         const d1 = new THREE.Mesh(this.decalGeo, this.decalMat); d1.scale.set(0.9, 0.7, 1); d1.position.set(-2, sy, sz); tilt.add(d1);
         const d2 = new THREE.Mesh(this.decalGeo, this.decalMatB); d2.scale.set(0.9, 0.7, 1); d2.position.set(-2, sy, -sz); d2.rotation.y = Math.PI; tilt.add(d2);
@@ -1268,7 +1276,9 @@ export class Renderer3D {
     const pool = new THREE.Mesh(this.poolGeo, c.kind === "player" ? this.poolMatP : this.poolMat); pool.renderOrder = 2;
     group.add(shadow, pool);
     const obj: CarObj = { group, tilt, body: dummy, glass: dummy, lights: dummy, pool, wheels, model: c.model, color: c.color, wreck: false, pitch: 0, roll: 0, spinA: 0, steerA: 0, dentN: 0, glassV: 0, bumpers: 0, doorsOff: 0, lonV: 0, prevV: 0, brakeT: 0, wipe: 0, bounce: 0, bounceV: 0,
-      glb: m, rotor: m.getObjectByName("rotor") ?? undefined, tailRotor: m.getObjectByName("tailrotor") ?? undefined, gear: m.getObjectByName("gear") ?? undefined, turret: m.getObjectByName("turret") ?? undefined, turretA: 0 };
+      glb: m, rotor: m.getObjectByName("rotor") ?? undefined, tailRotor: m.getObjectByName("tailrotor") ?? undefined, gear: m.getObjectByName("gear") ?? undefined, turret: m.getObjectByName("turret") ?? undefined, turretA: 0,
+      props: ["prop", "prop_l", "prop_r"].map((n) => m.getObjectByName(n)).filter((n): n is THREE.Object3D => !!n), drum: m.getObjectByName("drum") ?? undefined };
+    if (c.model === "tank" || c.model === "yacht") shadow.scale.set(1.6, 1, 2); else if (c.model === "plane" || c.model === "seaplane") shadow.scale.set(1.3, 1, 3);
     if (c.kind === "player") { obj.glow = new THREE.Mesh(this.glowGeo, this.glowMat); obj.glow.renderOrder = 2; group.add(obj.glow); }
     if (isHeli(c.model)) shadow.visible = false;
     if (isJet(c.model)) { obj.burner = new THREE.Mesh(this.burnerGeo, this.burnerMat); obj.burner.position.set(-35.5, 10, 0); tilt.add(obj.burner); shadow.scale.set(1.3, 1, 1.4); }
@@ -1314,7 +1324,7 @@ export class Renderer3D {
     if (isBoat(c.model)) { shadow.visible = false; pool.visible = false; }
     if (isTwoWheel(c.model)) shadow.scale.set(0.6, 1, 0.35);
     else if (c.model === "bus" || c.model === "truck") shadow.scale.set(1.5, 1, 1.15);
-    if (c.model === "police" || c.model === "interceptor" || c.model === "polsuv" || c.model === "swat" || c.model === "ambulance" || c.model === "fire") {
+    if (c.model === "police" || c.model === "interceptor" || c.model === "polsuv" || c.model === "polsport" || c.model === "swat" || c.model === "ambulance" || c.model === "fire") {
       const reds = new THREE.MeshBasicMaterial({ color: this.copRed.clone(), toneMapped: false });
       const blues = new THREE.MeshBasicMaterial({ color: this.copBlue.clone(), toneMapped: false });
       const white = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1, 1), toneMapped: false });
@@ -1422,7 +1432,9 @@ export class Renderer3D {
         const liftR = -Math.min(0, H * cr - c.hw * Math.abs(sr), -c.hw * Math.abs(sr)), liftP = -Math.min(0, H * cp - c.hl * Math.abs(sp2), -c.hl * Math.abs(sp2));
         o.group.position.y += Math.max(liftR, liftP);
       }
-      if (isJet(c.model)) {
+      if (o.props) for (const pr of o.props) pr.rotation.x += dt * (c.dead ? 0 : c.model === "hovercraft" ? 14 + Math.abs(c.throttle) * 26 : 6 + c.rotor * 60);
+      if (o.drum && !c.dead) o.drum.rotation.x += dt * 1.6;
+      if (isPlane(c.model)) {
         // nose follows the climb, wings bank into the turn, afterburner glows
         o.tilt.rotation.z = c.air ? clamp(Math.atan2(c.vz, Math.max(150, c.vF)), -0.6, 0.6) : 0;
         o.tilt.rotation.x = c.air ? clamp(-c.av * 0.45, -0.9, 0.9) : 0;
@@ -1447,7 +1459,8 @@ export class Renderer3D {
       o.pool.visible = !c.air && !c.dead && !isBoat(c.model);
       // the armoured car's turret turns towards you when the police drive it
       if (o.turret) {
-        const want = c.kind === "cop" && !c.dead && !c.calm ? wrapA(Math.atan2(g.fy - c.y, g.fx - c.x) - c.a) : 0;
+        // the player's tank aims where the camera looks
+        const want = c === g.player && !g.onFoot && !c.dead ? wrapA(g.aimYaw() - c.a) : c.kind === "cop" && !c.dead && !c.calm ? wrapA(Math.atan2(g.fy - c.y, g.fx - c.x) - c.a) : 0;
         o.turretA = (o.turretA ?? 0) + wrapA(want - (o.turretA ?? 0)) * Math.min(1, dt * 2.5);
         o.turret.rotation.y = -o.turretA;
       }
@@ -2009,12 +2022,12 @@ export class Renderer3D {
         this.camYaw += wrapA(desired - this.camYaw) * (1 - Math.exp(-dt * 5));
         const fly = isAircraft(p.model);
         const zoom = currentSettings.camNear ? (fly ? 0.75 : 0.6) : 1;
-        const full = (128 + sp * 0.07 + (fly ? (isJet(p.model) ? 110 : 70) : 0)) * zoom;
+        const full = (128 + sp * 0.07 + (fly ? (isPlane(p.model) ? 110 : 70) : 0)) * zoom + (BIG_CAM[p.model] ?? 0);
         let dist = full;
         const cx = Math.cos(this.camYaw + this.lookYaw), cy = Math.sin(this.camYaw + this.lookYaw);
         for (let s = 0.12; s <= 1.0001; s += 0.08) if (this.world.isSolid(p.x - cx * full * s, p.y - cy * full * s, 6)) { dist = Math.max(36, full * s - 12); break; }
         const behindH = terrainH(p.x - cx * dist, p.y - cy * dist);
-        let h = (46 + sp * 0.025 + (fly ? 45 : 0)) * zoom * (0.55 + 0.45 * (dist / full)) + (g.ending ? 40 : 0) + this.lookPitch * 70;
+        let h = (46 + sp * 0.025 + (fly ? 45 : 0)) * zoom * (0.55 + 0.45 * (dist / full)) + (g.ending ? 40 : 0) + this.lookPitch * 70 + (BIG_CAM[p.model] ?? 0) * 0.45;
         // in the tunnel the camera stays under the ceiling, close behind the car
         const tf = tunnelAt(p.x, p.y), tb = tunnelAt(p.x - cx * dist, p.y - cy * dist);
         const inTunnel = (!isNaN(tf) && p.z < tf + TUNNEL.clear) || (!isNaN(tb) && p.z < tb + TUNNEL.clear);

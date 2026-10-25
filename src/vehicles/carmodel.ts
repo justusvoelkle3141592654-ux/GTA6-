@@ -53,6 +53,14 @@ export const SHAPES: Partial<Record<CarModel, Shape>> = {
   formula: S({ L: 50, W: 9, R: 3.6, y0: 1.2, nose: 3, cowl: 5.4, cowlX: 6, roofF: 0, roofR: -6, roof: 9, deckX: -8, deck: 7.6, tail: 6.2, belt: 5.4, doors: 2, open: true, taper: 0.9, seatX: -3, wf: 17, wr: -15, track: 9.6, wd: 3.8 }),
   interceptor: S({ L: 47, W: 20.4, R: 3.6, nose: 4.8, cowl: 7.8, cowlX: 11, roofF: 2, roofR: -6, roof: 11.6, deckX: -13, deck: 9.2, tail: 9.6, belt: 8, doors: 2, taper: 0.68, seatX: 0 }),
   polsuv: S({ L: 49, W: 20.4, R: 3.9, y0: 3.4, nose: 9.5, cowl: 11.6, cowlX: 12, roofF: 6, roofR: -19, roof: 17.6, deckX: -22.5, deck: 15, tail: 12.5, belt: 11.6, taper: 0.86, seatX: -1 }),
+  limo: S({ L: 72, W: 19.2, R: 3.4, cowlX: 22, roofF: 10, roofR: -24, roof: 14.6, deckX: -28, wf: 25, wr: -24, seatX: 10 }),
+  classic: S({ L: 50, W: 19.2, R: 3.4, nose: 8.5, cowl: 10, cowlX: 9, roofF: 3, roofR: -11, roof: 15.2, deckX: -16, deck: 10.5, tail: 10, belt: 10, doors: 2, taper: 0.82, seatX: -3 }),
+  electric: S({ L: 47, W: 20.4, R: 3.6, nose: 5.2, cowl: 8.2, cowlX: 12, roofF: 2, roofR: -10, roof: 12.4, deckX: -16, deck: 9.6, tail: 9.6, belt: 8.4, doors: 2, taper: 0.7, seatX: -2 }),
+  mini: S({ L: 35, W: 16.4, R: 2.9, nose: 7, cowl: 9.4, cowlX: 7, roofF: 2, roofR: -12, roof: 14.6, deckX: -14, deck: 13, tail: 12, belt: 9.4, doors: 2, seatX: -3 }),
+  rally: S({ L: 42, W: 18.4, R: 3.4, y0: 3, nose: 7.5, cowl: 10, cowlX: 9, roofF: 4, roofR: -13, roof: 15.4, deckX: -17, deck: 12.5, tail: 11.4, belt: 9.8, doors: 2, seatX: -2 }),
+  polsport: S({ L: 47, W: 20.4, R: 3.6, nose: 4.8, cowl: 7.8, cowlX: 11, roofF: 2, roofR: -6, roof: 11.6, deckX: -13, deck: 9.2, tail: 9.6, belt: 8, doors: 2, taper: 0.68, seatX: 0 }),
+  gtav: S({ L: 48, W: 21.2, R: 3.6, nose: 4.2, cowl: 7.2, cowlX: 12, roofF: 1, roofR: -4, roof: 10.6, deckX: -12, deck: 8.8, tail: 9.6, belt: 7.6, doors: 2, taper: 0.64, seatX: 0 }),
+  camper: S({ L: 62, W: 21.5, R: 3.7, y0: 2.8, nose: 9, cowl: 11.5, cowlX: 22, roofF: 17, roofR: -30, roof: 27, deckX: -31, deck: 26, tail: 26, belt: 12, taper: 0.98, doors: 2, box: { x0: -31, x1: 14, h: 29, col: "#f4f2ea" }, seatX: 12 }),
   bus: S({ L: 100, W: 25, R: 4.8, y0: 3.4, nose: 14, cowl: 16, cowlX: 49, roofF: 47, roofR: -49, roof: 31, deckX: -49.5, deck: 31, tail: 30, belt: 14, taper: 0.98, doors: 2, seatX: 41, wf: 32, wr: -28 }),
 };
 export const hasRig = (m: CarModel) => !!SHAPES[m];
@@ -99,6 +107,14 @@ const STYLE: Partial<Record<CarModel, Style>> = {
   interceptor: ST({ crease: 0.9, flare: 1.2, grille: "mesh", tail: "bar", rim: "multi", rimCol: "#2a2d33", skirts: true, diffuser: true, pipes: 2 }),
   polsuv: ST({ crease: 0.6, flare: 1.0, grille: "mesh", lamp: "square", tail: "vertical", rim: "steel", rimCol: "#3a3d45", rails: true }),
   bus: ST({ crease: 0.1, flare: 0.1, grille: "none", lamp: "square", tail: "vertical", rim: "steel" }),
+  limo: ST({ crease: 0.4, flare: 0.3, grille: "bars", tail: "bar", rim: "multi", rimCol: "#d8dce2", chrome: true, antenna: true }),
+  classic: ST({ crease: 0.8, flare: 0.6, grille: "bars", lamp: "round", tail: "round", rim: "wire", rimCol: "#e8ecf2", chrome: true }),
+  electric: ST({ crease: 0.7, flare: 1.1, grille: "none", tail: "bar", rim: "turbine", rimCol: "#d8dce2", diffuser: true }),
+  mini: ST({ crease: 0.3, flare: 0.4, grille: "mesh", lamp: "round", tail: "vertical", rim: "five" }),
+  rally: ST({ crease: 0.6, flare: 1.5, grille: "mesh", tail: "vertical", rim: "multi", rimCol: "#d4a017", spoiler: "wing", skirts: true, scoop: true }),
+  polsport: ST({ crease: 0.9, flare: 1.2, grille: "mesh", tail: "bar", rim: "multi", rimCol: "#2a2d33", skirts: true, diffuser: true, spoiler: "wing", pipes: 2 }),
+  gtav: ST({ crease: 1, flare: 1.5, grille: "none", tail: "bar", rim: "turbine", rimCol: "#d4a017", skirts: true, diffuser: true, spoiler: "wing", pipes: 2 }),
+  camper: ST({ crease: 0.2, flare: 0.3, grille: "bars", lamp: "square", tail: "vertical", rim: "steel" }),
 };
 const styleOf = (m: CarModel) => STYLE[m] ?? ST({});
 
@@ -508,6 +524,8 @@ export function rigGeo(model: CarModel): RigGeo {
   if (model === "polsuv") { T.push(bx(2, 7, s.W * 0.86, hl + 1.4, yb + 3, 0, "#22252b")); for (const z of [-1, 1]) T.push(bx(2, 9, 1, hl + 1.4, yb + 4, z * s.W * 0.3, "#22252b")); }
   if (model === "interceptor") { X.push(bx(3.2, 0.5, s.W * 0.86, -hl + 2.2, s.deck + 3.6, 0, "#15161b")); for (const z of [-1, 1]) T.push(bx(1.4, 3, 0.5, -hl + 2.6, s.deck + 1.9, z * s.W * 0.25, "#15161b")); }
   if (model === "police" || model === "unmarked") T.push(bx(1.2, 3, s.W * 0.9, hl + 0.8, yb + 1.5, 0, "#22252b"));
+  if (model === "camper") { for (const z of [-1, 1]) { X.push(bx(40, 2, 0.3, -9, 18, z * (s.W * 0.49 + 0.15), "#c0392b")); G.push({ id: "camp" + z, geo: pane([[-24, 20, z * (s.W * 0.49 + 0.2)], [-10, 20, z * (s.W * 0.49 + 0.2)], [-10, 25, z * (s.W * 0.49 + 0.2)], [-24, 25, z * (s.W * 0.49 + 0.2)]]) }); } X.push(bx(10, 1.4, 8, -14, s.box!.h + 0.7, 0, "#d8d8d8")); }
+  if (model === "limo") for (const z of [-1, 1]) X.push(bx(1, 3.6, 0.3, 2, s.belt - 1.6, z * (s.W * 0.49 + 0.1), "#c9ced8"));
   if (model === "taxi") X.push(bx(3.5, 2.8, 8, (s.roofF + s.roofR) / 2, s.roof + 1.4, 0, "#fff5b0", 1.2));
   if (model === "fire") { X.push(bx(s.box!.x1 - s.box!.x0 - 4, 1.2, 6, (s.box!.x0 + s.box!.x1) / 2, s.box!.h + 1, 0, "#c9ced8")); for (let i = 0; i < 12; i++) X.push(bx(0.6, 1, 6, s.box!.x0 + 3 + i * 4.4, s.box!.h + 2, 0, "#c9ced8")); }
   if (model === "tow") { X.push(bx(s.deckX + hl - 2, 1.6, s.W * 0.92, (s.deckX - hl) / 2, s.deck, 0, "#3a3d45")); const g = new THREE.BoxGeometry(24, 1.8, 2); g.rotateZ(0.6); g.translate(-hl + 10, s.deck + 8, 0); X.push(col(g, "#d9b23a")); }

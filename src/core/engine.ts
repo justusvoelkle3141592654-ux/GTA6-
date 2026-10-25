@@ -5,7 +5,7 @@ import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, CRIMES, type Crime } from "../ai/wanted";
 import { buildPlaces, onJetty, respawnCost, RESPAWN_RULES, type Place } from "../world/places";
 import { PedSystem, PED_LIMIT, isPolice, type Civilian, type Team } from "../ai/peds";
-import { Car, CARS, VEH_SCALE, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, isJet, isAircraft, isTwoWheel, hitCar, copyBody, repairBody, type CarDef, type CarModel, type FactionId } from "../vehicles/vehicles";
+import { Car, CARS, VEH_SCALE, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, isJet, isPlane, isAircraft, isTwoWheel, hitCar, copyBody, repairBody, type CarDef, type CarModel, type FactionId } from "../vehicles/vehicles";
 import { Inventory, WEAPONS, WEAPON_DEFS, type Weapon } from "../gameplay/weapons";
 import { SHAPES, hasRig } from "../vehicles/carmodel";
 import { buildInteriors, interiorAt, interiorFloor, interiorCeil, inRoofHole, type Elevator, type Home, type Interior, type Seat } from "../world/interiors";
@@ -996,6 +996,7 @@ export class Game {
     if (this.fireCd > 0 || this.ending || this.state !== "playing") return;
     if (this.jobs.waterCannon) { this.jobs.spray(0.05); this.fireCd = 0.05; return; } // fire truck: water instead of bullets
     if (!this.onFoot && isJet(this.player.model)) { this.jetGuns(); return; }
+    if (!this.onFoot && this.player.model === "tank") { this.tankShot(); return; }
     const onFoot = this.onFoot;
     const p = this.player;
     const d = this.inv.def, w = d.id;
@@ -1087,6 +1088,20 @@ export class Game {
     sfx.shot(); this.shake(0.03);
     if (Math.random() < 0.2) this.crime("shot");
   }
+  // where the camera looks (the tank's turret follows it)
+  aimYaw() { return this.r3d.camMode === "chase" ? this.r3d.camYaw + this.r3d.lookYaw : this.player.a; }
+  // tank cannon (click / F / G): a shell along the turret, explodes where it hits
+  private tankShot() {
+    const p = this.player;
+    if (this.missileCd > 0) return;
+    this.missileCd = 1.5;
+    const a = this.aimYaw(), ca = Math.cos(a), sa = Math.sin(a), sp = 1100;
+    const ox = p.x + ca * 66 * VEH_SCALE, oy = p.y + sa * 66 * VEH_SCALE, oz = p.z + 21 * VEH_SCALE;
+    this.addProj("rocket", "player", "player", -1, 700, ox, oy, oz, ca * sp, sa * sp, 0, a, 3, null);
+    this.flashes.push({ x: ox, y: oy, z: oz, life: 0.14, max: 0.14, size: 260 });
+    sfx.rocket(); this.shake(0.3);
+    this.crime("rocket");
+  }
   // missile (G / RAKETE): locks on to the closest target in front of you, otherwise flies straight
   missileCd = 0;
   jetMissile() {
@@ -1146,6 +1161,7 @@ export class Game {
 
   detonate() {
     if (this.state === "playing" && !this.ending && !this.onFoot && isJet(this.player.model)) { this.jetMissile(); return; }
+    if (this.state === "playing" && !this.ending && !this.onFoot && this.player.model === "tank") { this.tankShot(); return; }
     if (!this.bombs.length) return;
     const list = this.bombs;
     this.bombs = [];
@@ -1692,7 +1708,11 @@ export class Game {
     const b = this.bind;
     if (isJet(p.model)) this.setHint(this.mobile ? "Kampfjet: GAS rollen · ab 120 km/h HOCH zum Abheben · FEUER Kanone · RAKETE" : `Kampfjet: ${b.label("up")} Schub · ab 120 km/h ${b.label("handbrake")} hochziehen · ${b.label("nitro")} sinken · Klick/F Kanone · ${b.label("detonate")} Rakete`, 6);
     else if (isHeli(p.model)) this.setHint(this.mobile ? "Hubschrauber: HOCH steigen · RUNTER sinken" : `Hubschrauber: ${b.label("handbrake")} steigen · ${b.label("nitro")} sinken · ${b.label("up")}/${b.label("down")} vor/zurück · ${b.label("left")}/${b.label("right")} drehen`, 5);
+    else if (p.model === "plane" || p.model === "seaplane") this.setHint(this.mobile ? `${MODEL_NAME[p.model]}: GAS rollen · ab ${p.model === "plane" ? 86 : 90} km/h HOCH zum Abheben` : `${MODEL_NAME[p.model]}: ${b.label("up")} Gas · ab ${p.model === "plane" ? 86 : 90} km/h ${b.label("handbrake")} hochziehen · ${b.label("nitro")} sinken${p.model === "seaplane" ? " · startet und landet auch auf dem Wasser" : ""}`, 6);
+    else if (p.model === "hovercraft") this.setHint("Luftkissenboot: fährt auf dem Wasser und an Land", 3);
     else if (isBoat(p.model)) this.setHint(`${MODEL_NAME[p.model]}: fährt nur auf dem Wasser – Nitro geht auch hier`, 3);
+    else if (p.model === "tank") this.setHint(this.mobile ? "Kampfpanzer: der Turm folgt der Kamera · FEUER Kanone" : `Kampfpanzer: der Turm folgt der Kamera · Klick/F oder ${b.label("detonate")} Kanone`, 5);
+    else if (p.model === "gtav") this.setHint("GTA V: bis 1000 km/h – festhalten!", 3);
   }
 
   // ---------- loop ----------
@@ -2236,7 +2256,7 @@ export class Game {
     for (const c of this.cars) {
       c.ox = c.x; c.oy = c.y; // where it was before this step (walls push it back to the side it came from)
       const grass = this.onGrass(c.x, c.y);
-      if (isJet(c.model) && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.jet(c, dt, mine ? this.lift : -1, mine); if (!c.air) this.collideWorld(c); continue; }
+      if (isPlane(c.model) && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.jet(c, dt, mine ? this.lift : -1, mine); if (!c.air && !(c.model === "seaplane" && isWater(c.x, c.y))) this.collideWorld(c); continue; }
       if (isHeli(c.model) && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.fly(c, dt, mine ? this.lift : -1, mine, mine ? currentSettings.vehSpeed : 1); this.collideWorld(c); continue; }
       if (isBoat(c.model) && !c.dead) {
         const st = MODEL_STATS[c.model], mine = c === p && playing;
