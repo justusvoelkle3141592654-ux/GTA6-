@@ -178,7 +178,7 @@ export default function BigMap({ game, onChange, onTravel }: { game: Game; onCha
             <button onClick={() => { setSel(null); setMsg(""); }} className="rounded-lg px-2 py-1 text-white/60 hover:text-white" aria-label="Auswahl schließen"><Icon name="close" size={14} /></button>
           </div>
           <div className="mt-2 grid grid-cols-2 gap-1.5 text-xs font-bold sm:grid-cols-4">
-            <button onClick={() => go(false)} className="rounded-lg bg-pink-500 px-2 py-2 text-white active:scale-95">Hinfliegen</button>
+            <button onClick={() => go(false)} className="rounded-lg bg-sky-600 px-2 py-2 text-white active:scale-95">Hinfliegen</button>
             <button onClick={() => go(true)} className="rounded-lg bg-white/15 px-2 py-2 text-white active:scale-95">Sofort hin</button>
             <button onClick={() => { game.setWaypoint(picked.x, picked.y); setMsg("GPS-Route gesetzt"); draw(); onChange(); }} className="rounded-lg bg-white/15 px-2 py-2 text-white active:scale-95">GPS-Route</button>
             {picked.marker ? <button onClick={() => { game.removeMarker(picked.marker); setSel(null); draw(); onChange(); }} className="rounded-lg bg-red-500/70 px-2 py-2 text-white active:scale-95">Löschen</button>

@@ -65,7 +65,7 @@ export default function Phone(props: PhoneProps) {
           {app === "progress" && <Progress game={game} narrow />}
           {app === "cheats" && <CheatTab game={game} />}
           {app === "settings" && <SettingsTab game={game} isTouch={props.isTouch} narrow />}
-          {app === "help" && <div className="rounded-2xl border border-white/10 bg-black/50 p-3 text-sm"><Help isTouch={props.isTouch} bind={game.bind} /></div>}
+          {app === "help" && <div className="rounded-sm border border-white/5 bg-black/65 p-3 text-sm"><Help isTouch={props.isTouch} bind={game.bind} /></div>}
           {app === "system" && <SystemApp {...props} />}
         </div>
       </div>
@@ -98,7 +98,7 @@ export function IncomingCall({ game, from, text, job, onClose }: { game: Game; f
       <div className="popin w-[min(94vw,360px)] rounded-3xl border border-pink-400/40 bg-[#0f0b1a]/95 p-5 text-center shadow-[0_0_30px_rgba(255,60,172,0.4)]">
         <div className="mx-auto flex h-14 w-14 animate-pulse items-center justify-center rounded-full bg-green-500/25 text-green-300"><Icon name="phone" size={28} /></div>
         <div className="mt-2 text-xs uppercase tracking-widest text-white/50">Anruf</div>
-        <div className="font-display text-3xl tracking-widest text-pink-300">{from}</div>
+        <div className="font-display text-3xl tracking-widest text-white">{from}</div>
         <p className="mt-2 text-sm text-white/85">{text}</p>
         <div className="mt-4 flex gap-3">
           <button className="flex-1 rounded-xl bg-red-500/80 py-2 font-bold" onClick={() => { game.declineCall(); onClose(); }}>Ablehnen</button>

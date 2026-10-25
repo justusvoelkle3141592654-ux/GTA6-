@@ -170,6 +170,8 @@ export default function App() {
         </Overlay>
       )}
 
+      {/* "fast" graphics have no post effects: the dark corners of the colour grade come from CSS */}
+      {(playing || state === "paused") && config.quality === "low" && <div className="pointer-events-none absolute inset-0 z-[5]" style={{ background: "radial-gradient(ellipse at center, transparent 58%, rgba(0,0,0,0.32) 100%)" }} />}
       {(playing || state === "paused") && g && (
         <Hud hud={hud} isTouch={isTouch} rules={rules} camera={config.camera} onPause={() => g.pause()} onCam={cycleCam} onZoom={() => g.toggleZoom()} onToggleCar={() => g.toggleCar()}
           onInteract={() => g.interact()} onRadio={() => g.cycleRadio()} onJob={() => g.toggleJob()} onPhone={() => g.openModal({ kind: "phone" })} onDetonate={() => g.detonate()} onWeapon={(w) => g.setWeapon(w)} onWheel={() => g.openModal({ kind: "wheel" })}

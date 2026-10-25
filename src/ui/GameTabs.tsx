@@ -10,8 +10,8 @@ import { fmt } from "./ui";
 
 const card = "rounded-2xl border border-white/10 bg-black/45 p-3 backdrop-blur-sm";
 const btn = "rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-sm font-semibold text-white transition hover:border-pink-400 active:scale-95 disabled:opacity-40";
-const btnHi = "rounded-lg bg-pink-500 px-3 py-1.5 text-sm font-bold text-white transition hover:brightness-110 active:scale-95 disabled:opacity-40";
-const h3 = "font-display text-2xl tracking-widest text-pink-300";
+const btnHi = "rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-bold text-white transition hover:brightness-110 active:scale-95 disabled:opacity-40";
+const h3 = "font-display text-2xl tracking-widest text-white";
 
 // ---------------------------------------------------------------- jobs (pause menu tab and phone app)
 export function JobsTab({ game, onDone, compact = false }: { game: Game; onDone: () => void; compact?: boolean }) {
@@ -33,7 +33,7 @@ export function JobsTab({ game, onDone, compact = false }: { game: Game; onDone:
       </div>
       {msg && <div className="popin rounded-lg bg-white/10 px-3 py-2 text-center text-sm text-yellow-100">{msg}</div>}
       <div className={card + " text-xs text-white/70"}>
-        <div className="mb-1 font-display text-lg tracking-widest text-pink-300">Rekorde</div>
+        <div className="mb-1 font-display text-lg tracking-widest text-white">Rekorde</div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 sm:grid-cols-4">
           <span>Weitester Sprung</span><b>{pr.records.jumpDist ? `${pr.records.jumpDist.toFixed(1).replace(".", ",")} m` : "–"}</b>
           <span>Längste Zeit in der Luft</span><b>{pr.records.airTime ? `${pr.records.airTime.toFixed(2).replace(".", ",")} s` : "–"}</b>
@@ -52,7 +52,7 @@ function JobCard({ game, k, onPick }: { game: Game; k: JobKind; onPick: (msg: st
   return (
     <div className={card + " flex flex-col gap-1.5 " + (running ? "border-cyan-300/60" : "")}>
       <div className="flex items-start gap-2">
-        <div className="rounded-xl bg-white/10 p-2 text-pink-300"><Icon name={k} size={26} /></div>
+        <div className="rounded-xl bg-white/10 p-2 text-white"><Icon name={k} size={26} /></div>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2"><span className="font-display text-xl tracking-widest">{d.name}</span><span className="text-xs text-yellow-200">Stufe {lvl}</span></div>
           <div className="text-xs leading-snug text-white/75">{d.desc}</div>
@@ -141,12 +141,12 @@ export function ContactsTab({ game }: { game: Game }) {
         const total = MISSIONS.filter((x) => x.giver === id), got = total.filter((x) => done.includes(x.id)).length;
         return (
           <div key={id} className={card + " flex items-center justify-between gap-2"}>
-            <div className="flex items-center gap-3"><Icon name="contacts" className="text-pink-300" /><div><div className="font-semibold">{pl?.name ?? id}</div><div className="text-[11px] text-white/55">{got}/{total.length} Aufträge{m ? ` · neu: „${m.title}“` : ""}</div></div></div>
+            <div className="flex items-center gap-3"><Icon name="contacts" className="text-white" /><div><div className="font-semibold">{pl?.name ?? id}</div><div className="text-[11px] text-white/55">{got}/{total.length} Aufträge{m ? ` · neu: „${m.title}“` : ""}</div></div></div>
             <button className={btnHi} onClick={() => call(id)}>Anrufen</button>
           </div>
         );
       })}
-      {reply && <div className={card + " border-pink-400/40 text-sm"}><b className="text-pink-300">{reply.who}:</b> {reply.text}</div>}
+      {reply && <div className={card + " border-pink-400/40 text-sm"}><b className="text-white">{reply.who}:</b> {reply.text}</div>}
     </div>
   );
 }
@@ -225,7 +225,7 @@ export function MessagesApp({ game }: { game: Game }) {
   return (
     <div className="space-y-2">
       {game.messages.map((m, i) => (
-        <div key={i} className="rounded-xl bg-white/10 p-2 text-sm"><div className="flex justify-between text-[11px] text-white/50"><b className="text-pink-300">{m.from}</b><span>{String(Math.floor(m.time)).padStart(2, "0")}:{String(Math.floor((m.time % 1) * 60)).padStart(2, "0")}</span></div>{m.text}</div>
+        <div key={i} className="rounded-xl bg-white/10 p-2 text-sm"><div className="flex justify-between text-[11px] text-white/50"><b className="text-white">{m.from}</b><span>{String(Math.floor(m.time)).padStart(2, "0")}:{String(Math.floor((m.time % 1) * 60)).padStart(2, "0")}</span></div>{m.text}</div>
       ))}
     </div>
   );

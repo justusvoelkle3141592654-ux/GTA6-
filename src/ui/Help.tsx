@@ -11,11 +11,11 @@ export default function Help({ isTouch, bind }: { isTouch: boolean; bind: Bindin
           <li><b className="text-white">Linker Daumen</b> – fahren / laufen (3D und Ego: hoch = Gas, seitlich = lenken; Vogelperspektive: Richtung ziehen)</li>
           <li><b className="text-orange-300">FEUER</b> – schießt (Zielhilfe auf Angreifer), Fäuste und Schläger schlagen zu</li>
           <li><b>Waffe</b> antippen = nächste Waffe · <b>gedrückt halten</b> = Waffenrad · roter Knopf = Bomben zünden</li>
-          <li><b className="text-pink-300">DRIFT</b> – Handbremse · <b className="text-cyan-300">NITRO / SPRINT</b> (Nitro verbraucht sich und lädt langsam nach)</li>
+          <li><b className="text-white">DRIFT</b> – Handbremse · <b className="text-cyan-300">NITRO / SPRINT</b> (Nitro verbraucht sich und lädt langsam nach)</li>
           <li>Oben: <b>Einsteigen / Aussteigen</b>, <b>Radio</b>, <b>Kamera</b>, <b>Jobs</b>, <b>Handy</b>, <b>Pause</b></li>
           <li><b>Grüner Knopf</b> – Laden betreten und an der Theke kaufen, Missionen und Versteckspiel starten, hinsetzen</li>
-          <li><b>Kampfjet:</b> Gas geben, ab 120 km/h <b className="text-pink-300">HOCH</b> zum Abheben · Feuer: Bordkanone · <b className="text-orange-300">RAKETE</b> (G) sucht sich ein Ziel · landen auf ebener Straße</li>
-          <li><b>Hubschrauber:</b> <b className="text-pink-300">HOCH</b> steigen · <b className="text-cyan-300">RUNTER</b> sinken · aussteigen nur gelandet</li>
+          <li><b>Kampfjet:</b> Gas geben, ab 120 km/h <b className="text-white">HOCH</b> zum Abheben · Feuer: Bordkanone · <b className="text-orange-300">RAKETE</b> (G) sucht sich ein Ziel · landen auf ebener Straße</li>
+          <li><b>Hubschrauber:</b> <b className="text-white">HOCH</b> steigen · <b className="text-cyan-300">RUNTER</b> sinken · aussteigen nur gelandet</li>
         </ul>
       ) : (
         <div className="grid grid-cols-[auto_1fr_auto] gap-x-4 gap-y-1.5 text-white/80">

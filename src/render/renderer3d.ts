@@ -4,6 +4,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { wrapA, clamp, canvasTex, radialTex, withColor, C, box, flat, cyl, sph } from "./meshutil";
@@ -530,6 +531,24 @@ class PointsLayer {
 }
 
 // ---------------------------------------------------------------- renderer
+// colour grade in the style of the sunny crime games: warmer light, a little more contrast and saturation, dark corners
+const GRADE = {
+  uniforms: { tDiffuse: { value: null }, uSat: { value: 1.12 }, uCon: { value: 1.07 }, uTint: { value: new THREE.Vector3(1.03, 1.0, 0.955) }, uVig: { value: 0.32 } },
+  vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float uSat, uCon, uVig; uniform vec3 uTint; varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      vec3 col = c.rgb;
+      float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      col = mix(vec3(l), col, uSat);
+      col = (col - 0.5) * uCon + 0.5;
+      col *= uTint;
+      vec2 d = vUv - 0.5;
+      col *= 1.0 - uVig * dot(d, d) * 2.0;
+      gl_FragColor = vec4(clamp(col, 0.0, 1.0), c.a);
+    }`,
+};
+
 export class Renderer3D {
   renderer: THREE.WebGLRenderer;
   scene = new THREE.Scene();
@@ -630,14 +649,17 @@ export class Renderer3D {
       this.atm.setQuality(q); this.atm.setupMaterials(this.scene);
       this.scene.remove(this.water.mesh); this.water = new WaterSurface(this.scene, this.world, q);
     }
-    if (hi) {
+    // post effects from "medium" up: bloom (high, ultra) and the colour grade (warm, a bit more contrast and colour, vignette)
+    if (changed && this.composer) { this.composer.dispose(); this.composer = null; }
+    if (q !== "low") {
       if (!this.composer) {
         this.composer = new EffectComposer(this.renderer);
         this.composer.addPass(new RenderPass(this.scene, this.camera));
-        this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(this.w, this.h), 0.28, 0.5, 0.92));
+        if (hi) this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(this.w, this.h), 0.28, 0.5, 0.92));
         this.composer.addPass(new OutputPass());
+        this.composer.addPass(new ShaderPass(GRADE));
       }
-    } else if (this.composer) { this.composer.dispose(); this.composer = null; }
+    }
     this.resize(this.w, this.h);
   }
 

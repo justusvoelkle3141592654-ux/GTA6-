@@ -23,7 +23,7 @@ export function Overlay({ children }: { children: ReactNode }) {
 
 export function Btn({ children, onClick, primary, disabled }: { children: ReactNode; onClick: () => void; primary?: boolean; disabled?: boolean }) {
   return (
-    <button disabled={disabled} onClick={onClick} className={"w-full rounded-xl px-6 py-3 font-display text-2xl tracking-widest transition-all active:scale-95 disabled:opacity-40 " + (primary ? "pulseglow bg-gradient-to-r from-pink-500 to-fuchsia-600 text-white hover:brightness-110" : "border border-white/20 bg-white/5 text-white/90 hover:border-cyan-300/60 hover:bg-white/10")}>
+    <button disabled={disabled} onClick={onClick} className={"w-full rounded-sm px-6 py-3 font-display text-2xl uppercase tracking-widest transition-all active:scale-95 disabled:opacity-40 " + (primary ? "bg-white text-black shadow-[0_4px_18px_rgba(0,0,0,0.5)] hover:bg-sky-100" : "border border-white/15 bg-black/60 text-white/90 hover:bg-white hover:text-black")}>
       {children}
     </button>
   );
@@ -81,7 +81,7 @@ export function Choice<T extends string>({ value, options, onChange, disabled }:
   return (
     <div className={"grid gap-2 " + (options.length === 3 ? "grid-cols-3" : options.length === 4 ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-2") + (disabled ? " pointer-events-none opacity-35" : "")}>
       {options.map((o) => (
-        <button key={o.v} onClick={() => onChange(o.v)} className={"rounded-xl border px-2 py-2 text-center transition-all active:scale-95 " + (value === o.v ? "border-pink-400 bg-pink-500/25 shadow-[0_0_16px_rgba(255,60,172,0.45)]" : "border-white/15 bg-black/30 hover:border-white/35")}>
+        <button key={o.v} onClick={() => onChange(o.v)} className={"rounded-sm border px-2 py-2 text-center transition-all active:scale-95 " + (value === o.v ? "border-white bg-white text-black [&_div]:text-black/70 [&_div:first-child]:text-black" : "border-white/15 bg-black/45 hover:border-white/40")}>
           <div className="font-display text-xl leading-none tracking-wider">{o.label}</div>
           {o.sub && <div className="mt-1 text-[10px] leading-tight text-white/55">{o.sub}</div>}
         </button>
