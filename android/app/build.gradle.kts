@@ -8,8 +8,8 @@ android {
         applicationId = "de.solarabay.game"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "2.2"
+        versionCode = 4
+        versionName = "3.0"
     }
     buildTypes {
         release {
