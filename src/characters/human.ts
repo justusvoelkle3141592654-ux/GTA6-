@@ -690,6 +690,10 @@ const CLIPS: Record<string, ClipDef> = {
   // knocked over: the whole body falls on its back and lies there
   fallBack: { dur: 0.6, keys: [[0, P(relaxed)], [0.25, P(turn(0, 0, 0.7), drop(3, -1), arm("L", 1.2, 1.0, 0.4), arm("R", 1.0, 1.2, 0.4), leg("L", 0.4, 0.5), leg("R", 0.1, 0.3))], [0.6, P(turn(0, 0, 1.52), drop(8.5, -1), arm("L", 0.6, 0.9, 0.3), arm("R", 0.3, 1.1, 0.2), leg("L", 0.15, 0.3), leg("R", -0.05, 0.1), headP(0.2))]] },
   lying: { dur: 2, keys: [[0, P(turn(0, 0, 1.52), drop(8.5, -1), arm("L", 0.6, 0.9, 0.3), arm("R", 0.3, 1.1, 0.2), leg("L", 0.15, 0.3), leg("R", -0.05, 0.1), headP(0.2))], [2, P(turn(0, 0, 1.52), drop(8.5, -1), arm("L", 0.6, 0.9, 0.3), arm("R", 0.3, 1.1, 0.2), leg("L", 0.15, 0.3), leg("R", -0.05, 0.1), headP(0.2))]] },
+  // getting up from lying face down: push up on the hands, knees under the body, stand
+  getupFront: { dur: 1.25, keys: [[0, P(turn(0, 0, -1.52), drop(8.3, 1), arm("L", 2.4, 0.5, 0.4), arm("R", 2.4, 0.5, 0.4), leg("L", 0.05, 0.2), leg("R", -0.05, 0.1))],
+    [0.45, P(turn(0, 0, -0.8), drop(6.2, 0.6), sit(1.7, 2.3, 0), spine(0.7), arm("L", 1.3, 0.3, 0.2), arm("R", 1.3, 0.3, 0.2), headP(-0.3))],
+    [0.9, P(drop(3), sit(1.2, 1.8, 0), spine(0.55), arm("L", 0.5, 0.2, 0.5), arm("R", 0.5, 0.2, 0.5))], [1.25, P(relaxed)]] },
   getup: { dur: 1.1, keys: [[0, P(turn(0, 0, 1.52), drop(8.5, -1), arm("L", 0.6, 0.9, 0.3), arm("R", 0.3, 1.1, 0.2), leg("L", 0.15, 0.3), leg("R", -0.05, 0.1))], [0.45, P(turn(0, 0, 0.3), drop(6, 0), sit(1.9, 2.4, 0), spine(0.9), arm("L", 0.6, 0.3, 0.6), arm("R", 0.6, 0.3, 0.6))], [0.8, P(drop(3), sit(1.2, 1.8, 0), spine(0.6), arm("L", 0.3, 0.2, 0.4), arm("R", 0.3, 0.2, 0.4))], [1.1, P(relaxed)]] },
   // thrown about by a car or an explosion (physics moves the body, the limbs flail)
   ragdoll: { dur: 0.5, keys: [[0, P(turn(0.3, 0, 0.9), drop(5, -1), arm("L", 2.2, 1.4, 0.8), arm("R", 1.4, 1.5, 0.3), leg("L", 0.8, 1.2), leg("R", -0.3, 0.4), spine(-0.3), headP(-0.4))], [0.25, P(turn(-0.3, 0, 1.2), drop(6, -1), arm("L", 1.2, 1.6, 0.3), arm("R", 2.4, 1.2, 0.9), leg("L", -0.2, 0.5), leg("R", 0.9, 1.3), spine(-0.4), headP(-0.3))], [0.5, P(turn(0.3, 0, 0.9), drop(5, -1), arm("L", 2.2, 1.4, 0.8), arm("R", 1.4, 1.5, 0.3), leg("L", 0.8, 1.2), leg("R", -0.3, 0.4), spine(-0.3), headP(-0.4))]] },
@@ -811,6 +815,25 @@ export class HumanRig {
     if (this.vest) this.vest.visible = on;
   }
   bone(n: string) { return this.bones.get(n)!; }
+  // where a bone sits in the rest pose (the figure's own space)
+  private restMap: Map<string, { i: number; p: THREE.Vector3 }> | null = null;
+  restPos(n: string) { return (this.restMap ??= restPositions(this.defs)).get(n)!.p.clone(); }
+  // the mixer is paused while a ragdoll moves the bones; freezePose() keeps the last pose as a clip to blend from
+  ragdoll = false;
+  freezePose() {
+    const tracks: THREE.KeyframeTrack[] = [];
+    for (const [n, b] of this.bones) {
+      if (n === "root") continue;
+      tracks.push(new THREE.QuaternionKeyframeTrack(`${n}.quaternion`, [0], [b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w]));
+      if (n === "hips") tracks.push(new THREE.VectorKeyframeTrack("hips.position", [0], [b.position.x, b.position.y, b.position.z]));
+    }
+    const clip = new THREE.AnimationClip("frozen", 1, tracks);
+    for (const a of this.active) a.stop();
+    this.active.clear();
+    const old = this.actions.get("frozen"); if (old) { old.stop(); this.mixer.uncacheAction(old.getClip()); }
+    const a = this.mixer.clipAction(clip); a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; a.play();
+    this.actions.set("frozen", a); this.active.add(a); this.current = "frozen"; this.upper = "";
+  }
   private action(name: string, part: "" | "lo" | "up") {
     const k = name + part;
     let a = this.actions.get(k);
@@ -893,11 +916,11 @@ export class HumanRig {
   }
   update(dt: number) {
     // head and neck back to rest first: the extra look turn must not add up when no clip moves them
-    this.bone("head").quaternion.identity(); this.bone("neck").quaternion.identity();
+    if (!this.ragdoll) { this.bone("head").quaternion.identity(); this.bone("neck").quaternion.identity(); }
     if (this.current === "loco") this.updateLoco(dt);
-    this.mixer.update(dt);
+    if (!this.ragdoll) this.mixer.update(dt);
     // head and eyes on top of the animation, blinking
-    if (this.lookYaw || this.lookPitch) {
+    if ((this.lookYaw || this.lookPitch) && !this.ragdoll) {
       const h = this.bone("head");
       h.quaternion.multiply(_q.setFromEuler(_e.set(0, this.lookYaw * 0.7, -this.lookPitch, "ZXY")));
       this.bone("neck").quaternion.multiply(_q.setFromEuler(_e.set(0, this.lookYaw * 0.3, 0, "ZXY")));

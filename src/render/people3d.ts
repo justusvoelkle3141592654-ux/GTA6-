@@ -1,6 +1,7 @@
 // the player figure and the people near the camera as skinned, animated humans (human.ts);
 // people further away stay instanced simple figures (crowd3d.ts, the far detail level)
 import * as THREE from "three";
+import { Ragdoll, type RagdollWorld } from "../characters/ragdoll";
 import { BODY_GEN, HumanRig, PERSON_SCALE, kaiLook, lookFromSeed, weaponGeo, type Look } from "../characters/human";
 import { VEH_SCALE } from "../vehicles/vehicles";
 import { OUTFITS, type Style } from "../gameplay/economy";
@@ -35,6 +36,8 @@ export type ActKind = "open" | "smash" | "butt" | "jack" | "getin" | "getout" | 
 const ACT_CLIP: Record<ActKind, string> = { open: "openDoor", smash: "smash", butt: "buttStrike", jack: "pull", getin: "getIn", getout: "getOut", roll: "roll" };
 
 export class PlayerFigure {
+  ragWorld: RagdollWorld | null = null;
+  private rag: Ragdoll | null = null;
   rig: HumanRig;
   shadow: THREE.Mesh;
   private guns = {} as Record<Weapon, THREE.Mesh | null>;
@@ -99,6 +102,22 @@ export class PlayerFigure {
     const wpn = g.weapon, kind = WEAPON_DEFS[wpn].kind;
     const act = g.act;
     let upper = "";
+    if (pd.dead && this.ragWorld) {
+      // dead: the body falls as a ragdoll (pushed back a little, plus the speed it had)
+      if (!this.rag) {
+        root.updateMatrixWorld(true);
+        const back = new THREE.Vector3(-Math.cos(pd.a), 0, -Math.sin(pd.a)).multiplyScalar(45);
+        this.rag = new Ragdoll(r, new THREE.Vector3(pd.vx, Math.max(pd.vz, 25), pd.vy).add(back), 1.5);
+        r.ragdoll = true; r.playUpper("");
+      }
+      this.rag.step(dt, this.ragWorld);
+      this.rag.pose();
+      for (const w of WEAPONS) { const m = this.guns[w]; if (m) m.visible = false; }
+      const pv = this.rag.pelvis(); this.shadow.position.set(pv.x, pd.z + 0.3, pv.z);
+      r.update(dt);
+      return;
+    }
+    if (this.rag) { this.rag = null; r.ragdoll = false; r.play("idle", 0, 1, true); }
     if (pd.dead) {
       r.play(r.current === "fallBack" || r.current === "lying" ? (r.done("fallBack") ? "lying" : "fallBack") : "fallBack", 0.15);
     } else if (act && !pd.swim) {
@@ -139,12 +158,13 @@ export class PlayerFigure {
 }
 
 // ---------------------------------------------------------------------------------------- people around
-interface Slot { rig: HumanRig; ped: number; look: number; acc: number; prev: string; getup: boolean; punchT: number; tumble: number; props: { phone: THREE.Mesh; cig: THREE.Mesh; gun: THREE.Mesh } }
+interface Slot { rig: HumanRig; ped: number; look: number; acc: number; prev: string; getup: boolean; punchT: number; tumble: number; rag: Ragdoll | null; props: { phone: THREE.Mesh; cig: THREE.Mesh; gun: THREE.Mesh } }
 const roleName = (c: Civilian) => (c.role === "cop" ? "cop" : c.role === "swat" ? "swat" : c.role === "army" ? "army" : c.role === "gang" ? "gang" : "civ");
 const phoneGeo = weaponGeo("phone")!, gunGeo = weaponGeo("pistol")!, cigGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.45, 5).translate(0.1, -0.7, 0.05);
 const cigMat = new THREE.MeshBasicMaterial({ color: 0xf2efe6 });
 
 export class CrowdFigures {
+  ragWorld: RagdollWorld | null = null; // the ground and the walls (set by the renderer)
   private slots: (Slot | null)[] = [];
   private byPed = new Map<number, number>();
   readonly drawn = new Set<number>();
@@ -160,7 +180,7 @@ export class CrowdFigures {
     hand.add(phone, cig, gun);
     this.scene.add(rig.root);
     this.setup(rig.root);
-    return { rig, ped: c.id, look: c.look * 1000 + c.role.length + BODY_GEN * 0.1, acc: 0, prev: "", getup: false, punchT: 0, tumble: 0, props: { phone, cig, gun } };
+    return { rig, ped: c.id, look: c.look * 1000 + c.role.length + BODY_GEN * 0.1, acc: 0, prev: "", getup: false, punchT: 0, tumble: 0, rag: null, props: { phone, cig, gun } };
   }
 
   // camera position (x, y on the map), list of all peds; returns the peds drawn here (the instanced crowd skips them)
@@ -193,6 +213,7 @@ export class CrowdFigures {
         if (s && s.rig.setLook(look, 1)) { s.look = lookKey; s.prev = ""; s.getup = false; }
         else { if (s) { this.scene.remove(s.rig.root); s.rig.dispose(); } s = this.make(c); this.slots[si] = s; }
       }
+      if (s.ped !== pid && s.rag) { s.rag = null; s.rig.ragdoll = false; s.prev = ""; }
       s.ped = pid;
       this.drawn.add(pid);
       this.animate(s, c, list, dist.get(pid) ?? 0, dt);
@@ -205,18 +226,37 @@ export class CrowdFigures {
     const scale = r.look.height * c.scale * PERSON_SCALE;
     root.scale.setScalar(scale);
     root.position.set(c.x, c.z, c.y);
-    // ragdoll: the body tumbles while it flies, then settles flat on the ground
-    if (c.state === "down" && c.air) s.tumble += c.spin * dt;
-    else if (s.tumble) { const w = Math.atan2(Math.sin(s.tumble), Math.cos(s.tumble)); s.tumble = Math.abs(w) < 0.02 ? 0 : s.tumble - w * Math.min(1, dt * 9); }
     root.rotation.order = "YXZ";
-    root.rotation.set(s.tumble, -c.a, s.tumble * 0.4);
-    if (s.tumble) root.position.y += 9 * Math.abs(Math.sin(s.tumble)) * scale / 1.2; // turn about the middle of the body, not the feet
+    root.rotation.set(0, -c.a, 0);
+    // knocked down: a real ragdoll (joint physics) from the pose the person had; the person lies where the body ends up
+    if (c.state === "down" && this.ragWorld && d < 420) {
+      if (!s.rag) {
+        root.updateMatrixWorld(true);
+        s.rag = new Ragdoll(r, new THREE.Vector3(c.vx, Math.max(c.vz, 20), c.vy), c.spin * 0.6);
+        r.ragdoll = true; r.playUpper(""); s.props.phone.visible = s.props.cig.visible = s.props.gun.visible = false;
+      }
+      s.rag.step(dt, this.ragWorld);
+      const pv = s.rag.pelvis(); c.x = pv.x; c.y = pv.z; c.vx = 0; c.vy = 0;
+      root.position.set(c.x, c.z, c.y);
+      s.rag.pose();
+      s.prev = "down";
+      r.update(dt);
+      return;
+    }
+    if (s.rag) {
+      // getting up: face the way the body lies, keep the lying pose and blend into the getting-up animation
+      const back = s.rag.onBack(), hd = s.rag.headDir();
+      c.a = back ? hd + Math.PI : hd;
+      root.rotation.set(0, -c.a, 0); root.position.set(c.x, c.z, c.y);
+      s.rag.pose(); r.freezePose(); r.ragdoll = false; s.rag = null;
+      if (c.state !== "down") { s.getup = true; r.play(back ? "getup" : "getupFront", 0.4, 1, true); s.prev = c.state; }
+    }
     const sp = Math.hypot(c.vx, c.vy);
     let upper = "", prop = "";
     r.lookYaw *= 0.9; r.eyeYaw *= 0.9;
     // got up again after lying on the ground
-    if (s.prev === "down" && c.state !== "down") { s.getup = true; r.play("getup", 0.1, 1, true); }
-    if (s.getup && r.done("getup")) s.getup = false;
+    if (s.prev === "down" && c.state !== "down" && !s.getup) { s.getup = true; r.play("getup", 0.1, 1, true); }
+    if (s.getup && r.done("getup") && r.done("getupFront")) s.getup = false;
     if (s.getup) { /* keep getting up */ }
     else switch (c.state) {
       case "walk": locomote(r, sp, false); if (c.role === "seeker") upper = "lookAround"; break;

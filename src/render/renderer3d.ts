@@ -25,7 +25,7 @@ const inStuntPark = (x: number, y: number) => (x > STUNT_PARK.x0 - 60 && x < STU
 import { isCraft, isBoat, isHeli, isJet, isPlane, isAircraft, isTwoWheel, VEH_SCALE } from "../vehicles/vehicles";
 import { CarRig, carMaterials, hasRig, topAt, type CarMats } from "../vehicles/carmodel";
 import { JETTY, HELI_SPOT, WALKABLE, type Place } from "../world/places";
-import { interiorCeil, onRoof, type Interior } from "../world/interiors";
+import { interiorCeil, interiorFloor, onRoof, type Interior } from "../world/interiors";
 import { CrowdRenderer } from "./crowd3d";
 import { PlayerFigure, CrowdFigures } from "./people3d";
 import { InteriorsRenderer } from "./interiors3d";
@@ -2101,6 +2101,11 @@ export class Renderer3D {
     this.updateDebris(g, dt);
     this.propMeshes?.update();
     if (this.padMat?.map) this.padMat.map.offset.y = (this.padMat.map.offset.y - dt * 1.6) % 1; // boost pads: chevrons run towards the ramp
+    // ragdolls: the ground (with the floors of the rooms) and the walls
+    if (!this.people.ragWorld) this.people.ragWorld = this.ped.ragWorld = {
+      ground: (x, y, z) => Math.max(g.groundH(x, y, z + 6), interiorFloor(g.interiors, x, y, z + 6)),
+      solid: (x, y, z) => g.world.isSolid(x, y, 1.5, z),
+    };
     this.people.update(g.peds.list, g.state !== "menu", this.camPos.x, this.camPos.z, g.fx, g.fy, dt);
     this.crowd.update(g.peds.list, g.state !== "menu", g.fx, g.fy, this.people.drawn);
     this.syncProps(g);
