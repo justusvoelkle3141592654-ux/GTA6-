@@ -235,3 +235,17 @@ Getestet wurde automatisiert in einem Headless-Chromium mit Software-Rendering (
   - Lauf- und Sprinttempo, Zielhilfe mit und ohne Sterne, Schüsse aus dem Auto auf den Hubschrauber.
   - Alle 71 Codes (fehlerfrei; Boote brauchen Wasser in der Nähe), PIN falsch/richtig, Riesensprung ohne Schaden.
   - Alle 8 Häuser betreten, Codes-App und Autoansicht in der fertigen Spieldatei.
+
+## Nachtrag 5: Klicks auf dem Handy, Aufzug, Dauerfeuer, Lenkung
+
+- **Nichts anklickbar (Handy):** Das unsichtbare Feld für den Lauf-Joystick lag über dem grünen Knopf zum Betreten, Kaufen und für den Aufzug und schluckte jeden Tipp. Die HUD-Knöpfe liegen jetzt darüber.
+  - Geprüft mit echten Tipps im Handy-Format (860 x 400) und mit Mausklicks am Desktop: Laden öffnen, etwas kaufen, Aufzug rufen, Etage wählen.
+- **Aufzug:** Die Etagenliste passt jetzt auf kleine Bildschirme (zwei Spalten) und lässt sich scrollen.
+- **Dauerfeuer:** Gilt nur noch für Schusswaffen. Raketenwerfer, Granaten, Haftbomben und TNT geben pro Druck genau einen Schuss bzw. Wurf ab, auch wenn man die Taste hält.
+  - Gemessen: Pistole 6 Schüsse/s mit Cooldown, 15 mit Dauerfeuer.
+  - Raketenwerfer, Granate und TNT: je 1 bei 2 s gehaltener Taste.
+- **Lenkung** (eigenes Fahrzeug):
+  - Mit der Tastatur dreht das Lenkrad schnell, aber nicht schlagartig ein und kommt schneller in die Mitte zurück.
+  - Gamepad und Handy lenken um die Mitte feiner.
+  - Im Stadttempo lenkt das Auto etwas direkter, bei hohem Tempo ruhiger: bei 300 km/h etwa zwei Drittel, bei 1000 km/h etwa ein Viertel der bisherigen Drehung. Lässt man los, richtet es sich schneller gerade aus.
+  - Der Verkehr fährt unverändert.

@@ -36,7 +36,7 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onZoo
   const mmH = (isTouch ? 92 : 140) * currentSettings.hudScale + (rules.damage ? (hud.onFoot ? 9 : 18) * currentSettings.hudScale : 0) + 8;
   const outline = { textShadow: "0 0 2px #000, 0 2px 2px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.5)" };
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 select-none font-sans">
+    <div className="pointer-events-none absolute inset-0 z-[12] select-none font-sans">
       {/* WASTED / BUSTED: the picture turns grey, big letters like in the old crime games */}
       {hud.ending && (
         <div className="pointer-events-none fixed inset-0 z-40 flex flex-col items-center justify-center" style={{ backdropFilter: `grayscale(${Math.min(1, hud.endT * 1.5)}) brightness(${1 - Math.min(0.35, hud.endT * 0.3)})`, WebkitBackdropFilter: `grayscale(${Math.min(1, hud.endT * 1.5)})` }}>

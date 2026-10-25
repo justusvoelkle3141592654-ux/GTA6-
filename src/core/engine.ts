@@ -194,7 +194,7 @@ export class Game {
 
   score = 0; mult = 1; comboT = 0; time = 0; takedowns = 0; cash = 0; bank = 0;
   driftPts = 0; driftHold = 0; bestDrift = 0; bust = 0; nitro = 1; nitroWasOn = false; lastHurt = -10;
-  inv = new Inventory(); fireCd = 0; fireHeld = false; hint = ""; hintT = 0;
+  inv = new Inventory(); fireCd = 0; fireHeld = false; fireLatch = false; hint = ""; hintT = 0;
   ending: null | { reason: EndReason; t: number } = null;
   jailT = -1; // seconds left in the prison cell (-1: free)
   copSpawnT = 0;
@@ -1050,7 +1050,7 @@ export class Game {
       this.melee();
       return;
     }
-    if (currentSettings.fireMode === "auto" && this.inv.reloadT > 0) this.inv.update(this.inv.reloadT + 0.01); // no reloading pause
+    if (currentSettings.fireMode === "auto" && d.kind === "gun" && this.inv.reloadT > 0) this.inv.update(this.inv.reloadT + 0.01); // no reloading pause
     if (this.inv.reloadT > 0) return;
     if (d.kind === "sticky" && this.bombs.length >= 30) { this.setHint("Max. 30 Bomben – erst zünden (G)", 1.5); sfx.empty(); this.fireCd = 0.3; return; }
     if (!this.inv.consume()) {
@@ -1077,10 +1077,12 @@ export class Game {
     }
     const cp = Math.cos(pitch), spz = Math.sin(pitch) * speed;
     if (onFoot) { this.ped.a = a; this.ped.shootT = 0.4; }
-    // fire mode (settings): "auto" has no pause between shots and no reloading pause
-    const auto = currentSettings.fireMode === "auto";
-    this.fireCd = auto ? Math.min(d.cd, d.kind === "gun" ? 0.06 : 0.2) : d.cd;
+    // fire mode (settings): "auto" has no pause between shots and no reloading pause - for guns only;
+    // rockets, grenades, sticky bombs and TNT always need a new press for the next one
+    const auto = currentSettings.fireMode === "auto" && d.kind === "gun";
+    this.fireCd = auto ? Math.min(d.cd, 0.06) : d.cd;
     if (auto && this.inv.reloadT > 0) this.inv.update(this.inv.reloadT + 0.01);
+    if (d.kind !== "gun") this.fireLatch = true;
     if (d.noise > 0) { this.peds.alarm(ox, oy, d.noise, "shot"); this.indoor.alarm(ox, oy, Math.min(400, d.noise)); }
     if (d.crime) this.crime(d.crime);
     if (d.kind === "gun") {
@@ -2101,16 +2103,22 @@ export class Game {
     p.handbrake = b.held("handbrake", k) || this.touch.drift;
     const wantNitro = b.held("nitro", k) || this.touch.nitro;
     const ps = this.pad.state;
-    if (kb) { p.throttle = (up ? 1 : 0) - (down ? 1 : 0); p.steer = (right ? 1 : 0) - (left ? 1 : 0); }
+    if (kb) {
+      p.throttle = (up ? 1 : 0) - (down ? 1 : 0);
+      // keys: the wheel turns in quickly but not in one jump, and comes back to the middle a little faster
+      const tgt = (right ? 1 : 0) - (left ? 1 : 0), back = tgt === 0 || tgt * p.steer < 0;
+      const r = (back ? 9 : 5.5) * STEP;
+      p.steer = clamp(p.steer + clamp(tgt - p.steer, -r, r), -1, 1);
+    }
     else if (ps.active && (ps.lx || ps.ly || ps.rt > 0.05 || ps.lt > 0.05)) {
       // controller: triggers for gas and brake (or the stick up/down), the stick steers
-      p.steer = ps.lx;
+      p.steer = Math.sign(ps.lx) * ps.lx * ps.lx * 0.4 + ps.lx * 0.6; // finer around the middle
       p.throttle = ps.rt > 0.05 || ps.lt > 0.05 ? ps.rt - ps.lt : -ps.ly;
     } else if (this.touch.active) {
       const { jx, jy } = this.touch;
       const m = Math.min(1, Math.hypot(jx, jy));
       if (m < 0.15) { p.steer = 0; p.throttle = 0; }
-      else if (this.config.camera !== "top") { p.steer = clamp(jx * 1.5, -1, 1); p.throttle = jy < -0.25 ? 1 : jy > 0.55 ? -1 : 0.85; }
+      else if (this.config.camera !== "top") { const s = clamp(jx * 1.4, -1, 1); p.steer += (Math.sign(s) * s * s * 0.35 + s * 0.65 - p.steer) * 0.25; p.throttle = jy < -0.25 ? 1 : jy > 0.55 ? -1 : 0.85; }
       else { const diff = wrap(Math.atan2(jy, jx) - p.a); p.steer = clamp(diff * 2.6, -1, 1); p.throttle = m * (Math.abs(diff) > 1.9 ? 0.55 : 1); }
     } else { p.throttle = 0; p.steer = 0; }
     // tipsy: the steering wobbles on its own
@@ -2408,7 +2416,9 @@ export class Game {
       if (this.weatherNext <= 0) this.setWeather();
       if (this.onFoot) { this.readPedInput(dt); p.throttle = 0; p.steer = 0; p.handbrake = true; p.nitro = false; }
       else this.readCarInput();
-      if ((this.fireHeld || this.touch.fire || this.bind.held("fire", this.keys)) && this.fireCd <= 0) this.fire();
+      const fireDown = this.fireHeld || this.touch.fire || this.bind.held("fire", this.keys);
+      if (!fireDown) this.fireLatch = false; // rockets, grenades, bombs and TNT: one per press
+      if (fireDown && this.fireCd <= 0 && !this.fireLatch) this.fire();
     } else if (playing && this.ending) {
       p.throttle = 0; p.steer = 0; p.nitro = false; p.handbrake = this.ending.reason === "arrested" || this.onFoot;
       this.ped.vx *= 0.9; this.ped.vy *= 0.9;
@@ -2791,9 +2801,13 @@ export class Game {
     if (drifting) vF -= vF * 0.5 * dt;
     vF -= Math.sign(vF) * Math.abs(vR) * 0.25 * dt;
     const sp = Math.abs(vF);
-    const turnAmt = Math.min(1, sp / 100) * (1 - Math.min(0.3, sp / 2200));
+    let turnAmt = Math.min(1, sp / 100) * (1 - Math.min(0.3, sp / 2200));
+    // your car: a bit more bite at low speed, calmer at high speed (no twitching on the motorway), and the car
+    // straightens itself out a little when you let go
+    const mine = c.kind === "player";
+    if (mine) turnAmt = Math.min(1, sp / 70) * (1.08 / (1 + Math.max(0, sp - 160) / 520));
     const dir = vF >= -5 ? 1 : -1;
-    c.av += (c.steer * 3.2 * turnAmt * dir * (drifting ? 1.45 : 1) - c.av) * Math.min(1, dt * 14);
+    c.av += (c.steer * 3.2 * turnAmt * dir * (drifting ? 1.45 : 1) - c.av) * Math.min(1, dt * (mine ? (c.steer === 0 && !drifting ? 18 : 10) : 14));
     c.a += c.av * dt;
     c.vx = ca * vF - sa * vR; c.vy = sa * vF + ca * vR;
     c.x += c.vx * dt; c.y += c.vy * dt;
