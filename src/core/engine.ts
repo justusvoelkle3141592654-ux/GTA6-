@@ -1,4 +1,5 @@
 import { sfx } from "../audio/audio";
+import { DECK_CATCH } from "../world/roads";
 import { World, MAP_MIN, MAP_MAX, WATER_Y, EDGE_LAND, SOFT_EDGE, TUNNEL, ROAD, inCity, isWater, isEdgeSea, edgeDist, terrainH, terrainGrad, tunnelAt, roofOf, PAD_S0, PAD_S1, PRISON, type Building } from "../world/world";
 import { Renderer3D } from "../render/renderer3d";
 import { MODE_RULES, type Mode, type ModeRules } from "./modes";
@@ -1652,7 +1653,7 @@ export class Game {
   teleportOnFoot(x: number, y: number) {
     if (!this.onFoot) { const p = this.player; p.vx = 0; p.vy = 0; this.exitCar(); }
     const pd = this.ped;
-    pd.x = x; pd.y = y; pd.z = this.groundH(x, y, 0); pd.vx = 0; pd.vy = 0; pd.air = false;
+    pd.x = x; pd.y = y; pd.z = this.spawnH(x, y); pd.vx = 0; pd.vy = 0; pd.air = false;
     this.fade = 1; // fades in again (updateFall)
     this.r3d.resetCamera(this.r3d.camYaw);
   }
@@ -2198,11 +2199,11 @@ export class Game {
     if (f.car && !this.onFoot) {
       const p = this.player;
       p.x = pt.x; p.y = pt.y; p.a = pt.a; p.vx = 0; p.vy = 0; p.vz = 0; p.av = 0; p.air = false; p.onRamp = -1; p.wetT = 0;
-      p.z = this.groundH(p.x, p.y, 0); p.hp = Math.max(p.hp, f.hp); p.dead = false;
+      p.z = this.spawnH(p.x, p.y); p.hp = Math.max(p.hp, f.hp); p.dead = false;
     } else {
       const pd = this.ped;
       pd.x = pt.x; pd.y = pt.y; pd.a = pt.a; pd.vx = 0; pd.vy = 0; pd.vz = 0; pd.air = false; pd.swim = false; pd.stamina = 1;
-      pd.z = this.groundH(pd.x, pd.y, 0); pd.hp = Math.max(pd.hp, f.hp); pd.dead = false;
+      pd.z = this.spawnH(pd.x, pd.y); pd.hp = Math.max(pd.hp, f.hp); pd.dead = false;
     }
     this.r3d.fallCam = false; this.r3d.resetCamera(this.fa);
     this.timeScale = 1; this.slowT = 0;
@@ -2545,7 +2546,7 @@ export class Game {
   private travelGo(d: { name: string; x: number; y: number }, instant: boolean): string {
     if (!this.onFoot) { const p = this.player; p.vx = 0; p.vy = 0; p.throttle = 0; this.exitCar(false); }
     this.act = null; this.approach = null; this.seat = null;
-    const pd = this.ped, tz = this.groundH(d.x, d.y, 0);
+    const pd = this.ped, tz = this.spawnH(d.x, d.y);
     if (instant) { this.teleportOnFoot(d.x, d.y); this.setHint(d.name, 2); return ""; }
     const dist = Math.hypot(d.x - pd.x, d.y - pd.y);
     this.travel = { sx: pd.x, sy: pd.y, sz: pd.z, tx: d.x, ty: d.y, tz, t: 0, dur: clamp(dist / 1600, 2.5, 7), name: d.name };
@@ -2667,7 +2668,9 @@ export class Game {
     return Math.max(0, c - 2 - h);
   }
   // standing / driving on a bridge deck (not under it)
-  onDeck(x: number, y: number, z: number) { const br = this.world.roads.bridgeAt(x, y, 4); return !!br && z >= br.h - 14; }
+  onDeck(x: number, y: number, z: number) { const br = this.world.roads.bridgeAt(x, y, 4); return !!br && z >= br.h - DECK_CATCH; }
+  // where something put down at (x, y) stands: on a bridge the deck, never the sea below it
+  spawnH(x: number, y: number) { const br = this.world.roads.bridgeAt(x, y); return this.groundH(x, y, br ? br.h : 0); }
   groundAt(x: number, y: number) { return Math.max(this.groundH(x, y), WATER_Y); } // for the helicopter: the water surface counts
 
   // ramps: the surface only counts for a car that drove on over the low edge (or came down on it from above)
@@ -2807,9 +2810,10 @@ export class Game {
     const br = w.roads.bridgeAt(c.x, c.y, 50);
     if (br) {
       const b = br.b;
-      if (c.z >= br.h - 16) {
+      if (c.z >= br.h - DECK_CATCH) {
+        // thick rails: even the fastest car cannot pass through them in one step
         for (const side of [-1, 1]) {
-          const v0 = side > 0 ? b.c + b.hw : b.c - b.hw - 5, v1 = v0 + 5;
+          const v0 = side > 0 ? b.c + b.hw : b.c - b.hw - 30, v1 = v0 + 30;
           const pen = b.alongX ? this.boxRect(c, b.s0, v0, b.s1, v1) : this.boxRect(c, v0, b.s0, v1, b.s1);
           if (pen > 0) resolve(pen);
         }

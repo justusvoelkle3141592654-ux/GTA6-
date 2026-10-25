@@ -21,6 +21,8 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    // no release lint: it only downloads extra tools and is not needed for this WebView shell
+    lint { checkReleaseBuilds = false; abortOnError = false }
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("gameAssets"))
 }
 

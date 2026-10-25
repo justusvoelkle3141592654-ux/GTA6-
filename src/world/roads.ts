@@ -20,6 +20,9 @@ export interface Bridge {
 export const STEP = 20;
 export const BRIDGE_DECK = 58;   // deck top (boats pass below with more than 40 units of headroom)
 const BRIDGE_RAMP = 420;
+// how far below the deck something still counts as being on it (a fast car lags a little behind the steep end ramps;
+// boats and swimmers in the water are far below this)
+export const DECK_CATCH = 40;
 const END_GAP = EDGE_LAND + 300; // roads stop this far from the map border (viewpoint before the cliff)
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
@@ -142,7 +145,7 @@ export class RoadNet {
   // height of the road surface for something at height z: bridge deck, tunnel floor or the ground
   surface(x: number, y: number, z: number, ground: number): number {
     const br = this.bridgeAt(x, y);
-    if (br && z >= br.h - 14) return Math.max(ground, br.h);
+    if (br && z >= br.h - DECK_CATCH) return Math.max(ground, br.h);
     const tf = tunnelAt(x, y);
     if (!isNaN(tf) && z < tf + TUNNEL.clear) return tf;
     return ground;
