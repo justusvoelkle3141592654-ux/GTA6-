@@ -30,7 +30,7 @@ export default function Phone(props: PhoneProps) {
   const close = () => onClose();
   return (
     <div className="absolute inset-0 z-30 flex items-end justify-center bg-black/30 p-3 sm:items-center" onClick={close}>
-      <div className="popin phone-shell flex h-[min(94vh,680px)] w-[min(94vw,380px)] flex-col overflow-hidden rounded-[2.4rem] border-[5px] border-[#16181c] bg-[#0d1014] shadow-[0_20px_60px_rgba(0,0,0,0.6)]" onClick={(e) => e.stopPropagation()}>
+      <div className="popin phone-shell flex h-[min(94vh,680px)] w-[min(94vw,380px)] flex-col overflow-hidden rounded-[2.4rem] border-[5px] bg-[#0d1014] shadow-[0_20px_60px_rgba(0,0,0,0.6)]" style={{ borderColor: game.phoneColor() }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 pt-3 text-xs text-white/80">
           <span className="font-semibold">{String(h).padStart(2, "0")}:{String(m).padStart(2, "0")}</span>
           <span className="h-5 w-20 rounded-full bg-black" />

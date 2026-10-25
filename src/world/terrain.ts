@@ -23,6 +23,8 @@ export const STUNT_PARK = { x0: WORLD - 1500, x1: WORLD + 60, y0: -2700, y1: -10
 // the state prison north of the city (gate to the east, at the northern highway on line 8) and a gas station
 export const PRISON = { x0: 3380, x1: 4080, y0: -1720, y1: -1020 };
 export const GAS_STATION = { x: lineC(8) + 175, y: -880, w: 150, h: 110 };
+// the 24/7 shop next to it (a walkable room, door to the west)
+export const GAS_SHOP = { x0: GAS_STATION.x + 92, x1: GAS_STATION.x + 192, y0: GAS_STATION.y - 50, y1: GAS_STATION.y + 50 };
 export const TUNNEL_HILL = { x: lineC(8), y: -3050, rx: 1150, ry: 700, h: 300 };
 export const VILLA_HILL = { x: 2300, y: -1650, r: 1000, h: 150 };
 
@@ -191,7 +193,7 @@ function baseH(x: number, y: number): number {
   if (pad < HELIPAD.r * 1.6) h *= sstep(HELIPAD.r * 0.55, HELIPAD.r * 1.6, pad);
   const sp = STUNT_PARK, out = Math.max(sp.x0 - x, x - sp.x1, sp.y0 - y, y - sp.y1);
   if (out < 260) h *= sstep(0, 260, out);
-  for (const f of [PRISON, { x0: GAS_STATION.x - GAS_STATION.w / 2 - 20, x1: GAS_STATION.x + GAS_STATION.w / 2 + 20, y0: GAS_STATION.y - GAS_STATION.h / 2 - 20, y1: GAS_STATION.y + GAS_STATION.h / 2 + 20 }]) {
+  for (const f of [PRISON, { x0: GAS_STATION.x - GAS_STATION.w / 2 - 20, x1: GAS_SHOP.x1 + 20, y0: GAS_STATION.y - GAS_STATION.h / 2 - 20, y1: GAS_STATION.y + GAS_STATION.h / 2 + 20 }]) {
     const o = Math.max(f.x0 - x, x - f.x1, f.y0 - y, y - f.y1);
     if (o < 260) h *= sstep(0, 260, o);
   }

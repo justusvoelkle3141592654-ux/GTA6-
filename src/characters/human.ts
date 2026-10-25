@@ -382,7 +382,10 @@ if (zi == 14 && uTattoo > 0.5) {
   float ink = 0.0; vec3 q = vBind;
   if (uTattoo < 1.5) ink = step(0.75, sin(q.y * 9.0 + sin(q.x * 8.0 + q.z * 6.0) * 2.0)) * step(10.5, q.y);
   else if (uTattoo < 2.5) ink = step(0.82, sin(q.y * 6.0 + sin(atan(q.x, q.z) * 3.0) * 1.5)) * step(9.5, q.y) * step(q.y, 13.5);
-  else { vec2 g = fract(vec2(atan(q.x, abs(q.z) - 2.0) * 1.6, q.y * 1.4)) - 0.5; ink = step(length(g), 0.18) * step(10.0, q.y); }
+  else if (uTattoo < 3.5) { vec2 g = fract(vec2(atan(q.x, abs(q.z) - 2.0) * 1.6, q.y * 1.4)) - 0.5; ink = step(length(g), 0.18) * step(10.0, q.y); }
+  else if (uTattoo < 4.5) ink = step(0.86, sin(q.y * 4.0 + sin(atan(q.x, q.z) * 2.0 + q.y * 1.3) * 2.4)) * step(9.0, q.y); // vines
+  else if (uTattoo < 5.5) ink = step(0.7, sin(q.y * 14.0)) * step(10.5, q.y) * step(q.y, 12.5); // bands
+  else { vec2 g = fract(vec2(atan(q.x, abs(q.z) - 2.0) * 3.0 + floor(q.y * 3.0) * 0.5, q.y * 3.0)) - 0.5; ink = step(0.3, length(g)) * step(length(g), 0.45) * step(9.5, q.y); } // scales
   zc = mix(zc, vec3(0.08, 0.1, 0.16), ink * 0.85);
 }
 diffuseColor.rgb *= zc;`)
@@ -729,6 +732,10 @@ export function weaponGeo(kind: string): THREE.BufferGeometry | null {
   const Cy = (r: number, l: number, x: number, y: number, z: number, r2 = r) => parts.push(new THREE.CylinderGeometry(r, r2, l, 10).translate(x, y, z));
   switch (kind) {
     case "pistol": B(0.35, 2.0, 0.3, 0.45, -1.1, 0); B(0.3, 0.9, 0.28, 0.05, -0.4, 0); break;
+    case "revolver": B(0.32, 2.3, 0.28, 0.45, -1.25, 0); Cy(0.32, 0.6, 0.45, -0.75, 0); B(0.3, 0.9, 0.28, 0.05, -0.4, 0); break;
+    case "knife": B(0.25, 0.9, 0.3, 0.05, -0.35, 0); B(0.06, 1.8, 0.32, 0.05, -1.7, 0); break;
+    case "rifle": B(0.45, 5.2, 0.38, 0.45, -2.2, 0); B(0.3, 1.0, 0.3, 0.05, -0.45, 0); B(0.32, 1.1, 0.3, 0.8, -1.6, 0); B(0.45, 1.6, 0.4, 0.4, 1.0, 0); Cy(0.1, 1.4, 0.5, -5.4, 0); break;
+    case "sniper": B(0.4, 6.2, 0.34, 0.45, -2.6, 0); B(0.3, 1.0, 0.3, 0.05, -0.45, 0); B(0.5, 1.8, 0.4, 0.35, 1.1, 0); Cy(0.09, 2.4, 0.5, -6.6, 0); Cy(0.22, 2.2, 0.95, -2.0, 0); break;
     case "smg": B(0.5, 3.0, 0.4, 0.45, -1.4, 0); B(0.3, 1.0, 0.3, 0.05, -0.45, 0); B(0.3, 0.9, 0.3, 0.75, -1.2, 0); break;
     case "shotgun": Cy(0.22, 6.5, 0.5, -3.2, 0); B(0.5, 2.6, 0.45, 0.35, 0.6, 0); break;
     case "rocket": Cy(0.7, 9, 1.0, -2.2, 0); Cy(0.9, 1.2, 1.0, -6.9, 0, 0.7); B(0.4, 1.0, 0.4, 0.2, -0.3, 0); break;

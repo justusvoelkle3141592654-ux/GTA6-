@@ -1,9 +1,10 @@
 import { BLOCK, ROAD, GRID, HELIPAD, type Building, type World } from "./world";
 import type { EndReason } from "../core/engine";
 import type { JobKind } from "../gameplay/jobs";
-import { STUNT_PARK, PRISON } from "./terrain";
+import { STUNT_PARK, PRISON, GAS_SHOP } from "./terrain";
 
-export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport" | "park" | "job" | "market" | "cardealer" | "barber" | "mall" | "club" | "home" | "prison";
+export type PlaceKind = "hospital" | "police" | "gunshop" | "workshop" | "clothes" | "food" | "safehouse" | "contact" | "dock" | "heliport" | "park" | "job" | "market" | "cardealer" | "barber" | "mall" | "club" | "home" | "prison"
+  | "gas" | "bar" | "pharmacy" | "boats" | "planes" | "electronics";
 export type PlaceAccess = "foot" | "car" | "both" | "none";
 
 export interface PlaceDef {
@@ -14,6 +15,7 @@ export interface PlaceDef {
   robbable?: boolean;
   at?: [number, number, number]; // fixed spot outside the city blocks (x, y, facing); vehicles wait next to it
   inPark?: boolean;              // entrance at the west edge of the nearest park (cx, cy: middle of the park)
+  inMall?: boolean;              // a shop inside the mall (its counter is set when the mall is built)
   job?: JobKind;                 // job start point: the vehicle waits at the car spot, drive into the ring to start
 }
 // boat jetty on the beach and the helipad north of the industrial district
@@ -68,6 +70,13 @@ export const PLACE_DEFS: PlaceDef[] = [
   { id: "prison", kind: "prison", name: "Haftanstalt Solara Bay", color: "#8a9098", icon: "!", near: [8, 0], access: "none", at: [PRISON.x1 + 70, (PRISON.y0 + PRISON.y1) / 2 + 30, 0] },
   { id: "jetty", kind: "dock", name: "Bootssteg", color: "#2bb3ff", icon: "B", near: [0, 9], access: "none", at: [-196, 3455, Math.PI] },
   { id: "helipad", kind: "heliport", name: "Heliport", color: "#ffd23f", icon: "F", near: [15, 4], access: "none", at: [HELIPAD.x - 120, HELIPAD.y + 60, Math.PI] },
+  // Realism update: more shops (appended, so the older places keep their blocks)
+  { id: "gas", kind: "gas", name: "Tankstelle 24/7", color: "#e8452a", icon: "24", near: [8, 0], access: "foot", robbable: true, at: [GAS_SHOP.x0 - 14, (GAS_SHOP.y0 + GAS_SHOP.y1) / 2, Math.PI] },
+  { id: "bar", kind: "bar", name: "Bar Ankerplatz", color: "#d4a017", icon: "Ba", near: [3, 10], access: "foot", robbable: true },
+  { id: "pharmacy", kind: "pharmacy", name: "Bucht-Apotheke", color: "#2ecc71", icon: "Rx", near: [8, 6], access: "foot", robbable: true },
+  { id: "boats", kind: "boats", name: "Marina Bootshandel", color: "#2b9bd6", icon: "Bo", near: [0, 6], access: "foot" },
+  { id: "planes", kind: "planes", name: "Skyline Flugzeughandel", color: "#7fb2ff", icon: "Fl", near: [15, 3], access: "foot" },
+  { id: "electro", kind: "electronics", name: "Bucht-Elektro (Bay Plaza)", color: "#2bb3ff", icon: "El", near: [9, 9], access: "foot", inMall: true },
 ];
 
 export interface Place extends PlaceDef {
@@ -79,7 +88,7 @@ export interface Place extends PlaceDef {
 export const PLACE_RADIUS = { foot: 22, car: 46 };
 // shops with a room you walk into (door symbol on the maps)
 export const WALKABLE = new Set(["gunshop", "clothes", "food", "food2", "workshop", "safehouse", "market", "cardealer", "barber", "mall",
-  "hospital", "police", "lou", "marisol", "dock", "ines", "ruiz", "club", "loft", "tower"]);
+  "hospital", "police", "lou", "marisol", "dock", "ines", "ruiz", "club", "loft", "tower", "gas", "bar", "pharmacy", "boats", "planes"]);
 
 // a place on a map: coloured circle with its letter; walkable shops get a door in the circle
 export function drawPlaceIcon(g: CanvasRenderingContext2D, pl: { id: string; color: string; icon: string }, x: number, y: number, r: number) {
@@ -108,6 +117,7 @@ export function buildPlaces(world: World): Place[] {
   const ok = (bx: number) => { const w = westFacing(bx); return (b: Building) => w(b) && !world.ramps.some((r) => r.bld === b); };
   for (const def of PLACE_DEFS) {
     if (def.at) { const [x, y, a] = def.at; out.push({ ...def, x, y, a, cx: x, cy: y, bld: null }); continue; }
+    if (def.inMall) { out.push({ ...def, x: -1e5, y: -1e5, a: 0, cx: -1e5, cy: -1e5, bld: null }); continue; }
     if (def.inPark) {
       let pk = world.blocks[0], pd = Infinity;
       for (const b of world.blocks) { const d = Math.hypot(b.bx - def.near[0], b.by - def.near[1]); if (b.kind === "park" && d < pd) { pd = d; pk = b; } }

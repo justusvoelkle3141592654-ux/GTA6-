@@ -236,6 +236,7 @@ export function artTex(kind: string, col: string) {
     g.fillStyle = "#f4efe6"; g.fillRect(0, 0, 128, 96);
     if (kind === "sun") { g.fillStyle = "#ffd9a0"; g.fillRect(0, 0, 128, 60); g.fillStyle = col; g.beginPath(); g.arc(64, 60, 26, Math.PI, 0); g.fill(); g.fillStyle = "#3a7a8a"; g.fillRect(0, 60, 128, 36); }
     else if (kind === "sea" || kind === "wave") { g.fillStyle = "#cfe6f0"; g.fillRect(0, 0, 128, 96); g.strokeStyle = col; g.lineWidth = 6; for (let k = 0; k < 4; k++) { g.beginPath(); for (let x = 0; x <= 128; x += 4) g.lineTo(x, 40 + k * 14 + Math.sin(x / 10 + k) * 6); g.stroke(); } }
+    else if (kind === "sky") { const gr = g.createLinearGradient(0, 0, 0, 96); gr.addColorStop(0, "#3a7ac8"); gr.addColorStop(1, "#cfe6f0"); g.fillStyle = gr; g.fillRect(0, 0, 128, 96); g.fillStyle = col; g.beginPath(); g.moveTo(20, 50); g.lineTo(108, 44); g.lineTo(112, 48); g.lineTo(20, 54); g.fill(); g.fillRect(56, 34, 10, 26); g.fillRect(24, 42, 4, 10); }
     else if (kind === "target") { for (let k = 5; k > 0; k--) { g.fillStyle = k % 2 ? col : "#f4efe6"; g.beginPath(); g.arc(64, 48, k * 9, 0, 7); g.fill(); } }
     else if (kind === "pin") { g.fillStyle = "#2a2d33"; g.fillRect(0, 0, 128, 96); g.fillStyle = col; g.beginPath(); g.ellipse(64, 40, 18, 24, 0, 0, 7); g.fill(); g.fillRect(52, 60, 24, 30); g.fillStyle = "#fff"; g.font = "bold 16px sans-serif"; g.fillText("LOU'S", 40, 92); }
     else { for (let k = 0; k < 9; k++) { g.fillStyle = [col, "#ff3cac", "#ffd23f", "#2bf0ff", "#15161b"][Math.floor(r() * 5)]; if (r() < 0.5) g.fillRect(r() * 100, r() * 70, 20 + r() * 40, 14 + r() * 30); else { g.beginPath(); g.arc(r() * 128, r() * 96, 8 + r() * 20, 0, 7); g.fill(); } } }
@@ -711,6 +712,35 @@ export function furniture(f: FurnSpec, out: Parts, seed: number, extra: THREE.Ob
       break;
     }
     case "lifering": s.push(paint(new THREE.TorusGeometry(hw * 0.8, hw * 0.22, 8, 20).translate(0, hw, 0.8), "#e8452a")); for (let k = 0; k < 4; k++) s.push(B(hw * 0.5, hw * 0.5, hw * 0.5, Math.cos(k * Math.PI / 2) * hw * 0.8, hw + Math.sin(k * Math.PI / 2) * hw * 0.8, 0.8, WHITE)); break;
+    case "hull": {
+      // a speedboat on a trailer: the hull (length along z, pointed bow at +z), a stripe, windscreen, seats, outboard motor
+      const L2 = hd, B2 = hw * 0.85, y0 = 9;
+      s.push(B(w * 0.9, 1.2, d * 0.9, 0, 1.6, 0, DARK), CY(2.4, 2.4, 1.8, -hw * 0.75, 2.4, -L2 * 0.3, "#15161b"), CY(2.4, 2.4, 1.8, hw * 0.75, 2.4, -L2 * 0.3, "#15161b"));
+      for (let i = 0; i < 6; i++) {
+        const t0 = i / 6, t1 = (i + 1) / 6, z0 = -L2 + t0 * 2 * L2, z1 = -L2 + t1 * 2 * L2;
+        const bw = (t: number) => B2 * (t < 0.62 ? 1 : 1 - (t - 0.62) / 0.38 * 0.9);
+        const wv = (bw(t0) + bw(t1)) / 2, hgt = 7 + t1 * 2;
+        s.push(B(wv * 2, hgt, z1 - z0 + 0.2, 0, y0 + hgt / 2 - 1, (z0 + z1) / 2, c));
+        s.push(B(wv * 2 + 0.2, 1.2, z1 - z0 + 0.2, 0, y0 + hgt * 0.55, (z0 + z1) / 2, f.c2 || "#2b6bff"));
+        s.push(B(wv * 1.4, 2.4, z1 - z0 + 0.2, 0, y0 - 1.5, (z0 + z1) / 2, darken(c, 0.25)));
+      }
+      gs.push(B(B2 * 1.6, 4, 0.5, 0, y0 + 9, L2 * 0.15, "#c9e6ff"));
+      s.push(B(B2 * 0.7, 3, 6, -B2 * 0.4, y0 + 8, -L2 * 0.2, "#2a2d33"), B(B2 * 0.7, 3, 6, B2 * 0.4, y0 + 8, -L2 * 0.2, "#2a2d33"));
+      s.push(B(4, 8, 4, 0, y0 + 5, -L2 - 2, "#15161b"), B(2, 6, 2, 0, y0 - 1, -L2 - 2.5, METAL));
+      break;
+    }
+    case "aircraft": {
+      // a scale model of a small plane on a pole: fuselage along z (nose at +z), wings, tail, propeller
+      const L2 = hd, y0 = 16;
+      s.push(CY(hw * 0.25, hw * 0.3, 1, 0, 0.5, 0, DARK, 16), CY(0.8, 0.8, y0, 0, y0 / 2, 0, METAL, 8));
+      s.push(paint(new THREE.CylinderGeometry(3.2, 1.6, L2 * 1.8, 12).rotateX(Math.PI / 2).translate(0, y0 + 3, 0), c));
+      s.push(SP(3.2, 0, y0 + 3, L2 * 0.9, c, 1, 1, 1.2, 12));
+      s.push(B(w, 0.8, L2 * 0.45, 0, y0 + 4, L2 * 0.15, c), B(w + 0.2, 0.9, 2, 0, y0 + 4.1, L2 * 0.3, f.c2 || "#2b6bff"));
+      s.push(B(w * 0.4, 0.6, L2 * 0.2, 0, y0 + 3.5, -L2 * 0.85, c), B(0.6, 6, L2 * 0.22, 0, y0 + 6, -L2 * 0.85, f.c2 || "#2b6bff"));
+      gs.push(B(4, 2.4, 6, 0, y0 + 5.6, L2 * 0.45, "#c9e6ff"));
+      s.push(B(0.6, w * 0.32, 1, 0, y0 + 3, L2 * 0.9 + 3.6, DARK), B(w * 0.32, 0.6, 1, 0, y0 + 3, L2 * 0.9 + 3.6, DARK));
+      break;
+    }
     case "shipmodel": s.push(B(w, 1.4, d, 0, 0.7, 0, "#3a2a1a"), CY(0.4, 0.4, 3, 0, 2.5, 0, METAL, 6), paint(new THREE.CylinderGeometry(1.6, 0.8, w * 0.8, 8).rotateZ(Math.PI / 2).scale(1, 0.8, 0.9).translate(0, 5, 0), "#c0392b"), B(w * 0.5, 2, 1.8, -w * 0.05, 7, 0, WHITE), B(w * 0.2, 2.4, 1.4, w * 0.12, 9, 0, "#2a2d33")); break;
     case "speaker": s.push(B(w, 30, d, 0, 15, 0, "#15161b")); for (const [y, rr] of [[8, hw * 0.75], [20, hw * 0.5], [27, hw * 0.28]] as [number, number][]) s.push(CYZ(rr, 0.6, 0, y, hd + 0.2, "#2a2d33", 16), CYZ(rr * 0.4, 0.8, 0, y, hd + 0.4, "#3a3d45", 12)); break;
     case "discoball": {

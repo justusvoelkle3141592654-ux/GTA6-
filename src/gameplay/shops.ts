@@ -3,7 +3,8 @@ import { Car, MODEL_NAME, MODEL_STATS, isCraft, repairBody } from "../vehicles/v
 import { WEAPON_DEFS } from "./weapons";
 import { terrainH } from "../world/world";
 import { MAX_TUNE, PAINTS, TUNE_DEFS, tuneHp } from "../vehicles/garage";
-import { AMMO_FOR_SALE, ARMOR_PRICE, BEARDS, DEALER_CARS, FOOD, GUNS_FOR_SALE, HAIR_STYLES, MARKET, OUTFITS, PAINT_PRICE, REPAIR_PER_HP, ROB_COOLDOWN, ROB_HEAT, ROB_REWARD, TATTOOS, TYRE_PRICE, type ShopAction } from "./economy";
+import { AMMO_FOR_SALE, ARMOR_PRICE, BEARDS, BOAT_DEALER, AIR_DEALER, DEALER_CARS, DRINKS, FOOD, GADGETS, GAS_ITEMS, GUNS_FOR_SALE, HAIR_STYLES, MARKET, MAX_KITS, MAX_VIT, NEON_PRICE, NEONS, NITRO_FILL_PRICE, OUTFITS, PAINT_PRICE, PHARMA, PHONE_CASES, REPAIR_PER_HP, ROB_COOLDOWN, ROB_HEAT, ROB_REWARD, SCRATCH_PRICE, TATTOOS, TYRE_PRICE, WASH_PRICE, type ShopAction } from "./economy";
+import { DOCK_SPOT, HELI_SPOT, JETTY } from "../world/places";
 import { MAX_ARMOR, newPed, type Game, type ShopView } from "../core/engine";
 
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
@@ -31,6 +32,9 @@ export class Shops {
       robWait: pl ? Math.max(0, Math.ceil(ROB_COOLDOWN - (g.time - (this.robbedAt.get(pl.id) ?? -1e9)))) : 0,
       style: { ...g.style }, energy: Math.ceil(g.energyT),
       dealer: DEALER_CARS.map((m) => ({ name: MODEL_NAME[m], price: MODEL_STATS[m].price })),
+      items: [...g.items], kits: g.kits, vit: g.vit, drunk: Math.round(g.drunk), nitro: g.nitro, neon: inCar ? p.neon : "",
+      crafts: (pl?.kind === "boats" ? BOAT_DEALER : pl?.kind === "planes" ? AIR_DEALER : []).map((m) => ({ model: m, name: MODEL_NAME[m], price: MODEL_STATS[m].price, owned: g.crafts.includes(m) })),
+      carNear: !!this.ownCarNear(),
     };
   }
 
@@ -122,7 +126,7 @@ export class Shops {
         if (g.garage.length >= g.garageSlots) return "Garage ist voll";
         if (p.tag) return "Den Wagen brauchst du noch für den Auftrag";
         if (isCraft(p.model)) return "Das passt nicht in die Garage";
-        g.garage.push({ model: p.model, color: p.color, hp: p.hp, maxHp: p.maxHp, mass: p.mass, tune: { ...p.tune } });
+        g.garage.push({ model: p.model, color: p.color, hp: p.hp, maxHp: p.maxHp, mass: p.mass, tune: { ...p.tune }, neon: p.neon });
         g.cars.splice(g.cars.indexOf(p), 1);
         g.playerCarStored = true;
         g.ped = newPed(pl.x, pl.y, pl.a); g.ped.armor = pd.armor; g.ped.hp = pd.hp;
@@ -136,7 +140,7 @@ export class Shops {
         const car = new Car("civ", c.model, c.color);
         car.x = pl.cx; car.y = pl.cy; car.a = -Math.PI / 2; car.z = terrainH(car.x, car.y);
         for (const o of g.cars) if (Math.hypot(o.x - car.x, o.y - car.y) < 45) car.y += 60; // free spot
-        car.hp = c.hp; car.maxHp = c.maxHp; car.mass = c.mass; car.tune = { ...c.tune };
+        car.hp = c.hp; car.maxHp = c.maxHp; car.mass = c.mass; car.tune = { ...c.tune }; car.neon = c.neon ?? "";
         car.parked = true; car.handbrake = true; car.owned = true; car.keep = true;
         g.cars.push(car);
         g.garage.splice(a.i, 1);
@@ -212,6 +216,87 @@ export class Shops {
         g.style = { ...g.style, beard: a.i };
         return b.name;
       }
+      case "gas": {
+        const m = GAS_ITEMS[a.i];
+        if (!m) return "";
+        if (!m.energy && pd.hp >= pd.maxHp) return "Du bist satt";
+        if (!this.pay(m.price)) return broke;
+        pd.hp = Math.min(pd.maxHp, pd.hp + m.heal);
+        if (m.energy) g.energyT = Math.max(g.energyT, m.energy);
+        return `${m.name} (+${m.heal})`;
+      }
+      case "scratch": {
+        if (!this.pay(SCRATCH_PRICE)) return broke;
+        const r = Math.random(), win = r < 0.01 ? 500 : r < 0.08 ? 50 : r < 0.3 ? 10 : 0;
+        if (win) { g.cash += win; g.stats.earned += win; return `Rubbellos: $${win} gewonnen!`; }
+        return "Rubbellos: leider nichts";
+      }
+      case "nitroFill": {
+        const c = this.ownCarNear();
+        if (!c) return "Dein Auto muss an der Tankstelle stehen";
+        if (g.nitro >= 0.99) return "Nitro ist schon voll";
+        if (!this.pay(NITRO_FILL_PRICE)) return broke;
+        g.nitro = 1;
+        return "Nitro aufgefüllt";
+      }
+      case "wash": {
+        const c = this.ownCarNear();
+        if (!c) return "Dein Auto muss an der Tankstelle stehen";
+        if (!this.pay(WASH_PRICE)) return broke;
+        repairBody(c);
+        return "Waschanlage: Dellen und Glas wie neu (der Motor nicht)";
+      }
+      case "neon": {
+        if (g.onFoot) return "";
+        if (!NEONS.includes(a.color) || a.color === p.neon) return "";
+        if (a.color && !this.pay(NEON_PRICE)) return broke;
+        p.neon = a.color;
+        return a.color ? "Unterbodenbeleuchtung eingebaut" : "Unterbodenbeleuchtung ausgebaut";
+      }
+      case "drink": {
+        const d = DRINKS[a.i];
+        if (!d) return "";
+        if (!this.pay(d.price)) return broke;
+        pd.hp = Math.min(pd.maxHp, pd.hp + d.heal);
+        if (d.booze) { g.drunk = Math.min(100, g.drunk + d.booze); return g.drunk > 70 ? `${d.name} – die Bar dreht sich` : `${d.name} – Prost!`; }
+        return `${d.name} (+${d.heal})`;
+      }
+      case "pharma": {
+        const m = PHARMA[a.i];
+        if (!m) return "";
+        if (m.kind === "heal" && pd.hp >= pd.maxHp) return "Dir fehlt nichts";
+        if (m.kind === "kit" && g.kits >= MAX_KITS) return `Du trägst schon ${MAX_KITS} Sets`;
+        if (m.kind === "vit" && g.vit >= MAX_VIT) return "Mehr bringt nichts";
+        if (m.kind === "clean" && g.drunk <= 0) return "Du bist nüchtern";
+        if (!this.pay(m.price)) return broke;
+        if (m.kind === "heal") { pd.hp = Math.min(pd.maxHp, pd.hp + m.heal); return `${m.name} (+${m.heal})`; }
+        if (m.kind === "kit") { g.items.push("kit"); return `Erste-Hilfe-Set eingesteckt (${g.kits}/${MAX_KITS}) – mit H benutzen`; }
+        if (m.kind === "vit") { g.items.push("vit"); g.applyPerks(); return `Maximale Gesundheit jetzt ${pd.maxHp}`; }
+        g.drunk = 0; pd.hp = Math.min(pd.maxHp, pd.hp + m.heal);
+        return "Wieder klar im Kopf";
+      }
+      case "gadget": {
+        const d = GADGETS.find((x) => x.id === a.id);
+        if (!d) return "";
+        if (g.items.includes(d.id)) return "Hast du schon";
+        if (!this.pay(d.price)) return broke;
+        g.items.push(d.id);
+        return `${d.name} gekauft – ${d.desc}`;
+      }
+      case "case": {
+        const d = PHONE_CASES.find((x) => x.id === a.id);
+        if (!d) return "";
+        if (!g.items.includes(d.id) && d.price > 0) { if (!this.pay(d.price)) return broke; g.items.push(d.id); }
+        g.items = g.items.filter((x) => !x.startsWith("active:")); g.items.push("active:" + d.id);
+        return `${d.name} ist jetzt dein Handy`;
+      }
+      case "buyCraft": {
+        if (g.crafts.includes(a.model)) return "Gehört dir schon";
+        if (!this.pay(MODEL_STATS[a.model].price)) return broke;
+        g.crafts.push(a.model);
+        return `${MODEL_NAME[a.model]} gekauft – jederzeit hier oder im Handy (Fahrzeug) abholen`;
+      }
+      case "fetchCraft": return this.fetchCraft(a.model);
       case "tattoo": {
         const t = TATTOOS[a.i];
         if (!t || g.style.tattoo === a.i) return "";
@@ -223,6 +308,26 @@ export class Shops {
     return "";
   }
 
+  // your own car standing next to the shop you are in (gas station: nitro, car wash)
+  ownCarNear(): Car | null {
+    const g = this.g, pl = g.modal?.kind === "shop" ? g.modal.place : null;
+    if (!pl || g.playerCarStored) return null;
+    const c = g.player;
+    if (c.dead || isCraft(c.model)) return null;
+    return Math.hypot(c.x - pl.x, c.y - pl.y) < 320 || !g.onFoot ? c : null;
+  }
+  // a boat or an aircraft you bought: it waits at the jetty / on the heliport, you are taken there and get in
+  fetchCraft(model: Car["model"]): string {
+    const g = this.g;
+    if (!g.crafts.includes(model)) return "Erst kaufen";
+    if (g.missions.active || g.hide.active) return "Nicht während einer Mission oder des Versteckspiels";
+    const boat = isCraft(model) && (BOAT_DEALER as string[]).includes(model);
+    const spot = boat ? DOCK_SPOT : HELI_SPOT;
+    if (g.modal) g.closeModal();
+    g.teleportOnFoot(boat ? JETTY.x1 - 20 : spot.x + 60, boat ? JETTY.y : spot.y + 40);
+    const r = g.spawner.vehicleAt(model, spot.x, spot.y, spot.a);
+    return r;
+  }
   // a robbery: money from the till (0 if it was robbed shortly before)
   robValue(id: string) {
     const g = this.g, last = this.robbedAt.get(id) ?? -1e9;

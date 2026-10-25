@@ -113,6 +113,7 @@ export class Car {
   driver = false; // somebody sits inside (gets pulled out when the car is stolen)
   spotId = -1;    // parking spot this car belongs to (-1: none)
   owned = false;  // left behind by the player
+  neon = "";      // underglow colour from the workshop ("": none)
   keep = false;   // taken out of the garage: never despawns
   roadblock = false; // police car standing across the road
   faction: FactionId | null = null; // gang car

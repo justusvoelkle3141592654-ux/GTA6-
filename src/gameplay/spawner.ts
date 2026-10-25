@@ -25,6 +25,18 @@ export class Spawner {
   get allowed() { return this.g.rules.city; }
 
   // a vehicle next to you, and you get in right away (it is yours: no crime)
+  // a vehicle at a fixed spot (bought boats and aircraft at the jetty / heliport); you get in
+  vehicleAt(model: CarModel, x: number, y: number, a: number): string {
+    const g = this.g;
+    const c = new Car("civ", model, COLOR[model] ?? PAINT[Math.floor(Math.random() * PAINT.length)]);
+    const st = MODEL_STATS[model];
+    c.x = x; c.y = y; c.a = a; c.z = isBoat(model) ? WATER_Y : isAircraft(model) ? g.groundAt(x, y) : terrainH(x, y);
+    c.hp = c.maxHp = st.hp; c.mass = st.mass;
+    c.parked = true; c.handbrake = true; c.owned = true; c.keep = true;
+    g.cars.push(c);
+    g.takeVehicle(c);
+    return `${MODEL_NAME[model]} steht bereit`;
+  }
   vehicle(model: CarModel): string {
     const g = this.g;
     if (!this.allowed) return "Nur in der Open World";

@@ -3,10 +3,12 @@
 // like with any building), a door to the street, a counter where you buy, furniture per room.
 // The mall and the apartment tower fill a whole block (mall: upper floor with escalators; tower: six flats).
 import { BLOCK, ROAD, H_SCALE, PRISON, World, type Building } from "./world";
+import { GAS_SHOP } from "./terrain";
 import type { Place } from "./places";
 
 export type InteriorKind = "gun" | "boutique" | "taco" | "burger" | "workshop" | "safehouse" | "market" | "cardealer" | "barber" | "mall"
-  | "hospital" | "police" | "garage" | "cafe" | "office" | "harbor" | "precinct" | "club" | "loft" | "tower" | "jail" | "mess" | "rec";
+  | "hospital" | "police" | "garage" | "cafe" | "office" | "harbor" | "precinct" | "club" | "loft" | "tower" | "jail" | "mess" | "rec"
+  | "gas247" | "bar" | "pharmacy" | "boats" | "planes";
 // k "f:<kind>": a piece from the furniture library (render/furniture.ts); w, d are its size before turning by a
 // (a = 0: the front looks south (+y), PI/2 west, PI north, -PI/2 east)
 export interface Prop { k: string; x: number; y: number; w: number; d: number; h: number; a?: number; z?: number; lv?: number; c?: string; c2?: string; solid?: boolean }
@@ -67,13 +69,15 @@ const KIND_OF: Record<string, [InteriorKind, number, number]> = {
   safehouse: ["safehouse", 140, 130], market: ["market", 140, 140], cardealer: ["cardealer", 170, 180], barber: ["barber", 110, 110],
   hospital: ["hospital", 170, 150], police: ["police", 160, 140], lou: ["garage", 150, 130], marisol: ["cafe", 130, 120], dock: ["office", 120, 110],
   ines: ["harbor", 130, 120], ruiz: ["precinct", 120, 110], club: ["club", 170, 150], loft: ["loft", 160, 140],
+  bar: ["bar", 150, 130], pharmacy: ["pharmacy", 120, 110], boats: ["boats", 170, 170], planes: ["planes", 170, 170],
 };
 const WIDE_DOOR = new Set<InteriorKind>(["workshop", "garage"]);
 
 export function buildInteriors(world: World, places: Place[]): Interior[] {
   const out: Interior[] = [];
   for (const pl of places) {
-    if (pl.id === "mall") { const m = buildMall(world, pl); if (m) out.push(m); continue; }
+    if (pl.id === "mall") { const m = buildMall(world, pl, places.find((q) => q.id === "electro")); if (m) out.push(m); continue; }
+    if (pl.id === "gas") { out.push(buildGasShop(world, pl)); continue; }
     if (pl.id === "tower") { const t = buildTower(world, pl); if (t) out.push(t); continue; }
     const spec = KIND_OF[pl.id];
     if (!spec || !pl.bld) continue;
@@ -124,6 +128,24 @@ export function buildInteriors(world: World, places: Place[]): Interior[] {
   }
   out.push(...buildPrison(world));
   return out;
+}
+
+// the 24/7 shop of the gas station by the northern highway (outside the city blocks: its walls are extras)
+function buildGasShop(world: World, pl: Place): Interior {
+  const g = GAS_SHOP, x0 = g.x0, x1 = g.x1, y0 = g.y0, y1 = g.y1, dy = (y0 + y1) / 2, H = 46, doorW = 20;
+  const it: Interior = {
+    id: pl.id, kind: "gas247", name: pl.name, color: pl.color, x0: x0 + T, y0: y0 + T, x1: x1 - T, y1: y1 - T, H,
+    door: { x: x0, y: dy, w: doorW }, counter: { x: 0, y: 0 }, clerk: { x: 0, y: 0, a: 0 }, props: [], seats: [], guests: [], walls: [],
+  };
+  it.walls.push(
+    wallB(x0, y0, T, dy - doorW / 2 - y0, H), wallB(x0, dy + doorW / 2, T, y1 - dy - doorW / 2, H),
+    wallB(x1 - T, y0, T, y1 - y0, H), wallB(x0, y0, x1 - x0, T, H), wallB(x0, y1 - T, x1 - x0, T, H),
+  );
+  furnish(it);
+  solidProps(it);
+  world.addExtras(it.walls);
+  pl.x = it.counter.x; pl.y = it.counter.y; pl.a = 0;
+  return it;
 }
 
 // the prison: one building along the west wall of the yard with the cell block, the canteen and the recreation room
@@ -454,6 +476,72 @@ function furnish(it: Interior) {
       look(["plaster", "#e8e2d8"], "none", "#ffe8c8");
       break;
     }
+    case "bar": {
+      // a long bar along the east wall with stools, bottles behind it; tables, billiards, darts, a jukebox
+      deskAt("bar", x1 - 20, cy, L - 46, "#3a2416");
+      F("bottles", x1 - 3, cy, L - 56, 4, WEST, "#5a3a22", { z: 18 }); F("bottles", x1 - 3, cy, L - 56, 4, WEST, "#3a2a1a", { z: 26 });
+      for (let k = 0; k < 5; k++) { const sy = cy - (L - 70) / 2 + k * ((L - 70) / 4); F("stool", x1 - 36, sy, 7, 7, 0, "#c9a070"); it.seats.push({ x: x1 - 36, y: sy, a: 0 }); }
+      for (const [tx, ty] of [[x0 + 34, y0 + 26], [x0 + 34, y1 - 26], [x0 + 70, y1 - 26]]) {
+        F("rtable", tx, ty, 16, 16, 0, "#5a3a22", { solid: true });
+        F("chair", tx - 12, ty, 9, 9, EAST, "#3a2416"); F("chair", tx + 12, ty, 9, 9, WEST, "#3a2416");
+        it.seats.push({ x: tx - 12, y: ty, a: 0 }, { x: tx + 12, y: ty, a: Math.PI });
+      }
+      F("pool", x0 + 78, y0 + 34, 44, 24, 0, "#7a1f2b", { solid: true });
+      F("jukebox", x0 + 8, cy + 30, 12, 10, EAST, "#c0392b", { solid: true });
+      onN("clock", x0 + 110, 12, "#f4f4f4", undefined, 22); onS("neon", x0 + 40, 36, "#ffb347", "ANKERPLATZ", 28); onN("neon", x0 + 40, 30, "#2bf0ff", "COLD BEER", 26);
+      onE("tv", y0 + 22, 30, "#15161b", undefined, 20);
+      for (const [px, py] of [[x0 + 34, y0 + 26], [x0 + 34, y1 - 26], [x0 + 70, y1 - 26], [x0 + 78, y0 + 34]]) F("pendant", px, py, 10, 10, 0, "#c9a227");
+      it.guests.push({ x: x1 - 36, y: cy - 6, a: 0, anim: "bench", z: 0 }, { x: x0 + 60, y: y0 + 46, a: 0.6, anim: "talk" }, { x: x0 + 96, y: y0 + 50, a: 2.6, anim: "talk" }, { x: x0 + 22, y: y1 - 26, a: 0, anim: "bench" });
+      streetWindows("blinds");
+      it.floor = ["darkwood", "#4a3222"]; it.wallTex = ["brick", "#6a3a2a"];
+      look(["wood", "#3a2a1e"], "none", "#ffcc8a");
+      break;
+    }
+    case "pharmacy": {
+      // white shelves full of boxes, a counter with a green cross, a waiting bench
+      counterAt(x1 - 26, cy, 40, "#f4f6f8");
+      for (let k = 0; k < 3; k++) F("cubeshelf", x0 + 30 + k * 26, y0 + 6, 22, 10, SOUTH, "#f4f6f8", { solid: true });
+      for (let k = 0; k < 3; k++) F("cubeshelf", x0 + 30 + k * 26, y1 - 6, 22, 10, NORTH, "#f4f6f8", { solid: true });
+      F("cabinet", x1 - 6, y0 + 20, 22, 10, WEST, "#f4f6f8", { solid: true }); F("cabinet", x1 - 6, y1 - 20, 22, 10, WEST, "#f4f6f8", { solid: true });
+      F("gondola", x0 + 54, cy, 40, 8, WEST, "#2ecc71", { solid: true });
+      F("bench", x0 + 14, y1 - 14, 26, 8, NORTH, "#2ecc71"); it.seats.push({ x: x0 + 14, y: y1 - 16, a: -Math.PI / 2 });
+      F("brochure", x0 + 10, y0 + 24, 10, 6, EAST); F("plant", x0 + 8, cy + 30, 10, 10);
+      onE("neon", cy, 20, "#2ecc71", "+", 34); onN("board", x0 + 90, 30, "#f4f4f4", "APOTHEKE", 22);
+      it.guests.push({ x: x0 + 44, y: cy - 20, a: 0.3, anim: "idle" });
+      streetWindows();
+      it.floor = ["tile", "#eef2f0"]; it.wallTex = ["tile2", "#f6f8f8"];
+      look(["tiles", "#f4f6f6"], "panel", "#f4fff8");
+      break;
+    }
+    case "boats": {
+      // showroom: two speedboats on trailers, a model ship, life rings, the sales desk
+      counterAt(x0 + 30, y1 - 24, 34, "#e8e4dc");
+      F("hull", x0 + 95, y0 + 45, 30, 70, 0, "#f4f4f6", { solid: true, c2: "#2b6bff" }); F("hull", x0 + 95, y1 - 50, 26, 60, 0, "#c0392b", { solid: true, c2: "#f4f4f6" });
+      F("shipmodel", x0 + 40, y0 + 30, 22, 8, SOUTH, "#5a3a22", { z: 0, solid: true });
+      F("lifering", x1 - 0.8, cy - 30, 12, 2, WEST, "#e8452a", { z: 16 }); F("lifering", x1 - 0.8, cy + 30, 12, 2, WEST, "#e8452a", { z: 16 });
+      onN("poster", x0 + 120, 16, "#2b9bd6", "sea", 14); onE("neon", cy, 44, "#2bf0ff", "MARINA", 28); onS("map", x0 + 80, 30, "#c9b07a", undefined, 16);
+      F("armchair", x0 + 18, y0 + 60, 16, 14, EAST, "#2b6bff", { solid: true }); F("palm", x0 + 10, y0 + 10, 14, 14);
+      F("spotrail", x0 + 95, y0 + 45, 30, 2, 0, "#15161b"); F("spotrail", x0 + 95, y1 - 50, 30, 2, 0, "#15161b");
+      it.guests.push({ x: x0 + 70, y: cy, a: 0, anim: "lookAround" });
+      streetWindows();
+      it.floor = ["planks", "#c9a070"]; it.wallTex = ["wood", "#e8e2d4"];
+      look(["wood", "#d8cfbf"], "spot", "#fff8ec");
+      break;
+    }
+    case "planes": {
+      // showroom: scale models of planes and helicopters, maps, the sales desk, a lounge
+      counterAt(x0 + 30, y1 - 24, 34, "#2a2d33");
+      F("aircraft", x0 + 100, y0 + 50, 60, 50, 0, "#e8e8ec", { solid: true, c2: "#2b6bff" }); F("aircraft", x0 + 100, y1 - 52, 50, 40, 0.5, "#ffd23f", { solid: true, c2: "#2a2d33" });
+      onN("map", x0 + 60, 36, "#7ab0c8", undefined, 16); onS("poster", x0 + 120, 16, "#7fb2ff", "sky", 14); onE("neon", cy, 44, "#7fb2ff", "SKYLINE", 28);
+      F("sofa", x0 + 20, y0 + 40, 40, 15, EAST, "#2a2d33", { solid: true }); F("coffee", x0 + 40, y0 + 40, 22, 11, 0, "#c9ced8");
+      F("brochure", x0 + 50, y1 - 12, 10, 6, NORTH); F("palm", x0 + 10, y1 - 10, 14, 14);
+      F("spotrail", x0 + 100, y0 + 50, 30, 2, 0, "#15161b"); F("spotrail", x0 + 100, y1 - 52, 30, 2, 0, "#15161b");
+      it.guests.push({ x: x0 + 70, y: cy + 6, a: 0.2, anim: "phone" });
+      streetWindows();
+      it.floor = ["polished", "#c9ced8"]; it.wallTex = ["panel", "#e2e6ea"];
+      look(["plaster", "#f4f6f8"], "panel", "#f6faff");
+      break;
+    }
     case "market": {
       counterAt(x0 + 34, y0 + 22, 30, "#e8e8ec");
       F("checkout", x0 + 34, y0 + 48, 26, 10, WEST, "#2e6da4", { solid: true });
@@ -680,6 +768,21 @@ function furnish(it: Interior) {
       break;
     }
     case "mall": case "tower": case "jail": case "mess": case "rec": break;
+    case "gas247": {
+      // 24/7 shop of the gas station: counter with the till by the door, shelves, coolers, coffee, hot dogs, lottery
+      counterAt(x0 + 30, y0 + 22, 30, "#e8e8ec");
+      for (let k = 0; k < 2; k++) F("gondola", x0 + 56 + k * 22, cy + 10, L - 50, 8, WEST, ["#e8452a", "#2e6da4"][k], { solid: true });
+      F("fridgeglass", x1 - 6, cy, L - 30, 10, WEST, "#2e6da4", { solid: true });
+      F("espresso", x0 + 14, y1 - 8, 12, 8, NORTH, "#c9ced8", { z: 12 }); F("counter", x0 + 14, y1 - 8, 22, 12, NORTH, "#e8e4dc", { solid: true });
+      F("shake", x0 + 34, y1 - 8, 14, 8, NORTH, "#e8452a", { z: 12 }); F("counter", x0 + 36, y1 - 8, 22, 12, NORTH, "#e8e4dc", { solid: true });
+      F("brochure", x0 + 10, y0 + 40, 10, 6, EAST); F("vending", x0 + 8, cy + 30, 14, 10, EAST, "#2bb3ff", { solid: true });
+      onN("neon", x0 + 60, 30, "#e8452a", "24/7", 30); onS("board", x0 + 70, 30, "#f4f4f4", "RUBBELLOSE", 20);
+      it.guests.push({ x: x0 + 67, y: cy - 24, a: 0.2, anim: "idle" });
+      streetWindows();
+      it.floor = ["lino", "#dcdcd4"]; it.wallTex = ["tile2", "#f4f4f0"];
+      look(["tiles", "#f0f0ec"], "panel", "#f4fbff");
+      break;
+    }
   }
 }
 
@@ -687,7 +790,7 @@ function furnish(it: Interior) {
 // (ground floor -> 1st floor, 1st -> 2nd across the atrium), a glass lift in the north-east corner, shop fronts on every
 // floor (closed shops: shop windows only), the food court on the ground floor
 export const MALL = { band: 70, floors: [0, 38, 76], H: 114 };
-function buildMall(world: World, pl: Place): Interior | null {
+function buildMall(world: World, pl: Place, electro?: Place): Interior | null {
   const bx = Math.floor((pl.x - ROAD) / BLOCK), by = Math.floor((pl.y - ROAD) / BLOCK);
   const blk = world.blockAt(pl.x, pl.y);
   if (!blk) return null;
@@ -753,7 +856,7 @@ function buildMall(world: World, pl: Place): Interior | null {
   };
   for (const z of MALL.floors) {
     for (const fx of [-122, -62, 2, 62]) front(cx + fx, iy1, 54, Math.PI, z);             // south wall (front looks north)
-    for (const fx of [-122, -62, 2, 62]) if (cx + fx + 27 < lx0 - 4) front(cx + fx, iy0, 54, 0, z); // north wall
+    for (const fx of [-122, -62, 2, 62]) if (cx + fx + 27 < lx0 - 4 && !(z === 0 && fx < 0)) front(cx + fx, iy0, 54, 0, z); // north wall (ground floor: the electronics shop)
     for (const fy of z === 0 ? [-100, 100] : [-100, -40, 40, 100]) { front(ix0, cy + fy, 50, -Math.PI / 2, z); front(ix1, cy + fy, 50, Math.PI / 2, z); }
   }
   // ground floor: the food court in the atrium (stand with the counter, tables), benches, palms
@@ -774,6 +877,19 @@ function buildMall(world: World, pl: Place): Interior | null {
       addF(it, "planter", cx - A - 22, cy, 12, 40, 0, "#3aa85c", { ...o, solid: true }); addF(it, "planter", cx + A + 22, cy, 12, 40, 0, "#3aa85c", { ...o, solid: true });
       addF(it, "directory", lx0 - 22, ly1 + 6, 12, 4, 0, "#2a2d33", o);
     }
+  }
+  // ground floor, north side: Bucht-Elektro, an open electronics shop (phones, gadgets, TVs); its counter looks south
+  {
+    const ex = cx - 92, ey = iy0;
+    addF(it, "neon", ex, ey + 0.6, 50, 1, SOUTH, "#2bb3ff", { z: 26, c2: "BUCHT-ELEKTRO" });
+    addF(it, "tvwall", ex, ey + 3, 60, 4, SOUTH, "#15161b", { z: 6 });
+    addF(it, "shopcounter", ex, ey + 54, 44, 12, SOUTH, "#f4f6f8", { solid: true });
+    addF(it, "register", ex + 12, ey + 54, 7, 6, SOUTH, "#2a2d33", { z: 16 });
+    addF(it, "monitor", ex - 12, ey + 54, 8, 4, SOUTH, "#2a2d33", { z: 13 });
+    for (const [dx, dy] of [[-44, 24], [44, 24], [-44, 70], [44, 70]]) addF(it, "displaytable", ex + dx, ey + dy, 24, 14, 0, "#f4f6f8", { solid: true });
+    addF(it, "cubeshelf", ex - 56, ey + 6, 22, 10, SOUTH, "#2a2d33", { solid: true }); addF(it, "cubeshelf", ex + 56, ey + 6, 22, 10, SOUTH, "#2a2d33", { solid: true });
+    it.guests.push({ x: ex, y: ey + 43, a: Math.PI / 2, anim: "idle", role: "clerk", shirt: "#2bb3ff", pants: "#1c1c22" }, { x: ex - 30, y: ey + 38, a: -0.4, anim: "phone" });
+    if (electro) { electro.x = ex; electro.y = ey + 70; electro.a = -Math.PI / 2; electro.cx = electro.x; electro.cy = electro.y; }
   }
   addF(it, "vending", ix0 + 6, cy + 40, 14, 10, -Math.PI / 2, "#2bb3ff", { solid: true });
   addF(it, "directory", ix0 + 16, cy - 30, 12, 4, -Math.PI / 2, "#2a2d33");

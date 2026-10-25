@@ -20,7 +20,7 @@ import { buildHideFields } from "../gameplay/hide";
 // flat places without trees and rocks: the stunt park, the prison and the gas station
 const inStuntPark = (x: number, y: number) => (x > STUNT_PARK.x0 - 60 && x < STUNT_PARK.x1 + 60 && y > STUNT_PARK.y0 - 60 && y < STUNT_PARK.y1 + 60)
   || (x > PRISON.x0 - 80 && x < PRISON.x1 + 80 && y > PRISON.y0 - 80 && y < PRISON.y1 + 80)
-  || Math.abs(x - GAS_STATION.x) < GAS_STATION.w / 2 + 70 && Math.abs(y - GAS_STATION.y) < GAS_STATION.h / 2 + 70;
+  || (x > GAS_STATION.x - GAS_STATION.w / 2 - 70 && x < GAS_STATION.x + 260 && Math.abs(y - GAS_STATION.y) < GAS_STATION.h / 2 + 70);
 import { isCraft, isBoat, isHeli, isJet, isAircraft, isTwoWheel, VEH_SCALE } from "../vehicles/vehicles";
 import { CarRig, carMaterials, hasRig, topAt, type CarMats } from "../vehicles/carmodel";
 import { JETTY, HELI_SPOT, WALKABLE, type Place } from "../world/places";
@@ -438,7 +438,18 @@ function getCarGeo(model: CarModel, color: string): CarGeo {
   return res;
 }
 
+// underglow: one shared plane, a soft glow texture
+const NEON_GEO = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+let neonTexC: THREE.Texture | null = null;
+function neonTex() {
+  if (neonTexC) return neonTexC;
+  const c = document.createElement("canvas"); c.width = c.height = 64; const x = c.getContext("2d")!;
+  const gr = x.createRadialGradient(32, 32, 4, 32, 32, 32); gr.addColorStop(0, "rgba(255,255,255,0.95)"); gr.addColorStop(0.55, "rgba(255,255,255,0.45)"); gr.addColorStop(1, "rgba(255,255,255,0)");
+  x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+  neonTexC = new THREE.CanvasTexture(c); return neonTexC;
+}
 interface CarObj {
+  neon?: THREE.Mesh;
   group: THREE.Group; tilt: THREE.Group; body: THREE.Mesh; glass: THREE.Mesh; lights: THREE.Mesh; pool: THREE.Mesh; glow?: THREE.Mesh; rotor?: THREE.Object3D;
   wheels: { pivot: THREE.Object3D; spin: THREE.Object3D; front: boolean; r: number; y: number }[];
   bar?: { reds: THREE.MeshBasicMaterial; blues: THREE.MeshBasicMaterial; white: THREE.MeshBasicMaterial };
@@ -1362,6 +1373,7 @@ export class Renderer3D {
     this.scene.remove(o.group);
     o.rig?.dispose();
     if (o.bar) { o.bar.reds.dispose(); o.bar.blues.dispose(); o.bar.white.dispose(); }
+    if (o.neon) (o.neon.material as THREE.Material).dispose();
   }
 
   private syncCars(g: Game, dt: number) {
@@ -1375,6 +1387,13 @@ export class Renderer3D {
       if (o && (o.model !== c.model || o.color !== c.color || (o.wreck && !c.dead) || c.dents.length < o.dentN * 3 || (o.bumpers & ~c.bumpers) !== 0 || (o.doorsOff & ~c.doorsOff) !== 0)) { this.disposeCar(o); o = undefined; }
       if (!o) { o = this.makeCar(c); this.carObjs.set(c, o); }
       o.group.position.set(c.x, c.z + (c === g.player && !g.onFoot ? this.rooms.liftY : 0), c.y);
+      // underglow (workshop): a glowing patch on the ground under the car
+      if (c.neon && !c.dead && !isCraft(c.model)) {
+        if (!o.neon) { o.neon = new THREE.Mesh(NEON_GEO, new THREE.MeshBasicMaterial({ map: neonTex(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false })); o.neon.renderOrder = 1; o.group.add(o.neon); }
+        o.neon.scale.set(c.hl * 2.6, 1, c.hw * 3.2); o.neon.position.y = 0.7 - (c.z - g.groundH(c.x, c.y, c.z + 6));
+        (o.neon.material as THREE.MeshBasicMaterial).color.set(c.neon).multiplyScalar(0.9 + Math.sin(t * 3) * 0.1);
+        o.neon.visible = !c.air || c.z - g.groundH(c.x, c.y, c.z + 6) < 30;
+      } else if (o.neon) o.neon.visible = false;
       // terrain tilt
       let tp = 0, tr = 0;
       if (!inCity(c.x, c.y) && !isCraft(c.model)) {
@@ -1982,6 +2001,8 @@ export class Renderer3D {
         if (it && !onRoof(it, fz)) { tgt.x = clamp(tgt.x, it.x0 + 6, it.x1 - 6); tgt.z = clamp(tgt.z, it.y0 + 6, it.y1 - 6); }
         if (it) tgt.y = Math.min(tgt.y, Math.min(interiorCeil(it, tgt.x, tgt.z, fz), interiorCeil(it, fx, fy, fz)) - 5);
         lx = fx + cx * 30; ly = fz + 16; lz = fy + cy * 30; fov = 60; kp = 9;
+        // binoculars: over the shoulder, a narrow view far ahead
+        if (g.binoc) { tgt.set(fx - cx * 8, fz + 24, fy - cy * 8); lx = fx + cx * 900; ly = fz + 24 + this.lookPitch * 500; lz = fy + cy * 900; fov = 12; kp = 12; }
       } else {
         let desired = p.a;
         if (p.vF > 60) desired = p.a + wrapA(Math.atan2(p.vy, p.vx) - p.a) * 0.55;
@@ -2024,8 +2045,25 @@ export class Renderer3D {
     cam.position.x += g.shakeX * 0.5; cam.position.y += g.shakeY * 0.35;
     cam.lookAt(this.camLook);
     cam.rotateZ(g.shakeR);
+    // tipsy after the bar: the picture sways
+    if (g.drunk > 1) { const d = g.drunk / 100; cam.rotateZ(Math.sin(g.t * 0.9) * 0.07 * d); cam.rotateX(Math.sin(g.t * 0.63 + 1) * 0.025 * d); fov += Math.sin(g.t * 0.5) * 6 * d; }
     this.fov += (fov - this.fov) * (1 - Math.exp(-dt * 4));
     if (Math.abs(cam.fov - this.fov) > 0.01) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
+  }
+
+  // flashlight from the electronics shop: on foot, at night or indoors, it shines where you look
+  private flash: THREE.SpotLight | null = null;
+  private syncFlashlight(g: Game) {
+    const on = g.has("flashlight") && g.onFoot && !g.ped.dead && g.state !== "menu" && (this.atm.state.night > 0.35 || !!g.inside);
+    if (!on) { if (this.flash) this.flash.visible = false; return; }
+    if (!this.flash) {
+      this.flash = new THREE.SpotLight(0xfff2d8, 0, 520, 0.38, 0.55, 1.3);
+      this.scene.add(this.flash, this.flash.target);
+    }
+    const pd = g.ped, a = this.camMode === "chase" ? this.camYaw + this.lookYaw : pd.a;
+    this.flash.visible = true; this.flash.intensity = 9000;
+    this.flash.position.set(pd.x + Math.cos(pd.a) * 4, pd.z + 18, pd.y + Math.sin(pd.a) * 4);
+    this.flash.target.position.set(pd.x + Math.cos(a) * 200, pd.z - 10, pd.y + Math.sin(a) * 200);
   }
 
   render(g: Game, dt: number) {
@@ -2058,6 +2096,7 @@ export class Renderer3D {
     this.water.update(g.t, this.atm);
     this.applyTime(g);
     this.updateCamera(g, dt);
+    this.syncFlashlight(g);
     const scale = this.renderer.domElement.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
     this.smoke.mat.uniforms.scale.value = scale;
     this.glowPts.mat.uniforms.scale.value = scale;

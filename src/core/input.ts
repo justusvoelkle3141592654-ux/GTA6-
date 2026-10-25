@@ -1,15 +1,16 @@
 // keyboard bindings (rebindable in the settings, stored in localStorage)
 export type Action =
   | "up" | "down" | "left" | "right" | "handbrake" | "nitro" | "fire" | "enter"
-  | "nextWeapon" | "wheel" | "reload" | "detonate" | "camera" | "zoom" | "radio" | "job" | "phone" | "map" | "pause";
+  | "nextWeapon" | "wheel" | "reload" | "detonate" | "camera" | "zoom" | "radio" | "job" | "phone" | "map" | "pause" | "heal" | "binoc";
 
-export const ACTIONS: Action[] = ["up", "down", "left", "right", "handbrake", "nitro", "fire", "enter", "nextWeapon", "wheel", "reload", "detonate", "camera", "zoom", "radio", "job", "phone", "map", "pause"];
+export const ACTIONS: Action[] = ["up", "down", "left", "right", "handbrake", "nitro", "fire", "enter", "nextWeapon", "wheel", "reload", "detonate", "camera", "zoom", "radio", "job", "phone", "map", "pause", "heal", "binoc"];
 
 export const ACTION_LABEL: Record<Action, string> = {
   up: "Gas / vorwärts", down: "Bremse / rückwärts", left: "Links", right: "Rechts", handbrake: "Handbremse / Drift · Hubschrauber steigen",
   nitro: "Nitro / Sprint · Hubschrauber sinken", fire: "Feuer", enter: "Einsteigen / Aussteigen / Betreten", nextWeapon: "Nächste Waffe",
   wheel: "Waffenrad (halten)", reload: "Nachladen", detonate: "Haftbomben zünden", camera: "Kamera wechseln", zoom: "Kamera nah / weit",
   radio: "Radiosender", job: "Jobs (Menü) / Job beenden", phone: "Handy", map: "Karte", pause: "Pause",
+  heal: "Erste-Hilfe-Set benutzen", binoc: "Fernglas",
 };
 
 // the first key of each list is the one you can rebind; the others stay as alternatives
@@ -17,7 +18,7 @@ export const DEFAULT_KEYS: Record<Action, string[]> = {
   up: ["KeyW", "ArrowUp"], down: ["KeyS", "ArrowDown"], left: ["KeyA", "ArrowLeft"], right: ["KeyD", "ArrowRight"],
   handbrake: ["Space"], nitro: ["ShiftLeft", "ShiftRight"], fire: ["KeyF", "ControlLeft", "ControlRight"], enter: ["KeyE"],
   nextWeapon: ["KeyQ"], wheel: ["Tab"], reload: ["KeyR"], detonate: ["KeyG"], camera: ["KeyC", "KeyV"], zoom: ["KeyX"], radio: ["KeyN"], job: ["KeyJ"], phone: ["KeyT"],
-  map: ["KeyM"], pause: ["KeyP", "Escape"],
+  map: ["KeyM"], pause: ["KeyP", "Escape"], heal: ["KeyH"], binoc: ["KeyZ"],
 };
 
 const KEY = "solarabay.keys.v1";

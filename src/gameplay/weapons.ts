@@ -1,8 +1,8 @@
 import type { Crime } from "../ai/wanted";
 
-export type Weapon = "fist" | "bat" | "pistol" | "smg" | "shotgun" | "grenade" | "rocket" | "bomb";
+export type Weapon = "fist" | "knife" | "bat" | "pistol" | "revolver" | "smg" | "rifle" | "shotgun" | "sniper" | "grenade" | "rocket" | "bomb";
 // order on the number keys and in the weapon wheel
-export const WEAPONS: Weapon[] = ["fist", "bat", "pistol", "smg", "shotgun", "grenade", "rocket", "bomb"];
+export const WEAPONS: Weapon[] = ["fist", "knife", "bat", "pistol", "revolver", "smg", "rifle", "shotgun", "sniper", "grenade", "rocket", "bomb"];
 
 export type WeaponKind = "melee" | "gun" | "rocket" | "throw" | "sticky";
 export interface WeaponDef {
@@ -22,10 +22,14 @@ export interface WeaponDef {
 
 export const WEAPON_DEFS: Record<Weapon, WeaponDef> = {
   fist: { id: "fist", name: "Fäuste", icon: "fist", kind: "melee", dmg: 14, cd: 0.45, clip: 0, reload: 0, speed: 0, pellets: 1, spread: 0, range: 24, price: 0, ammoPack: 0, ammoPrice: 0, maxAmmo: 0, crime: null, noise: 0 },
+  knife: { id: "knife", name: "Messer", icon: "knife", kind: "melee", dmg: 32, cd: 0.32, clip: 0, reload: 0, speed: 0, pellets: 1, spread: 0, range: 22, price: 90, ammoPack: 0, ammoPrice: 0, maxAmmo: 0, crime: null, noise: 0 },
   bat: { id: "bat", name: "Baseballschläger", icon: "bat", kind: "melee", dmg: 45, cd: 0.6, clip: 0, reload: 0, speed: 0, pellets: 1, spread: 0, range: 30, price: 150, ammoPack: 0, ammoPrice: 0, maxAmmo: 0, crime: null, noise: 0 },
   pistol: { id: "pistol", name: "Pistole", icon: "pistol", kind: "gun", dmg: 34, cd: 0.17, clip: 12, reload: 1.1, speed: 1500, pellets: 1, spread: 0.025, range: 0.6, price: 400, ammoPack: 36, ammoPrice: 60, maxAmmo: 240, crime: "shot", noise: 520 },
+  revolver: { id: "revolver", name: "Revolver", icon: "revolver", kind: "gun", dmg: 72, cd: 0.5, clip: 6, reload: 1.8, speed: 1700, pellets: 1, spread: 0.012, range: 0.7, price: 900, ammoPack: 24, ammoPrice: 80, maxAmmo: 120, crime: "shot", noise: 600 },
   smg: { id: "smg", name: "Maschinenpistole", icon: "smg", kind: "gun", dmg: 16, cd: 0.075, clip: 30, reload: 1.6, speed: 1600, pellets: 1, spread: 0.07, range: 0.55, price: 1500, ammoPack: 90, ammoPrice: 150, maxAmmo: 450, crime: "shot", noise: 560 },
+  rifle: { id: "rifle", name: "Sturmgewehr", icon: "rifle", kind: "gun", dmg: 24, cd: 0.105, clip: 30, reload: 1.9, speed: 1900, pellets: 1, spread: 0.035, range: 0.75, price: 3500, ammoPack: 90, ammoPrice: 200, maxAmmo: 420, crime: "shot", noise: 620 },
   shotgun: { id: "shotgun", name: "Schrotflinte", icon: "shotgun", kind: "gun", dmg: 14, cd: 0.8, clip: 6, reload: 2.2, speed: 1300, pellets: 7, spread: 0.16, range: 0.32, price: 1200, ammoPack: 18, ammoPrice: 120, maxAmmo: 90, crime: "shot", noise: 600 },
+  sniper: { id: "sniper", name: "Scharfschützengewehr", icon: "sniper", kind: "gun", dmg: 160, cd: 1.25, clip: 5, reload: 2.4, speed: 4200, pellets: 1, spread: 0.002, range: 1.0, price: 6000, ammoPack: 15, ammoPrice: 250, maxAmmo: 75, crime: "shot", noise: 700 },
   grenade: { id: "grenade", name: "Granate", icon: "grenade", kind: "throw", dmg: 0, cd: 0.7, clip: 0, reload: 0, speed: 330, pellets: 1, spread: 0, range: 0, price: 800, ammoPack: 5, ammoPrice: 300, maxAmmo: 25, crime: null, noise: 0 },
   rocket: { id: "rocket", name: "Raketenwerfer", icon: "rocket", kind: "rocket", dmg: 0, cd: 0.85, clip: 0, reload: 0, speed: 720, pellets: 1, spread: 0, range: 3, price: 5000, ammoPack: 5, ammoPrice: 600, maxAmmo: 30, crime: "rocket", noise: 600 },
   bomb: { id: "bomb", name: "Haftbombe", icon: "bomb", kind: "sticky", dmg: 0, cd: 0.45, clip: 0, reload: 0, speed: 280, pellets: 1, spread: 0, range: 4, price: 2500, ammoPack: 5, ammoPrice: 400, maxAmmo: 30, crime: null, noise: 0 },
@@ -33,7 +37,7 @@ export const WEAPON_DEFS: Record<Weapon, WeaponDef> = {
 
 export interface InventorySave { owned: Weapon[]; ammo: Partial<Record<Weapon, number>>; clip: Partial<Record<Weapon, number>>; current: Weapon; }
 
-const zero = (): Record<Weapon, number> => ({ fist: 0, bat: 0, pistol: 0, smg: 0, shotgun: 0, grenade: 0, rocket: 0, bomb: 0 });
+const zero = (): Record<Weapon, number> => ({ fist: 0, knife: 0, bat: 0, pistol: 0, revolver: 0, smg: 0, rifle: 0, shotgun: 0, sniper: 0, grenade: 0, rocket: 0, bomb: 0 });
 
 // weapons the player carries; ammo = reserve outside the magazine
 export class Inventory {

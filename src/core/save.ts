@@ -13,7 +13,7 @@ const HAIRS = ["short", "buzz", "curls", "long", "ponytail", "bald"] as const;
 const WEATHERS = ["sun", "clouds", "rain", "fog"] as const;
 export const AUTOSAVE_EVERY = 60; // seconds
 
-export interface SaveCar { model: CarModel; color: string; hp: number; maxHp: number; mass: number; x: number; y: number; a: number; tune: Tune; }
+export interface SaveCar { model: CarModel; color: string; hp: number; maxHp: number; mass: number; x: number; y: number; a: number; tune: Tune; neon?: string; }
 export interface SaveStats { playTime: number; carsStolen: number; pedsHit: number; deaths: number; arrests: number; maxStars: number; earned: number; jobsDone: number; }
 export interface Progress {
   missions: string[];               // finished story missions
@@ -113,7 +113,7 @@ function carOf(c: unknown, withPos: boolean): (OwnedCar & { x: number; y: number
   if (!isObj(c) || !oneOf(c.model, CAR_MODELS) || !isColor(c.color)) return null;
   if (!num(c.hp) || !num(c.maxHp) || !num(c.mass)) return null;
   if (withPos && (!num(c.x) || !num(c.y) || !num(c.a))) return null;
-  return { model: c.model, color: c.color, hp: c.hp, maxHp: c.maxHp, mass: c.mass, tune: tuneOf(c.tune), x: num(c.x) ? c.x : 0, y: num(c.y) ? c.y : 0, a: num(c.a) ? c.a : 0 };
+  return { model: c.model, color: c.color, hp: c.hp, maxHp: c.maxHp, mass: c.mass, tune: tuneOf(c.tune), neon: isColor(c.neon) ? c.neon : "", x: num(c.x) ? c.x : 0, y: num(c.y) ? c.y : 0, a: num(c.a) ? c.a : 0 };
 }
 
 function numList(v: unknown): number[] { return Array.isArray(v) ? v.filter(num) : []; }
@@ -171,7 +171,7 @@ function validate(d: unknown): SaveData | null {
     outfit: Math.round(clampN(d.outfit, 0, 99, 0)), garage: garage.slice(0, 12),
     radio: Math.round(clampN(d.radio, -1, STATIONS.length - 1, -1)),
     stats, progress,
-    style: isObj(d.style) ? { hair: oneOf(d.style.hair, HAIRS) ? d.style.hair : "short", beard: Math.round(clampN(d.style.beard, 0, 2, 1)), tattoo: Math.round(clampN(d.style.tattoo, 0, 3, 0)) } : { hair: "short", beard: 1, tattoo: 0 },
+    style: isObj(d.style) ? { hair: oneOf(d.style.hair, HAIRS) ? d.style.hair : "short", beard: Math.round(clampN(d.style.beard, 0, 2, 1)), tattoo: Math.round(clampN(d.style.tattoo, 0, 6, 0)) } : { hair: "short", beard: 1, tattoo: 0 },
     clock: clampN(d.clock, 0, 23.99, 10), weather: oneOf(d.weather, WEATHERS) ? d.weather : "sun",
     markers: Array.isArray(d.markers) ? d.markers.filter((m): m is { x: number; y: number; name: string } => isObj(m) && num(m.x) && num(m.y) && typeof m.name === "string").slice(0, 40).map((m) => ({ x: m.x, y: m.y, name: m.name.slice(0, 40) })) : [],
     crafts: Array.isArray(d.crafts) ? d.crafts.filter((c): c is string => typeof c === "string" && (CAR_MODELS as readonly string[]).includes(c)).slice(0, 30) : [],

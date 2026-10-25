@@ -23,5 +23,5 @@ export const tuneDamage = (t: Tune) => 1 - t.armor * 0.12;
 // paint colours offered in the paint shop (a fixed list keeps the car mesh cache small)
 export const PAINTS = ["#ff2d95", "#2bf0ff", "#ff8a1f", "#ffd23f", "#3dff8b", "#9d4dff", "#f4f4f6", "#15161b", "#c0392b", "#1d4e89", "#3c6e47", "#9aa3ad"];
 
-export interface OwnedCar { model: CarModel; color: string; hp: number; maxHp: number; mass: number; tune: Tune; }
+export interface OwnedCar { model: CarModel; color: string; hp: number; maxHp: number; mass: number; tune: Tune; neon?: string; }
 export const GARAGE_SLOTS = 4;

@@ -15,7 +15,7 @@ import { Traffic, PARKED_LIMIT } from "../ai/traffic";
 import { DISTRICTS, districtAt, districtLabels, type DistrictId } from "../world/districts";
 import { Radio } from "../audio/radio";
 import { GARAGE_SLOTS, tuneAcc, tuneDamage, tuneGrip, tuneSpeed, type OwnedCar, type TunePart } from "../vehicles/garage";
-import { DEFAULT_STYLE, type ShopAction, type Style } from "../gameplay/economy";
+import { DEFAULT_STYLE, PHONE_CASES, type ShopAction, type Style } from "../gameplay/economy";
 import { PLACE_RADIUS, drawPlaceIcon } from "../world/places";
 import { Bindings, type Action } from "./input";
 import { Gamepads } from "./gamepad";
@@ -54,6 +54,9 @@ export interface ShopView {
   robWait: number; // seconds until the shop can be robbed again
   style: Style; energy: number;
   dealer: { name: string; price: number }[];
+  items: string[]; kits: number; vit: number; drunk: number; nitro: number; neon: string;
+  crafts: { model: CarModel; name: string; price: number; owned: boolean }[];
+  carNear: boolean; // your car stands at the shop (gas station)
 }
 export type { Mode } from "./modes";
 export { Car, CARS, LEGACY_CAR_IDS } from "../vehicles/vehicles";
@@ -230,7 +233,54 @@ export class Game {
   robbery: { it: Interior; t: number; paid: boolean } | null = null;
   garage: OwnedCar[] = [];
   crafts: CarModel[] = [];   // boats and aircraft bought at the dealers (wait at the jetty / the heliport)
-  items: string[] = [];      // gadgets bought in the shops
+  items: string[] = [];      // gadgets bought in the shops (and "kit" / "vit" per first aid kit / vitamin pack)
+  drunk = 0;                 // 0..100 after drinks at the bar: the picture sways, the steering wobbles; wears off
+  get kits() { let n = 0; for (const i of this.items) if (i === "kit") n++; return n; }
+  get vit() { let n = 0; for (const i of this.items) if (i === "vit") n++; return n; }
+  has(item: string) { return this.items.includes(item); }
+  // colour of the phone (phone cases from the electronics shop)
+  phoneColor() { const a = this.items.find((i) => i.startsWith("active:")); return PHONE_CASES.find((c) => "active:" + c.id === a)?.color ?? "#16181c"; }
+  // vitamins: more health for good
+  applyPerks() { const mh = 100 + 10 * this.vit; if (this.ped.maxHp !== mh) { this.ped.maxHp = mh; } }
+  // binoculars (Z): a narrow view while you stand on foot
+  binoc = false;
+  toggleBinoc() {
+    if (!this.has("binoculars")) { this.setHint("Ein Fernglas gibt's bei Bucht-Elektro im Bay Plaza", 1.6); return; }
+    if (!this.onFoot) { this.binoc = false; return; }
+    this.binoc = !this.binoc; sfx.beep();
+  }
+  // the gadgets and the bar: called every step
+  private updatePerks(dt: number) {
+    this.applyPerks();
+    if (this.drunk > 0) this.drunk = Math.max(0, this.drunk - dt * 0.55);
+    if (this.binoc && (!this.onFoot || Math.hypot(this.ped.vx, this.ped.vy) > 40)) this.binoc = false;
+    // drunk driving in front of the police: one star
+    if (this.drunk > 50 && !this.onFoot && this.player.speed > 180 && this.wanted.stars === 0 && this.t - this.drunkCopT > 30) {
+      for (const c of this.cars) if (c.kind === "cop" && !c.dead && Math.hypot(c.x - this.player.x, c.y - this.player.y) < 260) {
+        this.drunkCopT = this.t; this.wanted.heat = Math.max(this.wanted.heat, 25); this.wanted.lostT = 0;
+        this.setHint("Betrunken am Steuer – die Polizei hat dich gesehen", 2.2); break;
+      }
+    }
+    // police scanner: a radio message when they start looking for you
+    if (this.has("scanner")) {
+      if (this.wanted.stars > 0 && !this.scannerSaid) { this.scannerSaid = true; let n = 0; for (const c of this.cars) if (c.kind === "cop" && !c.dead && Math.hypot(c.x - this.fx, c.y - this.fy) < 1500) n++; this.setHint(`Polizeifunk: Fahndung läuft – ${n} Streife${n === 1 ? "" : "n"} in der Nähe`, 2.6); }
+      if (this.wanted.stars === 0) this.scannerSaid = false;
+      // you hear where they search: they lose you faster
+      if (this.wanted.searching) this.wanted.lostT += dt * 0.4;
+    }
+  }
+  private drunkCopT = -1e9; private scannerSaid = false;
+  // a first aid kit (H)
+  useKit() {
+    const pd = this.ped;
+    if (!this.onFoot && !this.kits) return;
+    if (!this.kits) { this.setHint("Kein Erste-Hilfe-Set – gibt es in der Apotheke", 1.8); return; }
+    if (pd.hp >= pd.maxHp) { this.setHint("Du bist nicht verletzt", 1.2); return; }
+    this.items.splice(this.items.indexOf("kit"), 1);
+    pd.hp = Math.min(pd.maxHp, pd.hp + 60);
+    sfx.checkpoint();
+    this.setHint(`Erste Hilfe: +60 (noch ${this.kits})`, 1.6);
+  }
   district: DistrictId = "downtown"; districtT = 0; // name is shown big for a moment after entering
   nearPlace: Place | null = null;
   modal: ModalInfo | null = null;
@@ -340,6 +390,8 @@ export class Game {
     if (b.is("map", k) && this.state === "playing" && this.rules.city) { this.pause(); this.cb.onMapKey?.(); }
     if (b.is("camera", k) && (this.state === "playing" || this.state === "paused")) this.cycleCamera();
     if (b.is("zoom", k) && (this.state === "playing" || this.state === "paused")) this.toggleZoom();
+    if (b.is("heal", k) && this.state === "playing") this.useKit();
+    if (b.is("binoc", k) && this.state === "playing") this.toggleBinoc();
     if (k === "Enter" || k === "KeyR") {
       if (this.state === "paused" && k === "KeyR" && this.rules.respawn) { /* no quick restart in the open world */ }
       else if (this.state === "over" || this.state === "menu" || (this.state === "paused" && k === "KeyR")) { if (this.cb.onStartKey) this.cb.onStartKey(); else this.start(); }
@@ -482,7 +534,7 @@ export class Game {
     if (sv.car) {
       const c = sv.car;
       p.model = c.model; p.color = c.color; p.maxHp = c.maxHp; p.hp = Math.min(c.maxHp, Math.max(1, c.hp)); p.mass = c.mass;
-      p.tune = { ...c.tune };
+      p.tune = { ...c.tune }; p.neon = c.neon ?? "";
       p.x = c.x; p.y = c.y; p.a = c.a;
       if (sv.legacy) { const q = this.world.nearestSafeRoad(c.x, c.y); p.x = q.x; p.y = q.y; p.a = q.a; }
     } else if (sv.carStored) {
@@ -525,7 +577,7 @@ export class Game {
     const d: SaveData = {
       v: SAVE_VERSION, map: 2, savedAt: Date.now(), difficulty: this.config.difficulty,
       onFoot: this.onFoot, ped: { x: pd.x, y: pd.y, a: pd.a, hp: pd.hp, armor: pd.armor },
-      car: p.dead || this.playerCarStored ? null : { model: p.model, color: p.color, hp: p.hp, maxHp: p.maxHp, mass: p.mass, x: p.x, y: p.y, a: p.a, tune: { ...p.tune } },
+      car: p.dead || this.playerCarStored ? null : { model: p.model, color: p.color, hp: p.hp, maxHp: p.maxHp, mass: p.mass, x: p.x, y: p.y, a: p.a, tune: { ...p.tune }, neon: p.neon },
       cash: this.cash, bank: this.bank, carStored: this.playerCarStored, inventory: this.inv.save(), outfit: this.outfit,
       garage: this.garage.map((c) => ({ ...c, tune: { ...c.tune } })), radio: this.radio.station,
       stats: { ...this.stats }, progress: JSON.parse(JSON.stringify(this.progress)) as Progress,
@@ -1402,7 +1454,7 @@ export class Game {
   shopAction(a: ShopAction): string { return this.shops.act(a); }
 
   cycleRadio() {
-    if (this.onFoot) { this.setHint("Radio gibt's nur im Auto", 1.2); return; }
+    if (this.onFoot && !this.has("headphones")) { this.setHint("Radio zu Fuß: Kopfhörer gibt's bei Bucht-Elektro", 1.6); return; }
     const st = this.radio.cycle();
     sfx.beep();
     this.setHint(st ? `Radio: ${st.name} · ${st.genre}` : "Radio aus", 2);
@@ -1438,6 +1490,9 @@ export class Game {
   }
   private startEnter(c: Car) {
     const occupied = !c.dead && ((c.kind === "civ" && c.driver && !c.parked) || (c.kind === "cop" && !c.parked && !c.roadblock));
+    // the laptop's key app opens a locked car quietly (no broken glass, no alarm)
+    const quiet = c.locked && !c.owned && this.has("laptop");
+    if (quiet) { c.locked = false; this.setHint("Laptop: Schloss geknackt", 1.4); sfx.beep(); }
     const kind: ActKind = occupied ? "jack" : c.locked && !c.owned ? (WEAPON_DEFS[this.weapon].kind === "gun" ? "butt" : "smash") : "open";
     this.approach = { car: c, kind };
   }
@@ -1669,7 +1724,7 @@ export class Game {
     } else if (this.state === "over" || this.state === "modal") this.updateFx(dt);
     this.r3d.render(this, dt);
     this.renderOverlay();
-    this.radio.update(sfx.ctx, sfx.radioOut, (this.state === "playing" || this.state === "modal") && !this.onFoot && !this.ending);
+    this.radio.update(sfx.ctx, sfx.radioOut, (this.state === "playing" || this.state === "modal") && (!this.onFoot || this.has("headphones")) && !this.ending);
 
     this.hudT -= dt;
     if (this.hudT <= 0 && this.state === "playing") {
@@ -1869,6 +1924,8 @@ export class Game {
       else if (this.config.camera !== "top") { p.steer = clamp(jx * 1.5, -1, 1); p.throttle = jy < -0.25 ? 1 : jy > 0.55 ? -1 : 0.85; }
       else { const diff = wrap(Math.atan2(jy, jx) - p.a); p.steer = clamp(diff * 2.6, -1, 1); p.throttle = m * (Math.abs(diff) > 1.9 ? 0.55 : 1); }
     } else { p.throttle = 0; p.steer = 0; }
+    // tipsy: the steering wobbles on its own
+    if (this.drunk > 15) p.steer = clamp(p.steer + Math.sin(this.t * 1.7) * Math.sin(this.t * 0.63 + 1) * (this.drunk / 100) * 0.55, -1, 1);
     if (isAircraft(p.model) || (this.flyMode && !isCraft(p.model))) {
       // helicopter, jet and fly mode: Space / DRIFT climbs, Shift / NITRO descends (no nitro, no handbrake)
       this.lift = (p.handbrake ? 1 : 0) - (wantNitro ? 1 : 0);
@@ -2144,6 +2201,7 @@ export class Game {
 
     if (playing && !this.ending) {
       this.updateInside(dt);
+      this.updatePerks(dt);
       this.stepLift(dt);
       this.updateJail(dt);
       this.time += dt;

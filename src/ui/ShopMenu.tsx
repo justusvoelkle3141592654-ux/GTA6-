@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Game, ShopView } from "../core/engine";
 import type { Place } from "../world/places";
-import { FOOD, OUTFITS, ARMOR_PRICE, PAINT_PRICE, MARKET, HAIR_STYLES, BEARDS, TATTOOS, type ShopAction } from "../gameplay/economy";
+import { FOOD, OUTFITS, ARMOR_PRICE, PAINT_PRICE, MARKET, HAIR_STYLES, BEARDS, TATTOOS, GAS_ITEMS, SCRATCH_PRICE, NITRO_FILL_PRICE, WASH_PRICE, DRINKS, PHARMA, GADGETS, PHONE_CASES, NEONS, NEON_PRICE, MAX_KITS, type ShopAction } from "../gameplay/economy";
 import { WEAPON_DEFS } from "../gameplay/weapons";
 import { MAX_TUNE, PAINTS, TUNE_DEFS, TUNE_PARTS } from "../vehicles/garage";
 import { fmt } from "./ui";
@@ -12,7 +12,9 @@ const TITLE: Record<Place["kind"], string> = {
   hospital: "Klinik", police: "Wache", gunshop: "Waffenladen", workshop: "Werkstatt & Lackiererei", clothes: "Kleidung",
   food: "Imbiss", safehouse: "Safehouse", contact: "", dock: "Bootssteg", heliport: "Heliport", park: "Park", job: "Job",
   market: "Supermarkt", cardealer: "Autohaus", barber: "Friseur & Tattoo", mall: "Foodcourt", club: "Nachtclub", home: "Wohnung", prison: "Haftanstalt",
+  gas: "Tankstelle & 24/7-Shop", bar: "Bar", pharmacy: "Apotheke", boats: "Bootshändler", planes: "Flugzeughändler", electronics: "Elektronik & Handys",
 };
+const Head = ({ children }: { children: React.ReactNode }) => <div className="pt-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/50">{children}</div>;
 
 function Row({ children }: { children: React.ReactNode }) {
   return <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2">{children}</div>;
@@ -107,7 +109,7 @@ export default function ShopMenu({ game, place, onClose }: { game: Game; place: 
 
           {(place.kind === "food" || place.kind === "mall") && <>
             <div className="text-white/60">Gesundheit {Math.round(view.hp)}/{view.maxHp}</div>
-            {FOOD.map((f, i) => (
+            {FOOD.map((f, i) => f.at.includes(place.id) && (
               <Row key={f.name}><div><b>{f.name}</b> <span className="text-white/50">+{f.heal} Gesundheit</span></div><Buy label="Essen" price={f.price} onClick={() => act({ t: "food", i })} disabled={view.cash < f.price || view.hp >= view.maxHp} /></Row>
             ))}
             {robBtn}
@@ -132,6 +134,12 @@ export default function ShopMenu({ game, place, onClose }: { game: Game; place: 
                 {PAINTS.map((c) => <button key={c} onClick={() => act({ t: "paint", color: c })} disabled={c === view.car!.color || view.cash < PAINT_PRICE} className={"h-9 rounded-lg ring-2 transition active:scale-90 disabled:opacity-60 " + (c === view.car!.color ? "ring-white" : "ring-white/10")} style={{ background: c }} aria-label={c} />)}
               </div>
             </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+              <div className="mb-2 flex justify-between"><b>Unterbodenbeleuchtung</b><span className="text-white/50">${NEON_PRICE}</span></div>
+              <div className="grid grid-cols-8 gap-2">
+                {NEONS.map((c) => <button key={c || "none"} onClick={() => act({ t: "neon", color: c })} disabled={c === view.neon || (!!c && view.cash < NEON_PRICE)} className={"h-9 rounded-lg ring-2 transition active:scale-90 disabled:opacity-60 " + (c === view.neon ? "ring-white" : "ring-white/10")} style={{ background: c || "#2a2d33", boxShadow: c ? `0 0 12px ${c}` : undefined }} aria-label={c || "ohne"}>{!c && <span className="text-[10px] text-white/70">aus</span>}</button>)}
+              </div>
+            </div>
             {TUNE_PARTS.map((p) => {
               const lvl = view.car!.tune[p], d = TUNE_DEFS[p], price = lvl < MAX_TUNE ? d.prices[lvl] : 0;
               return (
@@ -142,6 +150,59 @@ export default function ShopMenu({ game, place, onClose }: { game: Game; place: 
               );
             })}
           </>)}
+
+          {place.kind === "gas" && <>
+            <div className="text-white/60">Gesundheit {Math.round(view.hp)}/{view.maxHp}</div>
+            {GAS_ITEMS.map((m, i) => (
+              <Row key={m.name}><div><b>{m.name}</b> <span className="text-white/50">+{m.heal}{m.energy ? ` · ${m.energy} s schneller` : ""}</span></div><Buy label="Kaufen" price={m.price} onClick={() => act({ t: "gas", i })} disabled={view.cash < m.price} /></Row>
+            ))}
+            <Row><div><b>Rubbellos</b> <span className="text-white/50">bis $500</span></div><Buy label="Rubbeln" price={SCRATCH_PRICE} onClick={() => act({ t: "scratch" })} disabled={view.cash < SCRATCH_PRICE} /></Row>
+            <Head>Dein Auto</Head>
+            <Row><div><b>Nitro auffüllen</b><div className="text-[11px] text-white/50">{view.carNear ? `Nitro ${Math.round(view.nitro * 100)} %` : "Dein Auto muss an der Tankstelle stehen"}</div></div><Buy label="Auffüllen" price={NITRO_FILL_PRICE} onClick={() => act({ t: "nitroFill" })} disabled={!view.carNear || view.cash < NITRO_FILL_PRICE} /></Row>
+            <Row><div><b>Waschanlage</b><div className="text-[11px] text-white/50">Dellen und Glas wie neu (Motorschaden: Werkstatt)</div></div><Buy label="Waschen" price={WASH_PRICE} onClick={() => act({ t: "wash" })} disabled={!view.carNear || view.cash < WASH_PRICE} /></Row>
+            <div className="text-[11px] text-white/45">Echtes Tanken gibt es nicht – Autos fahren ohne Sprit. An der Zapfsäule gibt es Nitro.</div>
+            {robBtn}
+          </>}
+
+          {place.kind === "bar" && <>
+            <div className="text-white/60">Gesundheit {Math.round(view.hp)}/{view.maxHp}{view.drunk > 0 && <span className="ml-2 text-amber-300">Promille-Gefühl {view.drunk} %</span>}</div>
+            {DRINKS.map((d, i) => (
+              <Row key={d.name}><div><b>{d.name}</b> <span className="text-white/50">+{d.heal}{d.booze ? " · Alkohol" : ""}</span></div><Buy label="Bestellen" price={d.price} onClick={() => act({ t: "drink", i })} disabled={view.cash < d.price} /></Row>
+            ))}
+            <div className="text-[11px] text-white/45">Alkohol lässt das Bild schwanken und die Lenkung wackeln. Nicht betrunken fahren – das gibt Ärger.</div>
+            {robBtn}
+          </>}
+
+          {place.kind === "pharmacy" && <>
+            <div className="text-white/60">Gesundheit {Math.round(view.hp)}/{view.maxHp} · Erste-Hilfe-Sets {view.kits}/{MAX_KITS} · Vitamine {view.vit}/5</div>
+            {PHARMA.map((m, i) => (
+              <Row key={m.name}><div><b>{m.name}</b><div className="text-[11px] text-white/50">{m.desc}</div></div><Buy label="Kaufen" price={m.price} onClick={() => act({ t: "pharma", i })} disabled={view.cash < m.price} /></Row>
+            ))}
+            {robBtn}
+          </>}
+
+          {place.kind === "electronics" && <>
+            <Head>Gadgets</Head>
+            {GADGETS.map((d) => (
+              <Row key={d.id}><div><b>{d.name}</b><div className="text-[11px] text-white/50">{d.desc}</div></div>{view.items.includes(d.id) ? <span className="text-xs text-green-300">im Besitz</span> : <Buy label="Kaufen" price={d.price} onClick={() => act({ t: "gadget", id: d.id })} disabled={view.cash < d.price} />}</Row>
+            ))}
+            <Head>Handys</Head>
+            {PHONE_CASES.map((d) => {
+              const owned = d.price === 0 || view.items.includes(d.id), active = view.items.includes("active:" + d.id) || (d.price === 0 && !view.items.some((x) => x.startsWith("active:")));
+              return (
+                <Row key={d.id}><div className="flex items-center gap-2"><span className="h-5 w-3 rounded-sm ring-1 ring-white/30" style={{ background: d.color }} /><b>{d.name}</b></div>
+                  {active ? <span className="text-xs text-green-300">benutzt du</span> : <Buy label={owned ? "Benutzen" : "Kaufen"} price={owned ? 0 : d.price} onClick={() => act({ t: "case", id: d.id })} disabled={!owned && view.cash < d.price} />}</Row>
+              );
+            })}
+          </>}
+
+          {(place.kind === "boats" || place.kind === "planes") && <>
+            <div className="text-white/60">{place.kind === "boats" ? "Gekaufte Boote liegen am Bootssteg bereit." : "Gekaufte Flugzeuge und Hubschrauber stehen am Heliport bereit."} Abholen geht hier oder im Handy (App Fahrzeug).</div>
+            {view.crafts.map((c) => (
+              <Row key={c.model}><div><b>{c.name}</b></div>
+                {c.owned ? <Buy label="Abholen" onClick={() => act({ t: "fetchCraft", model: c.model })} /> : <Buy label="Kaufen" price={c.price} onClick={() => act({ t: "buyCraft", model: c.model })} disabled={view.cash < c.price} />}</Row>
+            ))}
+          </>}
 
           {place.kind === "safehouse" && <>
             <Row><div><b>Ausruhen & speichern</b><div className="text-[11px] text-white/50">Volle Gesundheit, nur ohne Sterne</div></div><Buy label="Speichern" onClick={() => act({ t: "save" })} /></Row>
