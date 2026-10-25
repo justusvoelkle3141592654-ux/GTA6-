@@ -8,7 +8,7 @@ import { PedSystem, PED_LIMIT, isPolice, type Civilian, type Team } from "../ai/
 import { Car, CARS, VEH_SCALE, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, isJet, isAircraft, isTwoWheel, hitCar, copyBody, repairBody, type CarDef, type FactionId } from "../vehicles/vehicles";
 import { Inventory, WEAPONS, WEAPON_DEFS, type Weapon } from "../gameplay/weapons";
 import { SHAPES, hasRig } from "../vehicles/carmodel";
-import { buildInteriors, interiorAt, interiorFloor, interiorCeil, type Elevator, type Home, type Interior, type Seat } from "../world/interiors";
+import { buildInteriors, interiorAt, interiorFloor, interiorCeil, inRoofHole, type Elevator, type Home, type Interior, type Seat } from "../world/interiors";
 import type { ActKind } from "../render/people3d";
 import { AUTOSAVE_EVERY, SAVE_VERSION, emptyProgress, emptyStats, writeSave, type Progress, type SaveData, type SaveResult, type SaveStats } from "./save";
 import { Traffic, PARKED_LIMIT } from "../ai/traffic";
@@ -1316,7 +1316,7 @@ export class Game {
     if (this.onFoot && this.inside) {
       const it = this.inside, pd = this.ped;
       if (this.seat) { this.seat = null; return true; }
-      const s = it.seats.find((q) => Math.hypot(q.x - pd.x, q.y - pd.y) < 14);
+      const s = it.seats.find((q) => Math.hypot(q.x - pd.x, q.y - pd.y) < 14 && Math.abs((q.z ?? 0) - pd.z) < 12);
       if (s) { this.seat = s; pd.x = s.x; pd.y = s.y; pd.a = s.a; pd.vx = pd.vy = 0; return true; }
       const home = this.homeAt();
       if (home) { this.useHome(home); return true; }
@@ -1368,7 +1368,7 @@ export class Game {
   private homeAt(): Home | null {
     const it = this.inside, pd = this.ped;
     if (!it?.homes || !this.onFoot) return null;
-    return it.homes.find((h) => Math.hypot(h.bed.x - pd.x, h.bed.y - pd.y) < 20) ?? null;
+    return it.homes.find((h) => Math.hypot(h.bed.x - pd.x, h.bed.y - pd.y) < 20 && Math.abs((h.bed.z ?? 0) - pd.z) < 12) ?? null;
   }
   // buy it, or sleep in it (until the morning, full health, then the game is saved)
   private useHome(h: Home) {
@@ -1716,7 +1716,7 @@ export class Game {
     if (this.onFoot && this.inside) {
       const it = this.inside, pd = this.ped;
       if (this.seat) return "Aufstehen";
-      if (it.seats.some((q) => Math.hypot(q.x - pd.x, q.y - pd.y) < 14)) return "Hinsetzen";
+      if (it.seats.some((q) => Math.hypot(q.x - pd.x, q.y - pd.y) < 14 && Math.abs((q.z ?? 0) - pd.z) < 12)) return "Hinsetzen";
       if (it.range && !this.range && Math.hypot(it.range.stand.x - pd.x, it.range.stand.y - pd.y) < 20) return "Zielübung starten";
       const home = this.homeAt();
       if (home) return this.ownsHome(home.id) ? "Schlafen & speichern" : `${home.name} kaufen – $${home.price.toLocaleString("de-DE")}`;
@@ -1732,7 +1732,9 @@ export class Game {
     this.energyT = Math.max(0, this.energyT - dt);
     const x = this.onFoot ? pd.x : this.player.x, y = this.onFoot ? pd.y : this.player.y;
     const z = this.onFoot ? pd.z : this.player.z;
-    const it = z < 110 ? interiorAt(this.interiors, x, y) : null; // flying over a shop is not being inside
+    // flying over a shop is not being inside (the tower's roof terrace belongs to the tower)
+    const at = interiorAt(this.interiors, x, y);
+    const it = at && (z < at.H - 4 || (at.kind === "tower" && z < at.H + 60)) ? at : null;
     if (it !== this.inside) {
       this.inside = it; this.insideT = 0; this.copsIn = 0; this.copT = 3;
       if (it && it.kind !== "safehouse" && !it.prison && this.state === "playing") this.setHint(`„Willkommen bei ${it.name}!“`, 2);
@@ -1919,6 +1921,8 @@ export class Game {
       if (inNow !== inNext && (el.z !== el.to || Math.abs(el.z - pd.z) > 3 || el.open < 0.8)) return true;
     }
     if (!w.isSolid(x, y, 7, pd.z)) return false;
+    // already standing too close to a wall (pushed there): you may slide along it, only not further in
+    if (w.isSolid(pd.x, pd.y, 7, pd.z) && !w.isSolid(x, y, 5.5, pd.z)) return false;
     return !(this.ped.z > 30 && w.roofAt(x, y) <= this.ped.z + 4);
   }
   // ---------- the lift in the mall ----------
@@ -1935,7 +1939,9 @@ export class Game {
       if (el.z !== el.to) {
         el.open = Math.max(0, el.open - dt * 3);
         if (el.open > 0) continue;
-        const was = el.z, d = el.to - el.z, step = Math.sign(d) * Math.min(Math.abs(d), 30 * dt);
+        // a tall house has a faster lift (about 4 s from the bottom to the top)
+        const speed = Math.max(30, (el.floors[el.floors.length - 1] - el.floors[0]) / 4);
+        const was = el.z, d = el.to - el.z, step = Math.sign(d) * Math.min(Math.abs(d), speed * dt);
         el.z += step;
         const pd = this.ped;
         if (this.onFoot && this.inLift(el, pd.x, pd.y) && Math.abs(pd.z - was) < 4) { pd.z = el.z; pd.vz = 0; pd.air = false; pd.fallFrom = pd.z; }
@@ -1950,7 +1956,7 @@ export class Game {
     const fl = el.floors.findIndex((z) => Math.abs(z - pd.z) < 6);
     if (this.inLift(el, pd.x, pd.y)) {
       if (el.z !== el.to) return true;
-      this.openModal({ kind: "lift", floors: el.floors.map((_, i) => i === 0 ? "Erdgeschoss" : `${i}. Obergeschoss`), at: fl });
+      this.openModal({ kind: "lift", floors: el.names ?? el.floors.map((_, i) => i === 0 ? "Erdgeschoss" : `${i}. Obergeschoss`), at: fl });
       return true;
     }
     if (fl >= 0 && pd.x > el.x0 - 6 && pd.x < el.x1 + 6 && pd.y > el.y1 && pd.y < el.y1 + 22) {
@@ -2543,7 +2549,7 @@ export class Game {
     const roof = w.roofAt(x, y);
     if (roof > g && z >= roof - 25) g = roof;
     // the roof over a walkable room: whatever comes down from above lands on it
-    if (z > 30) { const it = interiorAt(this.interiors, x, y); if (it && z >= it.H - 6) g = Math.max(g, it.H + 2); }
+    if (z > 30) { const it = interiorAt(this.interiors, x, y); if (it && z >= it.H - 6 && !inRoofHole(it, x, y)) g = Math.max(g, it.H + 2); }
     return g;
   }
   // inside a room the ceiling stops you (fly mode): highest height for something of height h, Infinity elsewhere

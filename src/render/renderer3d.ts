@@ -24,7 +24,7 @@ const inStuntPark = (x: number, y: number) => (x > STUNT_PARK.x0 - 60 && x < STU
 import { isCraft, isBoat, isHeli, isJet, isAircraft, isTwoWheel, VEH_SCALE } from "../vehicles/vehicles";
 import { CarRig, carMaterials, hasRig, topAt, type CarMats } from "../vehicles/carmodel";
 import { JETTY, HELI_SPOT, WALKABLE, type Place } from "../world/places";
-import { interiorCeil, type Interior } from "../world/interiors";
+import { interiorCeil, onRoof, type Interior } from "../world/interiors";
 import { CrowdRenderer } from "./crowd3d";
 import { PlayerFigure, CrowdFigures } from "./people3d";
 import { InteriorsRenderer } from "./interiors3d";
@@ -1979,7 +1979,8 @@ export class Renderer3D {
         if (!it) for (let s = 0.15; s <= 1.0001; s += 0.1) if (this.world.isSolid(fx - cx * chk * s, fy - cy * chk * s, 6)) { dist = Math.max(24, chk * s - 8); break; }
         tgt.set(fx - cx * dist * Math.cos(this.lookPitch * 0.6), fz + (it ? 32 : near ? 30 : 54) + this.lookPitch * (near ? 40 : 60), fy - cy * dist * Math.cos(this.lookPitch * 0.6));
         // inside a room the camera stays in it, under the ceiling (the walls between it and you fade out)
-        if (it) { tgt.x = clamp(tgt.x, it.x0 + 6, it.x1 - 6); tgt.z = clamp(tgt.z, it.y0 + 6, it.y1 - 6); tgt.y = Math.min(tgt.y, Math.min(interiorCeil(it, tgt.x, tgt.z, fz), interiorCeil(it, fx, fy, fz)) - 5); }
+        if (it && !onRoof(it, fz)) { tgt.x = clamp(tgt.x, it.x0 + 6, it.x1 - 6); tgt.z = clamp(tgt.z, it.y0 + 6, it.y1 - 6); }
+        if (it) tgt.y = Math.min(tgt.y, Math.min(interiorCeil(it, tgt.x, tgt.z, fz), interiorCeil(it, fx, fy, fz)) - 5);
         lx = fx + cx * 30; ly = fz + 16; lz = fy + cy * 30; fov = 60; kp = 9;
       } else {
         let desired = p.a;

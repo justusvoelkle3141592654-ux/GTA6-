@@ -7,7 +7,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { Reflector } from "three/examples/jsm/objects/Reflector.js";
 import { box, cyl, C, canvasTex, withColor } from "./meshutil";
 import { HumanRig, lookFromSeed } from "../characters/human";
-import type { Guest, Interior, Prop } from "../world/interiors";
+import { interiorCeil, onRoof, type Guest, type Interior, type Prop } from "../world/interiors";
 import type { Building } from "../world/world";
 import { furniture, floorTex, wallTex, type Parts } from "./furniture";
 import type { Game } from "../core/engine";
@@ -15,7 +15,7 @@ import type { Game } from "../core/engine";
 const FLOOR_Y = 2.6;
 const NEAR = 300; // furniture is drawn within this distance of the room (or of the prison yard)
 
-interface Person { rig: HumanRig; anim: string; clerk?: boolean }
+interface Person { rig: HumanRig; anim: string; clerk?: boolean; z: number }
 interface Level { z: number; group: THREE.Group }
 interface Room {
   it: Interior; group: THREE.Group; inner: THREE.Group; roof: THREE.Mesh; ceiling: THREE.Mesh; walls: { m: THREE.Mesh; mat: THREE.MeshStandardMaterial; b: Building }[]; tower: THREE.Mesh | null;
@@ -102,34 +102,32 @@ export class InteriorsRenderer {
     const walls: Room["walls"] = [];
     for (const b of it.walls) {
       if (b.low) continue;
-      const mat = new THREE.MeshStandardMaterial({ map: wtex, roughness: 0.85, transparent: true, opacity: 1 });
-      const m = new THREE.Mesh(this.wallGeo(b, 0, it.H), mat);
+      // a wall of one storey (tower) is only as high as the storey, with its own texture
+      const part = b.zb !== undefined;
+      const mat = new THREE.MeshStandardMaterial({ map: part ? this.tex("wall", ws, wc, b.zt! - b.zb!) : wtex, roughness: 0.85, transparent: true, opacity: 1 });
+      const m = new THREE.Mesh(part ? this.wallGeo(b, b.zb!, b.zt! - b.zb!) : this.wallGeo(b, 0, it.H), mat);
       m.castShadow = true; m.receiveShadow = true;
       group.add(m); walls.push({ m, mat, b });
     }
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(W + 10, 2, L + 10).translate(cx, it.H + 1, cy), new THREE.MeshStandardMaterial({ color: it.prison ? "#7a766e" : "#6a6a70", roughness: 0.9 }));
+    // the roof (with openings where the stairs and the lift come up onto the roof terrace)
+    const roofRects = rectMinus({ x0: it.x0 - 5, y0: it.y0 - 5, x1: it.x1 + 5, y1: it.y1 + 5 }, it.roofHoles ?? []);
+    const roofG = roofRects.map((r) => new THREE.BoxGeometry(r.x1 - r.x0, 2, r.y1 - r.y0).translate((r.x0 + r.x1) / 2, it.H + 1, (r.y0 + r.y1) / 2));
+    const roofMat = it.kind === "tower" ? new THREE.MeshStandardMaterial({ map: this.tex("floor", "stone", "#b8b0a2").clone(), roughness: 0.85 }) : new THREE.MeshStandardMaterial({ color: it.prison ? "#7a766e" : "#6a6a70", roughness: 0.9 });
+    if (roofMat.map) { roofMat.map.needsUpdate = true; roofMat.map.repeat.set((W + 10) / 90, (L + 10) / 90); fixBoxUv(roofG, it.x0 - 5, it.y0 - 5, W + 10, L + 10); }
+    const roof = new THREE.Mesh(roofG.length === 1 ? roofG[0] : mergeGeometries(roofG)!, roofMat);
+    roof.receiveShadow = true;
     roof.castShadow = true; group.add(roof);
     // the ceiling seen from inside (acoustic tiles, plaster, wooden boards or raw concrete) and its lamps
     const [cs, cc] = it.ceil ?? ["tiles", "#b8b3aa"];
     const ct = this.tex("ceil", cs, cc).clone(); ct.needsUpdate = true; ct.repeat.set(W / 60, L / 60);
     const ceilMat = new THREE.MeshStandardMaterial({ map: ct, roughness: 0.9 });
-    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(W + 8, L + 8).rotateX(Math.PI / 2).translate(cx, it.H - 0.2, cy), ceilMat);
+    const ceilG = rectMinus({ x0: it.x0 - 4, y0: it.y0 - 4, x1: it.x1 + 4, y1: it.y1 + 4 }, it.roofHoles ?? []).map((r) => new THREE.PlaneGeometry(r.x1 - r.x0, r.y1 - r.y0).rotateX(Math.PI / 2).translate((r.x0 + r.x1) / 2, it.H - 0.2, (r.y0 + r.y1) / 2));
+    const ceiling = new THREE.Mesh(ceilG.length === 1 ? ceilG[0] : mergeGeometries(ceilG)!, ceilMat);
     ceiling.visible = false; ceiling.castShadow = true; group.add(ceiling); // keeps the sun out while the roof is hidden
     this.lamps(it.lamps ?? "panel", it.x0, it.y0, it.x1, it.y1, it.H, P, Lamp);
     // the apartment tower: the storeys above the ground floor (seen from outside)
     let tower: THREE.Mesh | null = null;
-    if (it.kind === "tower") {
-      const th = 300, ft = canvasTex(256, 256, (g) => {
-        g.fillStyle = "#d8cfc2"; g.fillRect(0, 0, 256, 256);
-        for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) {
-          g.fillStyle = (i * 7 + j * 3) % 5 === 0 ? "#ffe2a8" : "#3a5a7a"; g.fillRect(i * 64 + 10, j * 64 + 12, 44, 36);
-          g.fillStyle = "#b8ad9e"; g.fillRect(i * 64 + 6, j * 64 + 50, 52, 5);
-        }
-      });
-      ft.wrapS = ft.wrapT = THREE.RepeatWrapping; ft.repeat.set(Math.round((W + 10) / 60), Math.round(th / 60));
-      tower = new THREE.Mesh(new THREE.BoxGeometry(W + 10, th, L + 10).translate(cx, it.H + 2 + th / 2, cy), new THREE.MeshStandardMaterial({ map: ft, roughness: 0.7 }));
-      tower.castShadow = true; group.add(tower);
-    }
+    if (it.kind === "tower" && it.storey) tower = this.facade(it, group);
     const doors: THREE.Mesh[] = [];
     let gate: THREE.Mesh | undefined;
     const d = it.door, fx = d.x - 0.6;
@@ -172,7 +170,9 @@ export class InteriorsRenderer {
     for (const p of it.props) {
       const li = p.lv ? levelIx(p.lv) : -1;
       const pp = li >= 0 ? lvParts[li] : parts, ex = li >= 0 ? lvExtra[li] : extra, pP = li >= 0 ? lvP[li] : P, pG = li >= 0 ? lvG[li] : G, pQ = li >= 0 ? lvQ[li] : Q;
-      if (p.k.startsWith("f:")) furniture({ k: p.k.slice(2), x: p.x, y: p.y, w: p.w, d: p.d, a: p.a, z: p.z, c: p.c, c2: p.c2 }, pp, seed++, ex, it.H, FLOOR_Y);
+      // the ceiling over the piece (pendant lamps hang from it): the next floor up, else the roof
+      const ch = interiorCeil(it, p.x, p.y, p.lv ?? 0) - (p.lv ?? 0);
+      if (p.k.startsWith("f:")) furniture({ k: p.k.slice(2), x: p.x, y: p.y, w: p.w, d: p.d, a: p.a, z: p.z, c: p.c, c2: p.c2 }, pp, seed++, ex, Number.isFinite(ch) ? ch : 40, FLOOR_Y);
       else if (p.k === "front") this.front(p, pP, pG, pQ, li >= 0 ? levels[li].group : inner);
       else this.prop(p, pP, pG);
     }
@@ -234,10 +234,11 @@ export class InteriorsRenderer {
         to.push(box(b.w, 10, b.h, b.x + b.w / 2, FLOOR_Y + b.zb + 5, b.y + b.h / 2, "#cfe6f2"));
         toP.push(box(b.w + 0.4, 0.8, b.h + 0.4, b.x + b.w / 2, FLOOR_Y + b.zb + 10.4, b.y + b.h / 2, "#9aa3ad"));
       }
-      steps = canvasTex(32, 128, (g) => { g.fillStyle = "#4a4d55"; g.fillRect(0, 0, 32, 128); g.fillStyle = "#8a8d95"; for (let k = 0; k < 128; k += 16) g.fillRect(0, k, 32, 3); });
-      steps.wrapS = steps.wrapT = THREE.RepeatWrapping; steps.repeat.set(1, 6);
+      if (it.escalators!.some((e) => !e.stairs)) steps = canvasTex(32, 128, (g) => { g.fillStyle = "#4a4d55"; g.fillRect(0, 0, 32, 128); g.fillStyle = "#8a8d95"; for (let k = 0; k < 128; k += 16) g.fillRect(0, k, 32, 3); });
+      if (steps) { steps.wrapS = steps.wrapT = THREE.RepeatWrapping; steps.repeat.set(1, 6); }
       const sm = new THREE.MeshStandardMaterial({ map: steps, roughness: 0.6, metalness: 0.3 });
       for (const e of it.escalators!) {
+        if (e.stairs) { this.stairs(e, P); continue; }
         const run = e.y1 - e.y0, rise = e.zb - e.za, len = Math.hypot(run, rise), ang = -Math.atan2(rise, run), mx = (e.x0 + e.x1) / 2, mz = (e.y0 + e.y1) / 2, my = FLOOR_Y + (e.za + e.zb) / 2;
         const tread = new THREE.Mesh(new THREE.BoxGeometry(e.x1 - e.x0, 1.2, len), sm);
         tread.position.set(mx, my + 0.4, mz); tread.rotation.x = ang; inner.add(tread);
@@ -342,11 +343,62 @@ export class InteriorsRenderer {
     }
   }
 
+  // a flight of stairs: solid steps on a sloped stringer, a wooden handrail on the open side
+  private stairs(e: { x0: number; x1: number; y0: number; y1: number; za: number; zb: number }, P: THREE.BufferGeometry[]) {
+    const run = e.y1 - e.y0, rise = e.zb - e.za, n = Math.max(2, Math.round(Math.abs(rise) / 2.2)), sd = run / n, w = e.x1 - e.x0, mx = (e.x0 + e.x1) / 2;
+    for (let i = 0; i < n; i++) {
+      // step i covers y0 + i*sd .. y0 + (i+1)*sd; its top is the height at its far end (going up) or near end (going down)
+      const top = e.za + rise * (rise > 0 ? (i + 1) / n : i / n), lo = Math.min(e.za, e.zb);
+      const h = Math.max(1, top - lo);
+      P.push(box(w, h, sd + 0.1, mx, FLOOR_Y + lo + h / 2, e.y0 + (i + 0.5) * sd, i % 2 ? "#cfc6b8" : "#c4baa9"));
+      P.push(box(w, 0.4, 1.2, mx, FLOOR_Y + top + 0.2, e.y0 + (rise > 0 ? (i + 1) * sd - 0.6 : i * sd + 0.6), "#7a7266"));
+    }
+    const len = Math.hypot(run, rise), ang = -Math.atan2(rise, run);
+    const hr = box(1.2, 1.2, len, 0, 0, 0, "#6a4a32");
+    hr.rotateX(ang).translate(e.x1 - 0.8, FLOOR_Y + (e.za + e.zb) / 2 + 11, (e.y0 + e.y1) / 2);
+    P.push(hr);
+  }
+
+  // the tower seen from outside: a facade with a band of windows and balcony slabs on every storey (door left open)
+  private facade(it: Interior, group: THREE.Group) {
+    const S = it.storey!, NF = Math.round(it.H / S), o = 5.4;
+    const t = canvasTex(256, 256, (g) => {
+      // one storey, 60 wide: plaster, two windows with frames and a reflection, a balcony slab with a rail
+      g.fillStyle = "#d9d0c2"; g.fillRect(0, 0, 256, 256);
+      for (let k = 0; k < 900; k++) { g.fillStyle = Math.random() < 0.5 ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)"; g.fillRect(Math.random() * 256, Math.random() * 256, 2, 2); }
+      for (const x of [18, 138]) {
+        const gr = g.createLinearGradient(x, 40, x + 100, 190); gr.addColorStop(0, "#9fc3dc"); gr.addColorStop(0.45, "#3e6382"); gr.addColorStop(1, "#1d3550");
+        g.fillStyle = "#4a4f57"; g.fillRect(x - 5, 34, 110, 166); g.fillStyle = gr; g.fillRect(x, 40, 100, 154);
+        g.fillStyle = "rgba(255,255,255,0.18)"; g.beginPath(); g.moveTo(x + 10, 40); g.lineTo(x + 40, 40); g.lineTo(x + 5, 120); g.lineTo(x, 120); g.fill();
+        g.fillStyle = "#4a4f57"; g.fillRect(x + 48, 40, 4, 154);
+      }
+      g.fillStyle = "#b4ab9c"; g.fillRect(0, 214, 256, 16); g.fillStyle = "#8a8378"; g.fillRect(0, 228, 256, 4);
+      g.fillStyle = "rgba(60,64,72,0.85)"; for (let x = 0; x < 256; x += 12) g.fillRect(x, 196, 3, 18); g.fillRect(0, 194, 256, 3);
+    });
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1, NF); t.colorSpace = THREE.SRGBColorSpace;
+    const X0 = it.x0 - o, X1 = it.x1 + o, Y0 = it.y0 - o, Y1 = it.y1 + o, d = it.door;
+    const piece = (x: number, y: number, w: number, h: number, z0: number, H: number) => this.wallGeo({ x, y, w, h } as Building, z0, H);
+    const parts = [
+      piece(X0, Y0, X1 - X0, 1, 0, it.H), piece(X0, Y1 - 1, X1 - X0, 1, 0, it.H), piece(X1 - 1, Y0, 1, Y1 - Y0, 0, it.H),
+      piece(X0, Y0, 1, d.y - d.w / 2 - 6 - Y0, 0, it.H), piece(X0, d.y + d.w / 2 + 6, 1, Y1 - d.y - d.w / 2 - 6, 0, it.H),
+      piece(X0, d.y - d.w / 2 - 6, 1, d.w + 12, S, it.H - S),
+    ];
+    // the above-door piece starts one storey up: shift its texture so the storeys line up
+    const uv = parts[5].attributes.uv as THREE.BufferAttribute;
+    for (let i = 0; i < uv.count; i++) uv.setY(i, (S + uv.getY(i) * (it.H - S)) / it.H);
+    const m = new THREE.Mesh(mergeGeometries(parts)!, new THREE.MeshStandardMaterial({ map: t, roughness: 0.6, metalness: 0.05 }));
+    m.castShadow = true; m.receiveShadow = true; group.add(m);
+    // an entrance canopy over the door, the house name on it
+    const can = new THREE.Mesh(new THREE.BoxGeometry(24, 1.6, d.w + 30).translate(X0 - 12, 28, d.y), new THREE.MeshStandardMaterial({ color: "#2a2d33", roughness: 0.5, metalness: 0.4 }));
+    group.add(can);
+    return m;
+  }
+
   private spawn(g: Guest, seed: number, list: Person[], clerk = false) {
     const rig = new HumanRig(lookFromSeed(seed * 31 + 7, g.role ?? "civ", g.shirt ?? "", g.pants ?? ""), 1);
     rig.root.position.set(g.x, FLOOR_Y + (g.z ?? 0), g.y); rig.root.rotation.y = -g.a; rig.play(g.anim, 0);
     this.scene.add(rig.root); this.setup(rig.root);
-    list.push({ rig, anim: g.anim, clerk });
+    list.push({ rig, anim: g.anim, clerk, z: g.z ?? 0 });
     return rig;
   }
   private people(room: Room) {
@@ -396,14 +448,27 @@ export class InteriorsRenderer {
       for (const m of room.doors) m.position.z = it.door.y + (m.userData.s as number) * (it.door.w / 4 + room.doorOpen * it.door.w * 0.45);
       if (room.gate) { room.gate.scale.y = 1 - room.doorOpen * 0.9; room.gate.position.y = ((it.H - 6) * (1 - room.doorOpen * 0.9)) / 2 + room.doorOpen * (it.H - 6) * 0.9; }
       // inside: the roof gives way to the ceiling with its lamps (only the bird's eye view looks in from above)
-      room.roof.visible = !inside; room.ceiling.visible = inside && !top;
+      // on the roof terrace of the tower you are outdoors again
+      const roofNow = inside && onRoof(it, pz), inRooms = inside && !roofNow, S = it.storey;
+      room.roof.visible = !inRooms; room.ceiling.visible = inRooms && !top;
       if (room.lamps) room.lamps.visible = !inside || !top;
-      if (room.tower) room.tower.visible = !inside;
-      // mall: from above the floors over you are left out
-      for (const lv of room.levels) lv.group.visible = !(inside && top && lv.z > pz + 10);
+      if (room.tower) room.tower.visible = !inRooms;
+      // mall: from above the floors over you are left out; tower: only your storey (with its ceiling) and the roof
+      for (const lv of room.levels) {
+        let vis = !(inRooms && top && lv.z > pz + 10);
+        if (S) vis = lv.z >= it.H ? true : inRooms ? vis && lv.z <= pz + S + 2 && lv.z >= pz - S - 2 : false;
+        lv.group.visible = vis;
+      }
+      if (S && room.people) for (const q of room.people) q.rig.root.visible = q.z >= it.H ? !inRooms || pz > it.H - 30 : inRooms && Math.abs(q.z - pz) < S - 4;
       // only the walls between the camera and you (or right at the camera) fade out
       for (const w of room.walls) {
-        const b = w.b, fade = sameHouse && (segHitsRect(cam.x, cam.z, px, py, b.x - 3, b.y - 3, b.x + b.w + 3, b.y + b.h + 3) || (cam.x > b.x - 10 && cam.x < b.x + b.w + 10 && cam.z > b.y - 10 && cam.z < b.y + b.h + 10)) ? 0.15 : 1;
+        const b = w.b;
+        if (b.zb !== undefined) {
+          // a storey wall (tower): your storey only; the walls on the roof are seen from everywhere outside the rooms
+          w.m.visible = b.zb >= it.H - 4 ? !inRooms || pz > it.H - 40 : inRooms ? b.zb <= pz + 30 && b.zt! >= pz - 8 : near && b.zb < 10;
+          if (!w.m.visible) continue;
+        }
+        const fade = sameHouse && !roofNow && (segHitsRect(cam.x, cam.z, px, py, b.x - 3, b.y - 3, b.x + b.w + 3, b.y + b.h + 3) || (cam.x > b.x - 10 && cam.x < b.x + b.w + 10 && cam.z > b.y - 10 && cam.z < b.y + b.h + 10)) ? 0.15 : 1;
         if (Math.abs(w.mat.opacity - fade) > 0.01) w.mat.opacity += (fade - w.mat.opacity) * Math.min(1, dt * 8);
         w.mat.depthWrite = w.mat.opacity > 0.9;
       }
@@ -476,4 +541,30 @@ function segHitsRect(ax: number, ay: number, bx: number, by: number, x0: number,
     if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; } else { if (r < t0) return false; if (r < t1) t1 = r; }
   }
   return t0 <= t1;
+}
+
+// the parts of a rectangle that are not covered by any of the holes (cut along the holes' edges)
+function rectMinus(r: { x0: number; y0: number; x1: number; y1: number }, holes: { x0: number; y0: number; x1: number; y1: number }[]) {
+  if (!holes.length) return [r];
+  const xs = [...new Set([r.x0, r.x1, ...holes.flatMap((h) => [h.x0, h.x1])])].filter((x) => x >= r.x0 && x <= r.x1).sort((a, b) => a - b);
+  const ys = [...new Set([r.y0, r.y1, ...holes.flatMap((h) => [h.y0, h.y1])])].filter((y) => y >= r.y0 && y <= r.y1).sort((a, b) => a - b);
+  const out: { x0: number; y0: number; x1: number; y1: number }[] = [];
+  for (let j = 0; j < ys.length - 1; j++) {
+    let run: { x0: number; y0: number; x1: number; y1: number } | null = null;
+    for (let i = 0; i < xs.length - 1; i++) {
+      const mx = (xs[i] + xs[i + 1]) / 2, my = (ys[j] + ys[j + 1]) / 2;
+      const open = holes.some((h) => mx > h.x0 && mx < h.x1 && my > h.y0 && my < h.y1);
+      if (open) { if (run) { out.push(run); run = null; } continue; }
+      if (run) run.x1 = xs[i + 1]; else run = { x0: xs[i], y0: ys[j], x1: xs[i + 1], y1: ys[j + 1] };
+    }
+    if (run) out.push(run);
+  }
+  return out;
+}
+// box faces in world units for a texture laid over the whole rectangle (top faces only matter)
+function fixBoxUv(list: THREE.BufferGeometry[], x0: number, y0: number, w: number, h: number) {
+  for (const g of list) {
+    const P = g.attributes.position as THREE.BufferAttribute, uv = g.attributes.uv as THREE.BufferAttribute;
+    for (let i = 0; i < P.count; i++) uv.setXY(i, (P.getX(i) - x0) / w, 1 - (P.getZ(i) - y0) / h);
+  }
 }

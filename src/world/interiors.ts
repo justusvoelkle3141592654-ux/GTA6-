@@ -11,8 +11,8 @@ export type InteriorKind = "gun" | "boutique" | "taco" | "burger" | "workshop" |
 // (a = 0: the front looks south (+y), PI/2 west, PI north, -PI/2 east)
 export interface Prop { k: string; x: number; y: number; w: number; d: number; h: number; a?: number; z?: number; lv?: number; c?: string; c2?: string; solid?: boolean }
 // a flat or house you can buy: sleep in its bed (heals, saves the game)
-export interface Home { id: string; name: string; price: number; bed: { x: number; y: number }; x0: number; y0: number; x1: number; y1: number }
-export interface Seat { x: number; y: number; a: number }
+export interface Home { id: string; name: string; price: number; bed: { x: number; y: number; z?: number }; x0: number; y0: number; x1: number; y1: number; z?: number }
+export interface Seat { x: number; y: number; a: number; z?: number } // z: the floor it is on (tower, roof)
 export interface Interior {
   id: string; kind: InteriorKind; name: string; color: string;
   x0: number; y0: number; x1: number; y1: number; // inside of the walls
@@ -44,14 +44,16 @@ export interface Interior {
   yard?: { props: Prop[]; guests: Guest[] }; // outdoor things drawn with this room (the prison yard)
   // ceiling (texture style, colour), ceiling lamps ("panel", "spot", "tube" or "none": the room has its own pendants), light colour
   ceil?: [string, string]; lamps?: string; light?: string;
+  // tower: height of one storey (walls of a storey are drawn that high), where the roof is open (stair well, lift shaft)
+  storey?: number; roofHoles?: Rect[];
 }
 export interface Rect { x0: number; y0: number; x1: number; y1: number }
 // a floor above the ground: you stand at height z wherever one of its slabs is
 export interface Level { z: number; slabs: Rect[] }
 // rises from za at y0 to zb at y1 (along y); up: which way the steps run
-export interface Escalator { x0: number; x1: number; y0: number; y1: number; za: number; zb: number; up: boolean }
+export interface Escalator { x0: number; x1: number; y0: number; y1: number; za: number; zb: number; up: boolean; stairs?: boolean } // stairs: a flight of steps (does not move)
 // the lift: a cabin in a shaft, its door on the south side (y1); z: where the cabin is now, to: where it goes
-export interface Elevator extends Rect { floors: number[]; z: number; to: number; open: number }
+export interface Elevator extends Rect { floors: number[]; names?: string[]; z: number; to: number; open: number }
 export interface Guest { x: number; y: number; a: number; anim: string; z?: number; role?: string; shirt?: string; pants?: string }
 
 const T = 4; // wall thickness
@@ -789,9 +791,12 @@ function buildMall(world: World, pl: Place): Interior | null {
 }
 
 
-// the apartment tower: a whole block, lobby at the door, a corridor through the middle, two flats on each side
-// (every flat furnished: living room, kitchen, bedroom, bathroom; each one can be bought)
-export const FLAT_PRICES = [8000, 10000, 12500, 15000];
+// the apartment tower: a whole block, six storeys of 38 (ground floor: lobby, gym, games room and lounge;
+// floors 1-5: four flats each, every one furnished and for sale), a lift and a staircase from the lobby up to
+// the roof terrace with its pool, bar and the penthouse
+export const TOWER = { storey: 38, floors: 6 };
+export const FLAT_PRICES = [8000, 10000, 12500, 15000]; // first floor; every floor further up costs $2.500 more
+export const PENTHOUSE_PRICE = 60000;
 function buildTower(world: World, pl: Place): Interior | null {
   if (!pl.bld) return null;
   const blk = world.blockAt(pl.bld.x + 1, pl.bld.y + 1);
@@ -799,49 +804,166 @@ function buildTower(world: World, pl: Place): Interior | null {
   const s0x = blk.bx * BLOCK + ROAD, s0y = blk.by * BLOCK + ROAD, size = BLOCK - ROAD;
   const x0 = s0x + 18, y0 = s0y + 25, x1 = s0x + size - 25, y1 = s0y + size - 25, cy = (y0 + y1) / 2;
   blk.buildings.length = 0; blk.trees.length = 0;
-  const H = 46, dw = 26, CH = 24, LOBBY = 60, PER = 2;
+  const S = TOWER.storey, NF = TOWER.floors, H = S * NF, ROOF = H + 2, dw = 26, CH = 24, CORE = 64, PER = 2;
+  const Zs = Array.from({ length: NF }, (_, k) => k * S);
   const it: Interior = {
     id: "tower", kind: "tower", name: pl.name, color: pl.color, x0: x0 + T, y0: y0 + T, x1: x1 - T, y1: y1 - T, H,
     door: { x: x0, y: cy, w: dw }, counter: { x: 0, y: 0 }, clerk: { x: 0, y: 0, a: 0 }, props: [], seats: [], guests: [], walls: [], homes: [],
+    levels: [], escalators: [], roofHoles: [], storey: S,
     floor: ["marble", "#cfc6b8"], wallTex: ["panel", "#d6cebf"], ceil: ["plaster", "#efe8dc"], lamps: "spot", light: "#fff0dc",
   };
   const w = (x: number, y: number, ww: number, hh: number) => it.walls.push(wallB(x, y, ww, hh, H));
+  // a wall of one storey (z .. z + h); on the roof: the housings of the lift and the stairs, the penthouse
+  const zw = (x: number, y: number, ww: number, hh: number, z: number, h = S) => it.walls.push({ ...wallB(x, y, ww, hh, z + h), zb: z, zt: z + h });
+  // a rail (drawn as glass with a handrail)
+  const rail = (x: number, y: number, ww: number, hh: number, z: number) => it.walls.push({ ...wallB(x, y, ww, hh, z + 12, true), zb: z, zt: z + 12 });
   w(x0, y0, T, cy - dw / 2 - y0); w(x0, cy + dw / 2, T, y1 - cy - dw / 2);
   w(x1 - T, y0, T, y1 - y0); w(x0, y0, x1 - x0, T); w(x0, y1 - T, x1 - x0, T);
-  const ix0 = it.x0, ix1 = it.x1, iy0 = it.y0, iy1 = it.y1, fx0 = ix0 + LOBBY, fw = (ix1 - fx0) / PER;
-  // lobby: concierge, letter boxes, the lift, a sofa
+  zw(x0, cy - dw / 2, T, dw, 26, H - 26); // over the door: closed from the top of the door up to the roof
+  const ix0 = it.x0, ix1 = it.x1, iy0 = it.y0, iy1 = it.y1, fx0 = ix0 + CORE, fw = (ix1 - fx0) / PER;
+  // ---- the core: the lift in the north-west corner (door to the south), the staircase in the south-west corner
+  const lx0 = ix0 + 18, lx1 = lx0 + 30, ly0 = iy0, ly1 = iy0 + 30;
+  const names = Zs.map((_, k) => (k === 0 ? "Erdgeschoss · Lobby" : `${k}. Etage · Wohnungen ${(k - 1) * 4 + 1}–${k * 4}`)).concat("Dachterrasse & Penthouse");
+  it.elevator = { x0: lx0, y0: ly0, x1: lx1, y1: ly1, floors: [...Zs, ROOF], names, z: 0, to: 0, open: 1 };
+  w(lx0 - 2, ly0, 2, ly1 - ly0 + 2); w(lx1, ly0, 2, ly1 - ly0 + 2); w(lx0 - 2, ly1, 9, 2); w(lx1 - 7, ly1, 9, 2);
+  // stairs: two lanes of LW, a strip of ST at the floor, flights of RUN, a landing of LD half way up
+  const LW = 22, ST = 20, RUN = 40, LD = 24;
+  const sx0 = ix0, sx1 = ix0 + 2 * LW + 2, sy0 = iy1 - ST - RUN - LD, sMid = sy0 + ST + RUN;
+  w(sx1, sy0 + ST, 2, iy1 - sy0 - ST); w(sx0 + LW, sy0 + ST, 2, RUN);
+  // two flights per storey: up along the west lane to the landing, back along the east lane to the next floor
+  for (let k = 0; k < NF; k++) {
+    const za = Zs[k], zm = za + S / 2, zt = k < NF - 1 ? Zs[k + 1] : ROOF;
+    it.escalators!.push(
+      { x0: sx0 + 0.5, x1: sx0 + LW, y0: sy0 + ST, y1: sMid, za, zb: zm, up: true, stairs: true },
+      { x0: sx0 + LW + 2, x1: sx1 - 0.5, y0: sy0 + ST, y1: sMid, za: zt, zb: zm, up: false, stairs: true },
+    );
+    it.levels!.push({ z: zm, slabs: [{ x0: sx0, y0: sMid, x1: sx1, y1: iy1 }] });
+  }
+  // ---- the floors above the ground: everything but the lift shaft and the stair well
+  for (let k = 1; k < NF; k++) it.levels!.push({ z: Zs[k], slabs: [
+    { x0: lx1 + 2, y0: iy0, x1: ix1, y1: iy1 }, { x0: ix0, y0: ly1 + 2, x1: lx1 + 2, y1: sy0 + ST },
+    { x0: ix0, y0: iy0, x1: lx0 - 2, y1: ly1 + 2 }, { x0: sx1, y0: sy0 + ST, x1: lx1 + 2, y1: iy1 },
+  ] });
+  // ---- every storey: corridor walls with a door to each room, walls between the rooms
+  for (let k = 0; k < NF; k++) {
+    const z = Zs[k];
+    for (const side of [-1, 1]) {
+      const wy = side < 0 ? cy - CH - 3 : cy + CH;
+      for (let q = 0; q < PER; q++) {
+        const a = fx0 + q * fw, door = a + 14;
+        zw(a, wy, door - a, 3, z); zw(door + 28, wy, a + fw - door - 28, 3, z);
+        zw(a, side < 0 ? iy0 : cy + CH, 3, side < 0 ? cy - CH - iy0 : iy1 - cy - CH, z);
+      }
+    }
+    const lv = k ? { lv: z } : {};
+    // the hall at the lift: a sign with the floor, a plant, a bench
+    addF(it, "directory", lx1 + 8, ly1 + 4, 12, 4, 0, "#2a2d33", lv);
+    addF(it, "plant", fx0 - 8, cy - CH - 10, 12, 12, 0, "#3aa85c", lv);
+    if (k) {
+      addF(it, "bench", ix0 + 10, cy + 20, 30, 8, EAST, "#6a4a32", lv);
+      addF(it, "rug", fx0 + 60, cy, 100, 26, 0, "#7a2a2a", { ...lv, c2: "#c9a227" });
+      for (let q = 0; q < 3; q++) addF(it, "art", fx0 + 30 + q * 80, cy - CH - 2.2, 18, 1, SOUTH, ["#2bb3ff", "#ff6f91", "#3dd68c"][(q + k) % 3], { ...lv, z: 20, c2: ["sun", "wave", "abstract"][(q + k) % 3] });
+      // four flats
+      for (const side of [-1, 1]) for (let q = 0; q < PER; q++) {
+        const a = fx0 + q * fw + 3, b = fx0 + (q + 1) * fw, near = side < 0 ? cy - CH - 3 : cy + CH + 3, far = side < 0 ? iy0 : iy1;
+        const n = (k - 1) * 4 + (side < 0 ? 0 : 2) + q;
+        flat(it, a, b, near, far, n, side < 0 ? "Nord" : "Süd", z, k);
+      }
+    }
+    // a few residents
+    if (k) it.guests.push({ x: fx0 + 40 + (k % 2) * 120, y: cy + (k % 2 ? 8 : -8), a: k % 2 ? 0 : Math.PI, anim: k % 3 ? "phone" : "talk", z });
+  }
+  // ---- ground floor: lobby with the concierge, letter boxes, a sofa; gym, games room, cinema and lounge
   addF(it, "reception", ix0 + 30, cy - 56, 40, 12, 0, "#6a4a32", { solid: true });
   it.counter = { x: ix0 + 30, y: cy - 38 }; it.clerk = { x: ix0 + 30, y: cy - 66, a: Math.PI / 2 };
-  addF(it, "mail", ix0 + 30, iy0 + 5, 34, 8, 0, "#8a9098", { solid: true });
-  addF(it, "elevator", ix0 + 30, iy1 - 6, 30, 10, Math.PI, "#8a9098", { solid: true });
-  addF(it, "sofa", ix0 + 8, cy + 56, 40, 14, -Math.PI / 2, "#7a5a3a", { solid: true });
-  it.seats.push({ x: ix0 + 11, y: cy + 50, a: 0 }, { x: ix0 + 11, y: cy + 62, a: 0 });
-  addF(it, "palm", ix0 + 52, cy - 34, 14, 14); addF(it, "palm", ix0 + 52, cy + 34, 14, 14); addF(it, "plant", ix0 + 8, iy0 + 30, 12, 12);
-  addF(it, "rug", ix0 + 30, cy, 44, 70, 0, "#8a2a2a", { c2: "#c9a227" });
-  it.guests.push({ x: ix0 + 40, y: cy + 80, a: Math.PI, anim: "phone" });
-  // corridor walls with a door to each flat, walls between the flats
-  for (const side of [-1, 1]) {
-    const wy = side < 0 ? cy - CH - 3 : cy + CH;
-    for (let k = 0; k < PER; k++) {
-      const a = fx0 + k * fw, door = a + 14;
-      w(a, wy, door - a, 3); w(door + 28, wy, a + fw - door - 28, 3);
-      w(a, side < 0 ? iy0 : cy + CH, 3, side < 0 ? cy - CH - iy0 : iy1 - cy - CH);
+  addF(it, "mail", fx0 - 5, cy - 95, 34, 8, WEST, "#8a9098", { solid: true });
+  addF(it, "sofa", ix0 + 8, cy + 40, 40, 14, EAST, "#7a5a3a", { solid: true });
+  it.seats.push({ x: ix0 + 11, y: cy + 34, a: 0 }, { x: ix0 + 11, y: cy + 46, a: 0 });
+  addF(it, "palm", ix0 + 52, cy - 34, 14, 14); addF(it, "palm", ix0 + 52, cy + 34, 14, 14);
+  addF(it, "rug", ix0 + 30, cy, 44, 60, 0, "#8a2a2a", { c2: "#c9a227" });
+  it.guests.push({ x: ix0 + 40, y: cy + 70, a: Math.PI, anim: "phone" });
+  {
+    const N0 = iy0, N1 = cy - CH - 3, S0 = cy + CH + 3, S1 = iy1, A = fx0 + 3, M = fx0 + fw, B = ix1;
+    // gym (north-west)
+    addF(it, "rubber", (A + M) / 2, (N0 + N1) / 2, M - A - 10, N1 - N0 - 10, 0, "#2a2a2e");
+    for (let q = 0; q < 3; q++) addF(it, "treadmill", A + 20 + q * 34, N0 + 22, 14, 30, NORTH, "#2a2d33", { solid: true });
+    addF(it, "weights", A + 40, N1 - 30, 30, 16, 0, "#2a2d33", { solid: true });
+    addF(it, "dumbbells", M - 26, N1 - 30, 26, 10, WEST, "#2a2d33", { solid: true });
+    addF(it, "mirror", M - 1, (N0 + N1) / 2, 40, 1, WEST, "#c9e6ff", { z: 6 });
+    it.guests.push({ x: A + 70, y: N1 - 50, a: 0.4, anim: "idle" });
+    // games room (north-east): billiards, arcade machines, jukebox
+    addF(it, "pool", (M + B) / 2, (N0 + N1) / 2, 44, 24, 0, "#2d7a4a", { solid: true });
+    for (let q = 0; q < 3; q++) addF(it, "arcade", M + 20 + q * 18, N0 + 8, 14, 12, SOUTH, ["#c0392b", "#2b6bff", "#9d4dff"][q], { solid: true });
+    addF(it, "jukebox", B - 8, N1 - 20, 12, 10, WEST, "#c0392b", { solid: true });
+    addF(it, "neon", (M + B) / 2, N0 + 0.6, 30, 1, SOUTH, "#2bf0ff", { z: 26, c2: "GAME ON" });
+    it.guests.push({ x: (M + B) / 2 + 30, y: (N0 + N1) / 2 + 4, a: Math.PI, anim: "talk" });
+    // cinema (south-west): screen, rows of sofas
+    addF(it, "tvwall", (A + M) / 2, S1 - 4, 70, 4, NORTH, "#15161b", { z: 4 });
+    for (let r = 0; r < 2; r++) {
+      addF(it, "sofa", (A + M) / 2, S0 + 26 + r * 26, 60, 15, SOUTH, "#5a2a3a", { solid: true });
+      for (const dx of [-16, 0, 16]) it.seats.push({ x: (A + M) / 2 + dx, y: S0 + 31 + r * 26, a: Math.PI / 2 });
     }
+    // lounge (south-east): fireplace, piano, corner sofa
+    addF(it, "fireplace", B - 6, (S0 + S1) / 2, 30, 10, WEST, "#8a7a6a", { solid: true });
+    addF(it, "sofaL", M + 50, S1 - 30, 60, 40, NORTH, "#3a5a7a", { solid: true });
+    addF(it, "piano", M + 22, S0 + 26, 26, 18, SOUTH, "#15161b", { solid: true });
+    addF(it, "coffee", M + 50, S1 - 58, 22, 11, 0, "#6a4a32");
+    addF(it, "plant", B - 10, S0 + 10, 12, 12);
+    it.seats.push({ x: M + 40, y: S1 - 36, a: -Math.PI / 2 }, { x: M + 56, y: S1 - 36, a: -Math.PI / 2 });
   }
-  // the six flats
-  let n = 0;
-  for (const side of [-1, 1]) for (let k = 0; k < PER; k++) {
-    const a = fx0 + k * fw + 3, b = fx0 + (k + 1) * fw, near = side < 0 ? cy - CH - 3 : cy + CH + 3, far = side < 0 ? iy0 : iy1;
-    flat(it, a, b, near, far, n, side < 0 ? "Nord" : "Süd");
-    n++;
+  // ---- the roof: lift and stair housings, a glass rail around the edge, a pool, a bar, loungers, the penthouse
+  const RH = 36, R = { lv: ROOF };
+  it.levels!.push({ z: ROOF, slabs: [] });
+  zw(lx0 - 2, iy0 - 2, lx1 - lx0 + 4, 2, ROOF, RH); zw(lx0 - 2, iy0, 2, ly1 - iy0 + 2, ROOF, RH); zw(lx1, iy0, 2, ly1 - iy0 + 2, ROOF, RH);
+  zw(lx0 - 2, ly1, 9, 2, ROOF, RH); zw(lx1 - 7, ly1, 9, 2, ROOF, RH);
+  zw(x0, sy0 - 2, T, iy1 - sy0 + 2, ROOF, RH); zw(x0, iy1, sx1 + 2 - x0, T, ROOF, RH); zw(sx1, sy0 - 2, 2, iy1 - sy0 + 2, ROOF, RH);
+  zw(sx0, sy0 - 2, 4, 2, ROOF, RH); zw(sx0 + 26, sy0 - 2, sx1 - sx0 - 26, 2, ROOF, RH);
+  it.levels!.push({ z: ROOF + RH, slabs: [{ x0: lx0 - 2, y0: iy0 - 2, x1: lx1 + 2, y1: ly1 + 2 }, { x0: x0, y0: sy0 - 2, x1: sx1 + 2, y1: iy1 + T }] });
+  it.roofHoles!.push({ x0: lx0, y0: ly0, x1: lx1, y1: ly1 }, { x0: sx0, y0: sy0 + ST - 1, x1: sx1, y1: iy1 });
+  rail(x0, y0, x1 - x0, 2, ROOF); rail(x0, y1 - 2, x1 - x0, 2, ROOF); rail(x0, y0, 2, y1 - y0, ROOF); rail(x1 - 2, y0, 2, y1 - y0, ROOF);
+  // the penthouse: a glass pavilion on the east half of the roof, its door looks west
+  const px0 = ix1 - 150, px1 = ix1 - 6, py0 = iy0 + 20, py1 = cy + 30, pdy = (py0 + py1) / 2;
+  zw(px0, py0, 3, pdy - 14 - py0, ROOF, RH); zw(px0, pdy + 14, 3, py1 - pdy - 14, ROOF, RH);
+  zw(px1 - 3, py0, 3, py1 - py0, ROOF, RH); zw(px0, py0, px1 - px0, 3, ROOF, RH); zw(px0, py1 - 3, px1 - px0, 3, ROOF, RH);
+  it.levels!.push({ z: ROOF + RH, slabs: [{ x0: px0, y0: py0, x1: px1, y1: py1 }] });
+  for (const u of [0.25, 0.5, 0.75]) {
+    addF(it, "window", px0 + (px1 - px0) * u, py0 + 3.6, 28, 1, SOUTH, "#e8e4dc", { ...R, z: 6 });
+    addF(it, "window", px0 + (px1 - px0) * u, py1 - 3.6, 28, 1, NORTH, "#e8e4dc", { ...R, z: 6 });
   }
-  for (const p of it.props) if (p.solid) { const t = turned(p); it.walls.push(wallB(p.x - (t ? p.d : p.w) / 2, p.y - (t ? p.w : p.d) / 2, t ? p.d : p.w, t ? p.w : p.d, 16, true)); }
+  addF(it, "bed", px1 - 30, py0 + 30, 30, 36, WEST, "#2a2d33", { ...R, solid: true });
+  addF(it, "side", px1 - 8, py0 + 8, 9, 8, WEST, "#2a2016", R);
+  addF(it, "wardrobe", px1 - 70, py0 + 9, 30, 10, SOUTH, "#2a2016", { ...R, solid: true });
+  addF(it, "sofaL", px0 + 46, py1 - 26, 56, 36, NORTH, "#e8e2d4", { ...R, solid: true });
+  addF(it, "tv", px0 + 46, py0 + 10, 34, 9, SOUTH, "#2a2016", { ...R, solid: true });
+  addF(it, "rug", px0 + 46, (py0 + py1) / 2, 56, 40, 0, "#c9a070", { ...R, c2: "#2a2d33" });
+  addF(it, "island", px1 - 40, py1 - 22, 30, 12, NORTH, "#e8e4dc", { ...R, solid: true });
+  addF(it, "fridge", px1 - 12, py1 - 10, 12, 12, NORTH, "#c9ced8", { ...R, solid: true });
+  addF(it, "palm", px0 + 10, py0 + 12, 14, 14, 0, "#3aa85c", R);
+  it.seats.push({ x: px0 + 36, y: py1 - 30, a: -Math.PI / 2, z: ROOF }, { x: px0 + 52, y: py1 - 30, a: -Math.PI / 2, z: ROOF });
+  it.homes!.push({ id: "penthouse", name: "Penthouse", price: PENTHOUSE_PRICE, bed: { x: px1 - 30, y: py0 + 52, z: ROOF }, x0: px0, y0: py0, x1: px1, y1: py1, z: ROOF });
+  // the terrace: pool with loungers, a hot tub, a bar with stools, tables, palms, lamps
+  const tx = (fx0 + px0) / 2;
+  addF(it, "swim", tx + 10, cy + 90, 120, 60, 0, "#2bb3ff", R);
+  for (let q = 0; q < 4; q++) { addF(it, "bench", tx - 40 + q * 32, cy + 140, 24, 10, NORTH, "#f4f2ee", R); it.seats.push({ x: tx - 40 + q * 32, y: cy + 138, a: -Math.PI / 2, z: ROOF }); }
+  addF(it, "hottub", px1 - 30, cy + 100, 36, 36, 0, "#7ac8e8", { ...R, solid: true });
+  addF(it, "bar", fx0 + 20, cy - 60, 50, 12, EAST, "#3a2a1a", { ...R, solid: true });
+  for (let q = 0; q < 3; q++) { addF(it, "stool", fx0 + 36, cy - 76 + q * 16, 7, 7, 0, "#c9ced8", R); it.seats.push({ x: fx0 + 36, y: cy - 76 + q * 16, a: Math.PI, z: ROOF }); }
+  for (const [qx, qy] of [[tx - 30, cy - 20], [tx + 30, cy - 20]]) {
+    addF(it, "rtable", qx, qy, 16, 16, 0, "#f4f2ee", { ...R, solid: true });
+    addF(it, "chair", qx - 12, qy, 9, 9, EAST, "#c9a070", R); addF(it, "chair", qx + 12, qy, 9, 9, WEST, "#c9a070", R);
+    it.seats.push({ x: qx - 12, y: qy, a: 0, z: ROOF }, { x: qx + 12, y: qy, a: Math.PI, z: ROOF });
+  }
+  for (const [qx, qy] of [[fx0 - 10, iy0 + 50], [ix1 - 10, iy1 - 10], [fx0 + 10, iy1 - 12], [tx, iy0 + 14]]) addF(it, "palm", qx, qy, 16, 16, 0, "#3aa85c", R);
+  for (const [qx, qy] of [[tx - 60, cy + 40], [tx + 70, cy + 40]]) addF(it, "lamp", qx, qy, 8, 8, 0, "#f2e2c0", R);
+  it.guests.push({ x: tx - 10, y: cy - 40, a: 0.3, anim: "talk", z: ROOF }, { x: fx0 + 6, y: cy - 60, a: 0, anim: "idle", z: ROOF }, { x: tx + 60, y: cy + 128, a: 2, anim: "phone", z: ROOF });
+  solidProps(it);
   blk.buildings.push(...it.walls);
   pl.x = it.counter.x; pl.y = it.counter.y; pl.a = 0;
   return it;
 }
 
-// one flat between x a..b; near: its corridor wall, far: the outer wall (u across from a, v from the corridor)
+// one flat between x a..b; near: its corridor wall, far: the outer wall (u across from a, v from the corridor);
+// lv: the floor it is on, k: which storey (the windows show more of the bay further up)
 const FLAT_LOOK = [
   { sofa: "#3a5a7a", bed: "#2e4a7a", rug: "#c9a070", wood: "#6a4a32", art: "sun" },
   { sofa: "#7a3a4a", bed: "#7a2a3a", rug: "#8a9a6a", wood: "#3a2a1a", art: "wave" },
@@ -849,18 +971,21 @@ const FLAT_LOOK = [
   { sofa: "#c9a070", bed: "#5a4a8a", rug: "#2e6da4", wood: "#5a3a22", art: "sea" },
   { sofa: "#2a2d33", bed: "#c0392b", rug: "#e8e2d4", wood: "#2a2016", art: "abstract" },
   { sofa: "#9d4dff", bed: "#2bb3ff", rug: "#ffd23f", wood: "#c9a070", art: "sun" },
+  { sofa: "#e8e2d4", bed: "#8a9098", rug: "#3a5a7a", wood: "#c9a070", art: "wave" },
 ];
-function flat(it: Interior, a: number, b: number, near: number, far: number, n: number, side: string) {
-  const dir = Math.sign(far - near), D = Math.abs(far - near), Wf = b - a, lk = FLAT_LOOK[n % FLAT_LOOK.length];
+function flat(it: Interior, a: number, b: number, near: number, far: number, n: number, side: string, lv: number, k: number) {
+  const dir = Math.sign(far - near), D = Math.abs(far - near), Wf = b - a, lk = FLAT_LOOK[(n * 3 + k) % FLAT_LOOK.length];
   const X = (u: number) => a + u, Y = (v: number) => near + dir * v;
   const IN = dir > 0 ? 0 : Math.PI;            // front looks away from the corridor (into the flat)
   const OUT = dir > 0 ? Math.PI : 0;           // front looks to the corridor
   const LEFT = -Math.PI / 2, RIGHT = Math.PI / 2; // front looks east (+u) / west (-u)
-  const F = (k: string, u: number, v: number, w: number, d: number, ang: number, c = "#8a8a8a", o: FOpt = {}) => addF(it, k, X(u), Y(v), w, d, ang, c, o);
-  const sit = (u: number, v: number, toCorridor: boolean) => it.seats.push({ x: X(u), y: Y(v), a: (toCorridor ? -dir : dir) * Math.PI / 2 });
+  const S = it.storey ?? it.H;
+  const F = (kk: string, u: number, v: number, w: number, d: number, ang: number, c = "#8a8a8a", o: FOpt = {}) => addF(it, kk, X(u), Y(v), w, d, ang, c, { ...o, lv });
+  const sit = (u: number, v: number, toCorridor: boolean) => it.seats.push({ x: X(u), y: Y(v), a: (toCorridor ? -dir : dir) * Math.PI / 2, z: lv });
+  const wall = (x: number, y: number, ww: number, hh: number) => it.walls.push({ ...wallB(x, y, ww, hh, lv + S), zb: lv, zt: lv + S });
   // bathroom by the corridor on the right: shower, toilet, basin with a mirror
   const bu = Wf - 40, bv = 40;
-  it.walls.push(wallB(X(bu) - 1.5, Math.min(Y(0), Y(bv)), 3, bv, it.H), wallB(X(bu), Y(bv) - 1.5, 8, 3, it.H));
+  wall(X(bu) - 1.5, Math.min(Y(0), Y(bv)), 3, bv); wall(X(bu), Y(bv) - 1.5, 8, 3);
   F("toilet", bu + 10, 7, 10, 12, IN); F("shower", Wf - 9, 9, 16, 16, IN, "#f4f2ee"); F("basin", Wf - 6, 30, 12, 8, RIGHT, "#f4f2ee");
   F("plant", 8, 8, 10, 10, 0);
   // kitchen along the left wall, a small dining table
@@ -887,8 +1012,9 @@ function flat(it: Interior, a: number, b: number, near: number, far: number, n: 
   F("pendant", 34, bv + 30, 9, 9, 0, lk.wood);
   F("shelf", Wf * 0.56 - 42, D - 5, 18, 8, OUT, lk.wood, { solid: true });
   F("art", bedU, D - 0.6, 24, 1, OUT, lk.sofa, { z: 22, c2: lk.art });
-  const bed = { x: X(bedU), y: Y(bedV - 24) };
-  it.homes!.push({ id: "flat" + (n + 1), name: `Wohnung ${n + 1} (${side})`, price: FLAT_PRICES[n], bed, x0: Math.min(a, b), y0: Math.min(near, far), x1: Math.max(a, b), y1: Math.max(near, far) });
+  const bed = { x: X(bedU), y: Y(bedV - 24), z: lv };
+  const price = FLAT_PRICES[n % 4] + Math.floor(n / 4) * 2500;
+  it.homes!.push({ id: "flat" + (n + 1), name: `Wohnung ${n + 1} (${k}. Etage, ${side})`, price, bed, x0: Math.min(a, b), y0: Math.min(near, far), x1: Math.max(a, b), y1: Math.max(near, far), z: lv });
 }
 
 // ---------------------------------------------------------------------------------------- queries
@@ -914,9 +1040,13 @@ export function interiorFloor(list: Interior[], x: number, y: number, z: number)
 }
 // the ceiling above (x, y) for someone standing at z: the underside of the next floor up, else the roof
 export function interiorCeil(it: Interior, x: number, y: number, z: number): number {
-  let c = it.H;
+  let c = onRoof(it, z) ? Infinity : it.H;
   if (it.levels) for (const lv of it.levels) if (lv.z > z + 12 && lv.z - 1.5 < c && lv.slabs.some((r) => x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1)) c = lv.z - 1.5;
   return c;
 }
+// standing on the roof (tower: the roof terrace) rather than in a storey
+export const onRoof = (it: Interior, z: number) => z > it.H - 4;
+// the roof is open here (stairs and lift go through)
+export const inRoofHole = (it: Interior, x: number, y: number) => !!it.roofHoles?.some((r) => x > r.x0 && x < r.x1 && y > r.y0 && y < r.y1);
 // which floor (index) someone at height z is on
 export const levelOf = (it: Interior, z: number) => { let k = 0; if (it.levels) it.levels.forEach((lv, i) => { if (z > lv.z - 14) k = i + 1; }); return k; };
