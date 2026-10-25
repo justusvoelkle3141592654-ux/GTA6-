@@ -1,30 +1,39 @@
 import { useState } from "react";
-import type { Game } from "../core/engine";
+import type { Game, GameConfig } from "../core/engine";
 import { JOB_DEFS } from "../gameplay/jobs";
-import { applySettings, loadSettings, saveSettings } from "../core/settings";
 import BigMap from "./BigMap";
+import Help from "./Help";
 import Icon from "./icons";
 import { ContactsTab, FlightTab, GarageTab, HideTab, JobsTab, MessagesApp, RadioApp } from "./GameTabs";
+import { CAM_LABEL, Progress, SAVE_MSG, SettingsTab, SpawnTab } from "./PauseMenu";
 
-type App = "home" | "jobs" | "contacts" | "map" | "messages" | "garage" | "radio" | "hide" | "flight" | "settings";
-const APPS: [App, string, string][] = [
-  ["jobs", "Jobs", "#ff3cac"], ["contacts", "Kontakte", "#3dff8b"], ["map", "Karte", "#2bf0ff"], ["messages", "Nachrichten", "#ffd23f"],
-  ["garage", "Fahrzeug", "#ff8a1f"], ["radio", "Radio", "#c86bff"], ["hide", "Verstecken", "#5ad1c4"], ["flight", "Flug", "#7fb2ff"], ["settings", "Einstellungen", "#9aa3ad"],
+type App = "home" | "jobs" | "contacts" | "map" | "messages" | "garage" | "radio" | "hide" | "flight" | "spawn" | "progress" | "settings" | "help" | "system";
+// every function of the pause menu is an app here
+const APPS: [App, string, string, string][] = [
+  ["map", "Karte", "#2bf0ff", "map"], ["jobs", "Jobs", "#ff3cac", "money"], ["contacts", "Kontakte", "#3dff8b", "contacts"], ["messages", "Nachrichten", "#ffd23f", "messages"],
+  ["garage", "Fahrzeug", "#ff8a1f", "garage"], ["spawn", "Spawnen", "#ff5a3d", "car"], ["flight", "Flug", "#7fb2ff", "plane"], ["hide", "Verstecken", "#5ad1c4", "hide"],
+  ["radio", "Radio", "#c86bff", "radio"], ["progress", "Fortschritt", "#e1b12c", "star"], ["settings", "Einstellungen", "#9aa3ad", "settings"], ["help", "Hilfe", "#7ac8e8", "info"],
+  ["system", "Menü", "#f2f2f2", "save"],
 ];
-const ICON: Record<App, string> = { home: "phone", jobs: "money", contacts: "contacts", map: "map", messages: "messages", garage: "garage", radio: "radio", hide: "hide", flight: "plane", settings: "settings" };
+
+export interface PhoneProps {
+  game: Game; onClose: () => void; config: GameConfig; isTouch: boolean; muted: boolean;
+  onCam: () => void; onMute: () => void; onMenu: () => void; onSaved: () => void;
+}
 
 // the in-game phone (T): apps on a phone screen; the game waits while it is open
-export default function Phone({ game, onClose }: { game: Game; onClose: () => void }) {
+export default function Phone(props: PhoneProps) {
+  const { game, onClose } = props;
   const [app, setApp] = useState<App>("home");
   const [, redraw] = useState(0);
   const h = Math.floor(game.clock), m = Math.floor((game.clock % 1) * 60);
   const close = () => onClose();
   return (
     <div className="absolute inset-0 z-30 flex items-end justify-center bg-black/30 p-3 sm:items-center" onClick={close}>
-      <div className="popin flex h-[min(92vh,640px)] w-[min(94vw,360px)] flex-col overflow-hidden rounded-[2.2rem] border-4 border-[#1a1626] bg-[#0f0b1a] shadow-[0_0_40px_rgba(255,60,172,0.35)]" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 pt-3 text-xs text-white/70">
+      <div className="popin phone-shell flex h-[min(94vh,680px)] w-[min(94vw,380px)] flex-col overflow-hidden rounded-[2.4rem] border-[5px] border-[#16181c] bg-[#0d1014] shadow-[0_20px_60px_rgba(0,0,0,0.6)]" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 pt-3 text-xs text-white/80">
           <span className="font-semibold">{String(h).padStart(2, "0")}:{String(m).padStart(2, "0")}</span>
-          <span className="font-display tracking-widest text-pink-300">SB-MOBIL</span>
+          <span className="h-5 w-20 rounded-full bg-black" />
           <button onClick={close} className="rounded-full p-1 hover:bg-white/10" aria-label="Handy schließen"><Icon name="close" size={16} /></button>
         </div>
         {app !== "home" && (
@@ -35,11 +44,11 @@ export default function Phone({ game, onClose }: { game: Game; onClose: () => vo
         )}
         <div className="flex-1 overflow-y-auto p-3">
           {app === "home" && (
-            <div className="grid grid-cols-4 gap-3 pt-4">
-              {APPS.map(([k, label, col]) => (
+            <div className="grid grid-cols-4 gap-x-2 gap-y-4 pt-4">
+              {APPS.map(([k, label, col, icon]) => (
                 <button key={k} onClick={() => setApp(k)} className="flex flex-col items-center gap-1 active:scale-95">
-                  <span className="flex h-14 w-14 items-center justify-center rounded-2xl" style={{ background: col + "33", color: col, boxShadow: `0 0 12px ${col}55` }}><Icon name={ICON[k]} size={26} /></span>
-                  <span className="text-[10px] text-white/80">{label}</span>
+                  <span className="flex h-14 w-14 items-center justify-center rounded-[1.1rem] shadow-md" style={{ background: `linear-gradient(160deg, ${col}, ${col}99)`, color: "#0d1014" }}><Icon name={icon} size={26} /></span>
+                  <span className="text-[10px] text-white/85">{label}</span>
                 </button>
               ))}
             </div>
@@ -52,31 +61,31 @@ export default function Phone({ game, onClose }: { game: Game; onClose: () => vo
           {app === "radio" && <RadioApp game={game} />}
           {app === "hide" && <HideTab game={game} onDone={close} />}
           {app === "flight" && <FlightTab game={game} onDone={close} />}
-          {app === "settings" && <PhoneSettings />}
+          {app === "spawn" && <SpawnTab game={game} onResume={close} narrow />}
+          {app === "progress" && <Progress game={game} narrow />}
+          {app === "settings" && <SettingsTab game={game} isTouch={props.isTouch} narrow />}
+          {app === "help" && <div className="rounded-2xl border border-white/10 bg-black/50 p-3 text-sm"><Help isTouch={props.isTouch} bind={game.bind} /></div>}
+          {app === "system" && <SystemApp {...props} />}
         </div>
       </div>
     </div>
   );
 }
 
-function PhoneSettings() {
-  const [s, setS] = useState(loadSettings);
-  const upd = (n: typeof s) => { setS(n); saveSettings(n); applySettings(n); };
-  const row = (label: string, v: boolean, f: (b: boolean) => void) => (
-    <label className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2 text-sm">{label}<input type="checkbox" checked={v} onChange={(e) => f(e.target.checked)} className="accent-pink-500" /></label>
-  );
+// what the first page of the pause menu offers: save, camera, sound, cancel the mission, main menu
+function SystemApp({ game, onClose, config, muted, onCam, onMute, onMenu, onSaved }: PhoneProps) {
+  const [msg, setMsg] = useState("");
+  const open = config.mode === "open";
+  const b = "w-full rounded-xl bg-white/10 px-4 py-3 text-left text-sm font-bold text-white active:scale-[0.98]";
   return (
     <div className="space-y-2">
-      {row("Kamera nah", s.camNear, (b) => upd({ ...s, camNear: b }))}
-      {row("Minikarte dreht mit", s.mapRotate, (b) => upd({ ...s, mapRotate: b }))}
-      {row("Sichtkegel der Sucher", s.seekerCones, (b) => upd({ ...s, seekerCones: b }))}
-      {row("Wetterwechsel", s.weather, (b) => upd({ ...s, weather: b }))}
-      {row("Tutorial-Hinweise", s.tips, (b) => upd({ ...s, tips: b }))}
-      <label className="block rounded-xl bg-white/5 px-3 py-2 text-sm">Tempo-Faktor Fahrzeug: <b>{s.vehSpeed.toString().replace(".", ",")}x</b>
-        <input type="range" min={1} max={5} step={0.25} value={s.vehSpeed} onChange={(e) => upd({ ...s, vehSpeed: Number(e.target.value) })} className="mt-1 w-full accent-pink-500" /></label>
-      <label className="block rounded-xl bg-white/5 px-3 py-2 text-sm">Verkehr: <b>{s.traffic === 0 ? "aus" : `${Math.round(s.traffic * 100)} %`}</b>
-        <input type="range" min={0} max={3} step={0.25} value={s.traffic} onChange={(e) => upd({ ...s, traffic: Number(e.target.value) })} className="mt-1 w-full accent-pink-500" /></label>
-      <div className="text-[11px] text-white/45">Alle Einstellungen findest du im Pausenmenü.</div>
+      {open && <button className={b} onClick={() => { setMsg(SAVE_MSG[game.saveGame()]); onSaved(); }}>Speichern</button>}
+      {msg && <div className="px-1 text-xs text-white/70">{msg}</div>}
+      <button className={b} onClick={onCam}>Kamera: {CAM_LABEL[config.camera]}</button>
+      <button className={b} onClick={onMute}>{muted ? "Ton an" : "Ton aus"}</button>
+      {open && game.missions.active && <button className={b} onClick={() => { game.missions.fail("Abgebrochen"); onClose(); }}>Mission abbrechen</button>}
+      <button className={b} onClick={() => { onClose(); onMenu(); }}>Hauptmenü{open ? " (speichert)" : ""}</button>
+      <div className="pt-1 text-[11px] text-white/45">Alles aus dem Pausenmenü gibt es hier als App: Karte, Spawnen, Flug, Garage, Fortschritt, Einstellungen und Hilfe.</div>
     </div>
   );
 }

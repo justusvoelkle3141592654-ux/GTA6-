@@ -510,7 +510,7 @@ export class Game {
   // why saving is not possible right now (null: it is)
   saveBlock(): SaveResult | null {
     if (!this.rules.save) return "mode";
-    if (this.ending || (this.state !== "playing" && this.state !== "paused")) return "busy";
+    if (this.ending || (this.state !== "playing" && this.state !== "paused" && !(this.state === "modal" && this.modal?.kind === "phone"))) return "busy";
     if (this.wanted.stars > 0) return "wanted";
     if (this.jailT > 0) return "busy";
     return null;

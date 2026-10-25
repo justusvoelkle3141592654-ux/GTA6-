@@ -15,8 +15,8 @@ import { Btn, fmt, fmtTime } from "./ui";
 import Icon from "./icons";
 
 export type PauseTab = "menu" | "map" | "jobs" | "hide" | "contacts" | "progress" | "garage" | "flight" | "spawn" | "settings" | "help";
-const CAM_LABEL: Record<CameraMode, string> = { chase: "3D Verfolger", fp: "Ego (im Auto)", top: "Vogelperspektive" };
-const SAVE_MSG: Record<SaveResult, string> = {
+export const CAM_LABEL: Record<CameraMode, string> = { chase: "3D Verfolger", fp: "Ego (im Auto)", top: "Vogelperspektive" };
+export const SAVE_MSG: Record<SaveResult, string> = {
   saved: "Gespeichert", memory: "Nur vorübergehend gespeichert – der Browser blockiert den lokalen Speicher",
   wanted: "Speichern geht nur ohne Fahndung (keine Sterne)", busy: "Gerade nicht möglich", mode: "",
 };
@@ -70,12 +70,12 @@ export default function PauseMenu({ game, tab, setTab, hud, config, isTouch, mut
   );
 }
 
-function Progress({ game }: { game: Game }) {
+export function Progress({ game, narrow = false }: { game: Game; narrow?: boolean }) {
   const pr = game.progress, st = game.stats, done = new Set(pr.missions);
   const rep = (v: number) => (v <= -30 ? "feindlich" : v >= 30 ? "freundlich" : "neutral");
   const pct = Math.round(((pr.missions.length / MISSIONS.length) * 0.5 + (pr.shells.length / Math.max(1, game.jobs.shells.length)) * 0.2 + (pr.jumps.length / Math.max(1, game.jobs.jumps.length)) * 0.15 + (RACES.filter((r) => pr.records[r.id]).length / RACES.length) * 0.15) * 100);
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className={narrow ? "grid gap-3" : "grid gap-3 sm:grid-cols-2"}>
       <div className="rounded-2xl border border-white/10 bg-black/50 p-4 sm:col-span-2">
         <div className="flex items-end justify-between"><h3 className="font-display text-2xl tracking-widest text-pink-300">Gesamt</h3><div className="font-display text-4xl text-white">{pct} %</div></div>
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-gradient-to-r from-pink-500 to-yellow-300" style={{ width: `${pct}%` }} /></div>
@@ -120,7 +120,7 @@ function Progress({ game }: { game: Game }) {
 }
 
 // sandbox: everything on demand; vehicles take you back into the game right away
-function SpawnTab({ game, onResume }: { game: Game; onResume: () => void }) {
+export function SpawnTab({ game, onResume, narrow = false }: { game: Game; onResume: () => void; narrow?: boolean }) {
   const [msg, setMsg] = useState("");
   const sp = game.spawner;
   const run = (m: string, resume = false) => { setMsg(m); if (resume && !/^(Nur|Nicht|Ein Boot|Hier)/.test(m)) onResume(); };
@@ -128,10 +128,10 @@ function SpawnTab({ game, onResume }: { game: Game; onResume: () => void }) {
   const card = "rounded-2xl border border-white/10 bg-black/50 p-4 text-sm";
   const b = "rounded-lg border border-white/15 bg-white/5 px-2 py-2 text-sm font-bold text-white transition hover:border-pink-400 active:scale-95";
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className={narrow ? "grid gap-3" : "grid gap-3 sm:grid-cols-2"}>
       <div className={card + " sm:col-span-2"}>
         <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Fahrzeug herbeirufen</h3>
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+        <div className={narrow ? "grid grid-cols-2 gap-2" : "grid grid-cols-3 gap-2 sm:grid-cols-5"}>
           {SPAWN_MODELS.map((m) => <button key={m} className={b} onClick={() => run(sp.vehicle(m), true)}>{MODEL_NAME[m]}</button>)}
         </div>
         <div className="mt-2 text-[11px] text-white/50">Du steigst sofort ein. Boote erscheinen nur in der Nähe von Wasser.</div>
@@ -153,7 +153,7 @@ function SpawnTab({ game, onResume }: { game: Game; onResume: () => void }) {
       </div>
       <div className={card + " sm:col-span-2"}>
         <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Fahndung</h3>
-        <div className="grid grid-cols-7 gap-2">
+        <div className={narrow ? "grid grid-cols-4 gap-2" : "grid grid-cols-7 gap-2"}>
           {[0, 1, 2, 3, 4, 5, 6].map((n) => <button key={n} className={b} onClick={() => run(sp.wanted(n))}>{n === 0 ? "0 Sterne" : n === 1 ? "1 Stern" : n + " Sterne"}</button>)}
         </div>
       </div>
@@ -165,14 +165,14 @@ function SpawnTab({ game, onResume }: { game: Game; onResume: () => void }) {
 function Slider({ label, value, min, max, step, fmt, onChange }: { label: string; value: number; min: number; max: number; step: number; fmt: (v: number) => string; onChange: (v: number) => void }) {
   return (
     <label className="mb-2 flex items-center gap-3">
-      <span className="w-28 text-white/70">{label}</span>
+      <span className="w-24 shrink-0 text-white/70">{label}</span>
       <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="flex-1 accent-pink-500" />
       <span className="w-12 text-right text-white/60">{fmt(value)}</span>
     </label>
   );
 }
 
-function SettingsTab({ game, isTouch }: { game: Game; isTouch: boolean }) {
+export function SettingsTab({ game, isTouch, narrow = false }: { game: Game; isTouch: boolean; narrow?: boolean }) {
   const [s, setS] = useState<Settings>(loadSettings);
   const [waiting, setWaiting] = useState<Action | null>(null);
   const [, redraw] = useState(0);
@@ -192,7 +192,7 @@ function SettingsTab({ game, isTouch }: { game: Game; isTouch: boolean }) {
   }, [waiting, game]);
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className={narrow ? "grid gap-3" : "grid gap-3 sm:grid-cols-2"}>
       <div className="rounded-2xl border border-white/10 bg-black/50 p-4 text-sm">
         <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Lautstärke</h3>
         {CHANNELS.map((ch) => (
