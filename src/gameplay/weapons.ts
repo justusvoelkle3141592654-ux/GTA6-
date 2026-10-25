@@ -1,10 +1,12 @@
 import type { Crime } from "../ai/wanted";
 
-export type Weapon = "fist" | "knife" | "bat" | "pistol" | "revolver" | "smg" | "rifle" | "shotgun" | "sniper" | "grenade" | "rocket" | "bomb";
+export type Weapon = "fist" | "knife" | "bat" | "pistol" | "revolver" | "smg" | "rifle" | "shotgun" | "sniper" | "grenade" | "rocket" | "bomb" | "tnt";
 // order on the number keys and in the weapon wheel
-export const WEAPONS: Weapon[] = ["fist", "knife", "bat", "pistol", "revolver", "smg", "rifle", "shotgun", "sniper", "grenade", "rocket", "bomb"];
+export const WEAPONS: Weapon[] = ["fist", "knife", "bat", "pistol", "revolver", "smg", "rifle", "shotgun", "sniper", "grenade", "rocket", "bomb", "tnt"];
+// only from the cheat menu (one block per cheat), never in a shop or in "all weapons"
+export const CHEAT_ONLY: Weapon[] = ["tnt"];
 
-export type WeaponKind = "melee" | "gun" | "rocket" | "throw" | "sticky";
+export type WeaponKind = "melee" | "gun" | "rocket" | "throw" | "sticky" | "tnt";
 export interface WeaponDef {
   id: Weapon; name: string; icon: string; kind: WeaponKind; // icon: name of the SVG symbol (components/icons.tsx)
   dmg: number;       // per hit / pellet
@@ -33,11 +35,12 @@ export const WEAPON_DEFS: Record<Weapon, WeaponDef> = {
   grenade: { id: "grenade", name: "Granate", icon: "grenade", kind: "throw", dmg: 0, cd: 0.7, clip: 0, reload: 0, speed: 330, pellets: 1, spread: 0, range: 0, price: 800, ammoPack: 5, ammoPrice: 300, maxAmmo: 25, crime: null, noise: 0 },
   rocket: { id: "rocket", name: "Raketenwerfer", icon: "rocket", kind: "rocket", dmg: 0, cd: 0.85, clip: 0, reload: 0, speed: 720, pellets: 1, spread: 0, range: 3, price: 5000, ammoPack: 5, ammoPrice: 600, maxAmmo: 30, crime: "rocket", noise: 600 },
   bomb: { id: "bomb", name: "Haftbombe", icon: "bomb", kind: "sticky", dmg: 0, cd: 0.45, clip: 0, reload: 0, speed: 280, pellets: 1, spread: 0, range: 4, price: 2500, ammoPack: 5, ammoPrice: 400, maxAmmo: 30, crime: null, noise: 0 },
+  tnt: { id: "tnt", name: "TNT", icon: "tnt", kind: "tnt", dmg: 0, cd: 0.8, clip: 0, reload: 0, speed: 0, pellets: 1, spread: 0, range: 5, price: 0, ammoPack: 1, ammoPrice: 0, maxAmmo: 99, crime: "explosion", noise: 0 },
 };
 
 export interface InventorySave { owned: Weapon[]; ammo: Partial<Record<Weapon, number>>; clip: Partial<Record<Weapon, number>>; current: Weapon; }
 
-const zero = (): Record<Weapon, number> => ({ fist: 0, knife: 0, bat: 0, pistol: 0, revolver: 0, smg: 0, rifle: 0, shotgun: 0, sniper: 0, grenade: 0, rocket: 0, bomb: 0 });
+const zero = (): Record<Weapon, number> => ({ fist: 0, knife: 0, bat: 0, pistol: 0, revolver: 0, smg: 0, rifle: 0, shotgun: 0, sniper: 0, grenade: 0, rocket: 0, bomb: 0, tnt: 0 });
 
 // weapons the player carries; ammo = reserve outside the magazine
 export class Inventory {

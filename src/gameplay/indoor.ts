@@ -9,7 +9,7 @@ export interface IndoorPerson {
   scared: number;                                   // seconds left ducking / hands up
   clerk: boolean; role: string;
 }
-interface RoomState { people: IndoorPerson[]; yard: IndoorPerson[]; awayT: number; hurt: boolean }
+interface RoomState { people: IndoorPerson[]; yard: IndoorPerson[]; awayT: number; hurt: boolean; ruinT: number }
 
 const HP = { civ: 30, guard: 80 } as const;
 const KEEP = 900, RESET_AFTER = 90; // rooms with dead or scared people are reset this long after you have left (units, seconds)
@@ -25,14 +25,18 @@ export class IndoorPeople {
     if (it.clerk.x > -1e4) people.push(mk(it.clerk.x, it.clerk.y, 0, it.clerk.a, "civ", true));
     for (const g of it.guests) people.push(mk(g.x, g.y, g.z ?? 0, g.a, g.role ?? "civ", false));
     const yard = (it.yard?.guests ?? []).map((g) => mk(g.x, g.y, g.z ?? 0, g.a, g.role ?? "civ", false));
-    const s = { people, yard, awayT: 0, hurt: false };
+    const s = { people, yard, awayT: 0, hurt: false, ruinT: 0 };
     this.rooms.set(it, s);
     return s;
   }
   // the people of a room (in the order the renderer spawns them: the clerk first, then the guests)
   of(it: Interior): IndoorPerson[] { return (this.rooms.get(it) ?? this.make(it)).people; }
   yardOf(it: Interior): IndoorPerson[] { return (this.rooms.get(it) ?? this.make(it)).yard; }
-  clerkDead(it: Interior) { const s = this.rooms.get(it); return !!s && it.clerk.x > -1e4 && s.people[0]?.dead === true; }
+  // blown up with TNT: smoke comes out of the door for a while, the shop stays closed until the room is reset
+  ruin(it: Interior) { const s = this.rooms.get(it) ?? this.make(it); s.ruinT = 120; s.hurt = true; }
+  ruinT(it: Interior) { return this.rooms.get(it)?.ruinT ?? 0; }
+  *ruins() { for (const [it, s] of this.rooms) if (s.ruinT > 0) yield it; }
+  clerkDead(it: Interior) { const s = this.rooms.get(it); return !!s && (s.ruinT > 0 || (it.clerk.x > -1e4 && s.people[0]?.dead === true)); }
 
   private *all() { for (const [it, s] of this.rooms) { for (const p of s.people) yield { it, p, s }; for (const p of s.yard) yield { it, p, s }; } }
 
@@ -79,6 +83,7 @@ export class IndoorPeople {
     for (const [it, s] of this.rooms) {
       for (const p of s.people) p.scared = Math.max(0, p.scared - dt);
       for (const p of s.yard) p.scared = Math.max(0, p.scared - dt);
+      s.ruinT = Math.max(0, s.ruinT - dt);
       const d = Math.hypot(Math.max(it.x0 - px, 0, px - it.x1), Math.max(it.y0 - py, 0, py - it.y1));
       s.awayT = d > KEEP ? s.awayT + dt : 0;
       // far away for long enough: new people (rooms nobody was hurt in are simply forgotten)

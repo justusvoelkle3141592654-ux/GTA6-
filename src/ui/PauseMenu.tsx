@@ -14,7 +14,7 @@ import Help from "./Help";
 import { Btn, fmt, fmtTime } from "./ui";
 import Icon from "./icons";
 
-export type PauseTab = "menu" | "map" | "jobs" | "hide" | "contacts" | "progress" | "garage" | "flight" | "spawn" | "settings" | "help";
+export type PauseTab = "menu" | "map" | "jobs" | "hide" | "contacts" | "progress" | "garage" | "flight" | "spawn" | "cheats" | "settings" | "help";
 export const CAM_LABEL: Record<CameraMode, string> = { chase: "3D Verfolger", fp: "Ego (im Auto)", top: "Vogelperspektive" };
 export const SAVE_MSG: Record<SaveResult, string> = {
   saved: "Gespeichert", memory: "Nur vorübergehend gespeichert – der Browser blockiert den lokalen Speicher",
@@ -31,7 +31,7 @@ export default function PauseMenu({ game, tab, setTab, hud, config, isTouch, mut
   const [saveMsg, setSaveMsg] = useState("");
   const [, redraw] = useState(0);
   const tabs: [PauseTab, string][] = open
-    ? [["menu", "Weiter"], ["map", "Karte"], ["jobs", "Jobs"], ["hide", "Verstecken"], ["contacts", "Kontakte"], ["progress", "Fortschritt"], ["garage", "Garage"], ["flight", "Flug"], ["spawn", "Spawnen"], ["settings", "Einstellungen"], ["help", "Hilfe"]]
+    ? [["menu", "Weiter"], ["map", "Karte"], ["jobs", "Jobs"], ["hide", "Verstecken"], ["contacts", "Kontakte"], ["progress", "Fortschritt"], ["garage", "Garage"], ["flight", "Flug"], ["spawn", "Spawnen"], ["cheats", "Cheats"], ["settings", "Einstellungen"], ["help", "Hilfe"]]
     : [["menu", "Menü"], ["settings", "Einstellungen"], ["help", "Hilfe"]];
   return (
     <div className="absolute inset-0 z-20 flex flex-col items-center overflow-y-auto bg-[#0b0614]/80 p-4 backdrop-blur-sm sm:p-6">
@@ -63,6 +63,7 @@ export default function PauseMenu({ game, tab, setTab, hud, config, isTouch, mut
         {tab === "progress" && <Progress game={game} />}
         {tab === "flight" && <FlightTab game={game} onDone={onResume} />}
         {tab === "spawn" && <SpawnTab game={game} onResume={onResume} />}
+        {tab === "cheats" && <CheatTab game={game} />}
         {tab === "settings" && <SettingsTab game={game} isTouch={isTouch} />}
         {tab === "help" && <div className="rounded-2xl border border-white/10 bg-black/50 p-4"><Help isTouch={isTouch} bind={game.bind} /></div>}
       </div>
@@ -169,6 +170,26 @@ function Slider({ label, value, min, max, step, fmt, onChange }: { label: string
       <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="flex-1 accent-pink-500" />
       <span className="w-12 text-right text-white/60">{fmt(value)}</span>
     </label>
+  );
+}
+
+// cheat codes: type one in and confirm (TNT gives exactly one block per entry)
+export function CheatTab({ game }: { game: Game }) {
+  const [code, setCode] = useState("");
+  const [msg, setMsg] = useState("");
+  const go = () => { setMsg(game.cheat(code)); setCode(""); };
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/50 p-4 text-sm">
+      <h3 className="mb-2 font-display text-2xl tracking-widest text-pink-300">Cheat eingeben</h3>
+      <div className="flex gap-2">
+        <input value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") go(); }} placeholder="Code"
+          autoCapitalize="characters" autoComplete="off" spellCheck={false}
+          className="min-w-0 flex-1 rounded-lg border border-white/20 bg-white/10 px-3 py-2 font-bold uppercase tracking-widest text-white placeholder:text-white/30" />
+        <button onClick={go} className="rounded-lg bg-pink-500 px-4 py-2 font-display text-lg tracking-widest text-white">OK</button>
+      </div>
+      {msg && <div className="mt-2 text-white/85">{msg}</div>}
+      <div className="mt-3 text-xs text-white/50">TNT – ein Block Sprengstoff pro Eingabe. Ablegen mit Feuer, 5 Sekunden später geht er hoch (sprengt auch Läden).</div>
+    </div>
   );
 }
 

@@ -121,7 +121,7 @@ export const newPed = (x: number, y: number, a = 0): Ped => ({ x, y, z: terrainH
 // team: who fired (enemy bullets of the police and the gangs also hit each other); src: ped that fired (-1: none)
 // tgt: homing missiles steer towards it (anything with a live position: a car, the player, a ped, a jet)
 export interface HomingTarget { x: number; y: number; z: number; dead?: boolean; active?: boolean; }
-export interface Proj { kind: "bullet" | "rocket" | "bomb" | "grenade"; from: "player" | "enemy"; team: Team; src: number; dmg: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; a: number; life: number; px: number; py: number; tgt: HomingTarget | null; }
+export interface Proj { kind: "bullet" | "rocket" | "bomb" | "grenade" | "tnt"; from: "player" | "enemy"; team: Team; src: number; dmg: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; a: number; life: number; px: number; py: number; tgt: HomingTarget | null; }
 export interface Bomb { car: Car | null; ox: number; oy: number; x: number; y: number; z: number; t: number; }
 export interface Particle { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; size: number; grow: number; color: string; type: number; drag: number; }
 export type PickupType = "cash" | "repair" | "nitro" | "rocket" | "bomb";
@@ -132,6 +132,7 @@ export interface Flash { x: number; y: number; z: number; life: number; max: num
 
 const TAU = Math.PI * 2;
 const GRAV = 620;
+const TNT_FUSE = 5; // seconds until a placed block of TNT goes off
 const AIR_THRUST = 520, AIR_MAX = 900; // nitro thrust in the air, max air speed
 const NITRO_DRAIN = 0.22, NITRO_REGEN = 0.03; // tank per second: ~4.5 s of boost, ~33 s to refill
 export const wrap = (a: number) => { while (a > Math.PI) a -= TAU; while (a < -Math.PI) a += TAU; return a; };
@@ -1015,7 +1016,7 @@ export class Game {
     if (d.kind === "sticky" && this.bombs.length >= 30) { this.setHint("Max. 30 Bomben – erst zünden (G)", 1.5); sfx.empty(); this.fireCd = 0.3; return; }
     if (!this.inv.consume()) {
       if (this.inv.reloadT > 0) { sfx.reload(); this.setHint("Nachladen …", 0.8); }
-      else { sfx.empty(); this.setHint(this.rules.respawn ? `Keine Munition: ${d.name} – Waffenladen (W)` : `Keine Munition – such die Säulen`, 1.5); }
+      else { sfx.empty(); this.setHint(w === "tnt" ? "Kein TNT mehr – nur über Cheats (Pause → Cheats)" : this.rules.respawn ? `Keine Munition: ${d.name} – Waffenladen (W)` : `Keine Munition – such die Säulen`, 1.5); }
       this.fireCd = 0.3;
       return;
     }
@@ -1051,6 +1052,12 @@ export class Game {
       sfx.rocket();
       this.shake(0.25);
       this.flashes.push({ x: ox, y: oy, z: oz, life: 0.12, max: 0.12, size: 200 });
+    } else if (d.kind === "tnt") {
+      // a block of TNT at your feet: 5 seconds, then it goes off (a whole shop with it)
+      const pd = this.ped, tx = pd.x + Math.cos(pd.a) * 8, ty = pd.y + Math.sin(pd.a) * 8;
+      this.addProj("tnt", "player", "player", -1, 0, tx, ty, pd.z, 0, 0, 0, pd.a, TNT_FUSE);
+      sfx.beep();
+      this.setHint("TNT liegt – 5 Sekunden, lauf!", 2);
     } else if (d.kind === "throw") {
       this.addProj("grenade", "player", "player", -1, 0, ox, oy, oz + 4, Math.cos(a) * speed + bvx * 0.8, Math.sin(a) * speed + bvy * 0.8, 210, a, 2.2);
       sfx.throwIt();
@@ -1153,6 +1160,35 @@ export class Game {
     }
   }
 
+  // TNT goes off: a much bigger blast; in a shop everybody inside goes down and the shop is wrecked
+  private blowTnt(x: number, y: number, z: number) {
+    const it = interiorAt(this.interiors, x, y);
+    this.explode(x, y, 2.6, 6, true, z);
+    this.crime("explosion", 2);
+    if (it && z < it.H - 4) {
+      this.indoor.blast(x, y, z, 2000);
+      this.indoor.ruin(it);
+      if (this.robbery?.it === it) this.robbery = null;
+      // you are inside too: that hurts
+      const pd = this.ped;
+      if (this.onFoot && this.inside === it) { const d = Math.hypot(pd.x - x, pd.y - y); this.damagePed(Math.max(15, 120 - d)); }
+      if (it.kind !== "safehouse" && !it.prison && !it.homes) this.banner("GESPRENGT", `${it.name} liegt in Trümmern`, "#ff5a3d", 2.4);
+    }
+  }
+  // a cheat code from the cheat menu; returns what happened
+  cheat(code: string): string {
+    const c = code.trim().toUpperCase();
+    if (!c) return "";
+    if (this.state !== "playing" && this.state !== "modal" && this.state !== "paused") return "Erst ein Spiel starten";
+    if (c === "TNT") {
+      this.inv.give("tnt", 1); this.inv.select("tnt");
+      sfx.checkpoint();
+      return `1 Block TNT (jetzt ${this.inv.total("tnt")}) – ausgewählt, Feuer legt ihn ab`;
+    }
+    sfx.empty();
+    return "Unbekannter Cheat";
+  }
+
   // a person in a room was hit by the player
   private hitIndoor(it: Interior, p: IndoorPerson, dmg: number, fx: number, fy: number, push: number) {
     for (let i = 0; i < 6; i++) this.emit(p.x, p.y, p.z + 12, rnd(-30, 30), rnd(-30, 30), rnd(10, 60), rnd(0.3, 0.6), rnd(2, 4), -200, "#8a0f14", 0, 1);
@@ -1211,6 +1247,13 @@ export class Game {
       const q = this.projs[i];
       q.life -= dt;
       q.px = q.x; q.py = q.y;
+      if (q.kind === "tnt") {
+        // ticking: a beep every second, faster at the end
+        const step = q.life > 1.5 ? 1 : 0.25;
+        if (Math.floor(q.life / step) !== Math.floor((q.life + dt) / step)) sfx.beep();
+        if (q.life <= 0) { this.blowTnt(q.x, q.y, q.z); this.dropProj(i); }
+        continue;
+      }
       if (q.kind === "bomb" || q.kind === "grenade") { q.vz -= GRAV * dt; q.vx *= Math.exp(-0.5 * dt); q.vy *= Math.exp(-0.5 * dt); }
       // homing missiles turn towards their target (limited turn rate, so you can dodge them)
       if (q.tgt) {
@@ -2351,7 +2394,11 @@ export class Game {
     if (playing && this.rules.city) this.checkBorder(dt);
     this.traffic.lights.update(dt);
     if (playing && this.rules.city) { this.peds.update(dt, this); this.traffic.updateParking(this, dt, this.parkedLimit); }
-    if (playing) this.indoor.update(dt, this.fx, this.fy);
+    if (playing) {
+      this.indoor.update(dt, this.fx, this.fy);
+      // blown-up shops: smoke out of the door
+      for (const it of this.indoor.ruins()) if (Math.hypot(it.door.x - this.fx, it.door.y - this.fy) < 900 && P60(0.6, dt)) this.emit(it.door.x - 6, it.door.y + rnd(-8, 8), 20, rnd(-10, 10), rnd(-10, 10), rnd(30, 60), rnd(2, 3.5), rnd(14, 24), 30, "#2a2628", 0, 1.2);
+    }
     if (playing) this.updateProjs(dt);
     if (playing && !this.ending) {
       this.updatePlaces();

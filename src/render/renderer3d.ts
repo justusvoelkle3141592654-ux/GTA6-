@@ -1605,6 +1605,15 @@ export class Renderer3D {
     for (const [pk, o] of this.pickObjs) if (!seen.has(pk)) { this.scene.remove(o); this.pickObjs.delete(pk); }
   }
 
+  // a block of TNT: red sticks with a fuse; it blinks white while it ticks
+  private tntGeo = (() => {
+    const parts: THREE.BufferGeometry[] = [];
+    for (const [x, z] of [[-1.6, -1.6], [1.6, -1.6], [-1.6, 1.6], [1.6, 1.6]]) parts.push(new THREE.CylinderGeometry(1.5, 1.5, 8, 10).translate(x, 4, z));
+    parts.push(new THREE.CylinderGeometry(0.25, 0.25, 3, 5).translate(0, 9.5, 0));
+    return mergeGeometries(parts.map((p) => p.toNonIndexed()))!;
+  })();
+  private tntMat = new THREE.MeshStandardMaterial({ color: "#c0261c", roughness: 0.65 });
+  private tntBlink = new THREE.MeshStandardMaterial({ color: "#ffffff", emissive: "#ff4020", emissiveIntensity: 1.5 });
   private syncProjs(g: Game) {
     const seen = this.seenProjs;
     seen.clear();
@@ -1616,10 +1625,11 @@ export class Renderer3D {
       if (q.kind === "bullet") { o.geometry = this.bulletGeo; o.material = q.from === "enemy" ? this.enemyBulletMat : this.bulletMat; }
       else if (q.kind === "rocket") { o.geometry = this.rocketGeo; o.material = this.rocketMat; }
       else if (q.kind === "grenade") { o.geometry = this.bombGeo; o.material = this.grenadeMat; }
+      else if (q.kind === "tnt") { o.geometry = this.tntGeo; o.material = (q.life % 0.5 < 0.12 ? this.tntBlink : this.tntMat); }
       else { o.geometry = this.bombGeo; o.material = this.bombMat; }
       o.position.set(q.x, q.z, q.y);
       const a = Math.atan2(q.vy, q.vx);
-      o.rotation.set(0, -a, q.kind === "bomb" || q.kind === "grenade" ? g.t * 8 : Math.atan2(q.vz, Math.hypot(q.vx, q.vy)));
+      o.rotation.set(0, q.kind === "tnt" ? -q.a : -a, q.kind === "bomb" || q.kind === "grenade" ? g.t * 8 : q.kind === "tnt" ? 0 : Math.atan2(q.vz, Math.hypot(q.vx, q.vy)));
     }
     for (const [q, o] of this.projObjs) if (!seen.has(q)) { this.scene.remove(o); this.projObjs.delete(q); }
     const seenB = this.seenBombs;

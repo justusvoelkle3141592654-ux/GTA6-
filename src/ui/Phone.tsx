@@ -5,15 +5,15 @@ import BigMap from "./BigMap";
 import Help from "./Help";
 import Icon from "./icons";
 import { ContactsTab, FlightTab, GarageTab, HideTab, JobsTab, MessagesApp, RadioApp } from "./GameTabs";
-import { CAM_LABEL, Progress, SAVE_MSG, SettingsTab, SpawnTab } from "./PauseMenu";
+import { CAM_LABEL, CheatTab, Progress, SAVE_MSG, SettingsTab, SpawnTab } from "./PauseMenu";
 
-type App = "home" | "jobs" | "contacts" | "map" | "messages" | "garage" | "radio" | "hide" | "flight" | "spawn" | "progress" | "settings" | "help" | "system";
+type App = "home" | "jobs" | "contacts" | "map" | "messages" | "garage" | "radio" | "hide" | "flight" | "spawn" | "cheats" | "progress" | "settings" | "help" | "system";
 // every function of the pause menu is an app here
 const APPS: [App, string, string, string][] = [
   ["map", "Karte", "#2bf0ff", "map"], ["jobs", "Jobs", "#ff3cac", "money"], ["contacts", "Kontakte", "#3dff8b", "contacts"], ["messages", "Nachrichten", "#ffd23f", "messages"],
   ["garage", "Fahrzeug", "#ff8a1f", "garage"], ["spawn", "Spawnen", "#ff5a3d", "car"], ["flight", "Flug", "#7fb2ff", "plane"], ["hide", "Verstecken", "#5ad1c4", "hide"],
   ["radio", "Radio", "#c86bff", "radio"], ["progress", "Fortschritt", "#e1b12c", "star"], ["settings", "Einstellungen", "#9aa3ad", "settings"], ["help", "Hilfe", "#7ac8e8", "info"],
-  ["system", "Menü", "#f2f2f2", "save"],
+  ["cheats", "Cheats", "#ff4d6d", "tnt"], ["system", "Menü", "#f2f2f2", "save"],
 ];
 
 export interface PhoneProps {
@@ -63,6 +63,7 @@ export default function Phone(props: PhoneProps) {
           {app === "flight" && <FlightTab game={game} onDone={close} />}
           {app === "spawn" && <SpawnTab game={game} onResume={close} narrow />}
           {app === "progress" && <Progress game={game} narrow />}
+          {app === "cheats" && <CheatTab game={game} />}
           {app === "settings" && <SettingsTab game={game} isTouch={props.isTouch} narrow />}
           {app === "help" && <div className="rounded-2xl border border-white/10 bg-black/50 p-3 text-sm"><Help isTouch={props.isTouch} bind={game.bind} /></div>}
           {app === "system" && <SystemApp {...props} />}

@@ -1,6 +1,6 @@
 import { Car, CAR_MODELS, MODEL_NAME, MODEL_STATS, isBoat, isAircraft, isPlane, type CarModel } from "../vehicles/vehicles";
 import { WATER_Y, isWater, terrainH } from "../world/world";
-import { WEAPONS, WEAPON_DEFS } from "./weapons";
+import { CHEAT_ONLY, WEAPONS, WEAPON_DEFS } from "./weapons";
 import { STAR_HEAT } from "../ai/wanted";
 import { MAX_ARMOR, type Game } from "../core/engine";
 import type { FactionId } from "../vehicles/vehicles";
@@ -74,7 +74,7 @@ export class Spawner {
 
   weapons(): string {
     const g = this.g;
-    for (const w of WEAPONS) { const d = WEAPON_DEFS[w]; g.inv.give(w, d.maxAmmo); }
+    for (const w of WEAPONS) { if (CHEAT_ONLY.includes(w)) continue; const d = WEAPON_DEFS[w]; g.inv.give(w, d.maxAmmo); }
     return "Alle Waffen mit voller Munition";
   }
 

@@ -961,6 +961,7 @@ export function weaponGeo(kind: string): THREE.BufferGeometry | null {
     case "bat": Cy(0.22, 8.5, 0, -3.5, 0, 0.42); break;
     case "grenade": parts.push(new THREE.SphereGeometry(0.4, 8, 6).translate(0.2, -0.6, 0)); break;
     case "bomb": parts.push(new THREE.SphereGeometry(0.45, 8, 6).translate(0.2, -0.6, 0)); break;
+    case "tnt": parts.push(new THREE.BoxGeometry(0.55, 0.9, 0.55).translate(0.2, -0.65, 0)); break;
     case "phone": B(0.12, 0.85, 0.42, 0.2, -0.5, 0); break;
     default: return null;
   }

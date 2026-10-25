@@ -29,7 +29,7 @@ const gunMats = {
   bomb: new THREE.MeshStandardMaterial({ color: 0x3a3a44, emissive: 0xff2040, emissiveIntensity: 0.8, roughness: 0.4, metalness: 0.5 }),
   phone: new THREE.MeshStandardMaterial({ color: 0x15161b, roughness: 0.3, metalness: 0.4 }),
 };
-const WMAT: Record<Weapon, THREE.Material> = { fist: gunMats.metal, knife: gunMats.metal, bat: gunMats.wood, pistol: gunMats.metal, revolver: gunMats.metal, smg: gunMats.metal, rifle: gunMats.metal, shotgun: gunMats.wood, sniper: gunMats.metal, grenade: gunMats.green, rocket: gunMats.launcher, bomb: gunMats.bomb };
+const WMAT: Record<Weapon, THREE.Material> = { fist: gunMats.metal, knife: gunMats.metal, bat: gunMats.wood, pistol: gunMats.metal, revolver: gunMats.metal, smg: gunMats.metal, rifle: gunMats.metal, shotgun: gunMats.wood, sniper: gunMats.metal, grenade: gunMats.green, rocket: gunMats.launcher, bomb: gunMats.bomb, tnt: new THREE.MeshStandardMaterial({ color: "#c0261c", roughness: 0.7 }) };
 
 // the animation for an action of the player (entering and leaving cars, rolling out)
 export type ActKind = "open" | "smash" | "butt" | "jack" | "getin" | "getout" | "roll";
@@ -142,7 +142,7 @@ export class PlayerFigure {
     if (!pd.dead && !act && !pd.swim) {
       const fresh = pd.shootT > this.lastShoot + 0.05;
       if (kind === "melee" && (pd.shootT > 0 || !r.done(wpn === "bat" ? "bat" : "punch"))) upper = wpn === "bat" ? "bat" : "punch";
-      else if ((kind === "throw" || kind === "sticky") && (pd.shootT > 0 || !r.done("throw"))) upper = "throw";
+      else if ((kind === "throw" || kind === "sticky" || kind === "tnt") && (pd.shootT > 0 || !r.done("throw"))) upper = "throw";
       else if (kind === "gun" && g.inv.reloadT > 0) upper = "reload";
       else if ((kind === "gun" && pd.shootT > 0) || kind === "rocket") upper = wpn === "pistol" || wpn === "revolver" ? "aimPistol" : "aimRifle";
       if (!upper && pd.hitFlash > this.lastHit + 0.05) upper = "hit";

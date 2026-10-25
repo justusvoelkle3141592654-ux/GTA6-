@@ -42,6 +42,7 @@ const P: Record<string, string> = {
   grenade: "M12 8a6 6 0 1 0 0 12 6 6 0 1 0 0-12zM10 8V5h4v3M14 5l3-2M9 14h6M12 11v6",
   rocket: "M2 11h14l4 1-4 1H2zM6 13v4h3v-4M4 11V9M20 12h2",
   bomb: "M11 9a6 6 0 1 0 0 12 6 6 0 1 0 0-12zM14 10l3-3M17 7l1-3M17 7l3-1",
+  tnt: "M5 9h14v12H5zM5 13h14M5 17h14M12 9V5M12 5l3-2",
   // controls and HUD
   camera: "M3 8h4l2-3h6l2 3h4v11H3zM12 10a3.5 3.5 0 1 0 0 7 3.5 3.5 0 1 0 0-7",
   car: "M3 15h18v-3l-2-5H5l-2 5zM5 12h14M7 18a1.6 1.6 0 1 0 0 .01M17 18a1.6 1.6 0 1 0 0 .01M3 15v3M21 15v3",
