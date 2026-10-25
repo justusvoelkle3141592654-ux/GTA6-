@@ -8,9 +8,14 @@ import Icon from "./icons";
 type Filter = "shops" | "jobs" | "missions" | "collect" | "ramps";
 const FILTERS: [Filter, string][] = [["shops", "Läden"], ["jobs", "Jobs"], ["missions", "Missionen"], ["collect", "Sammelobjekte"], ["ramps", "Rampen"]];
 
+type Sel = { kind: "marker"; id: number } | { kind: "place"; id: string } | null;
+
 // the whole map: districts, street names, places, goals; zoom (wheel, pinch, buttons) and pan (drag, buttons);
-// a click / tap without dragging sets a waypoint
-export default function BigMap({ game, onChange }: { game: Game; onChange: () => void }) {
+// a click / tap without dragging sets a marker (or picks the place / marker under it); for the picked one:
+// GPS route, fly there, jump there, delete. onTravel: the menu closes when a trip starts
+export default function BigMap({ game, onChange, onTravel }: { game: Game; onChange: () => void; onTravel?: () => void }) {
+  const [sel, setSel] = useState<Sel>(null);
+  const [msg, setMsg] = useState("");
   const ref = useRef<HTMLCanvasElement>(null);
   const [zoom, setZoom] = useState(1);
   const [center, setCenter] = useState(() => ({ x: MAP_MIN + MAP_SIZE / 2, y: MAP_MIN + MAP_SIZE / 2 }));
@@ -70,6 +75,19 @@ export default function BigMap({ game, onChange }: { game: Game; onChange: () =>
       g.strokeStyle = mk.color; g.lineWidth = 3; g.beginPath(); g.arc(p.x, p.y, S / 55, 0, Math.PI * 2); g.stroke();
       if (mk.label) { g.fillStyle = mk.color; g.fillText(mk.label, p.x, p.y + 1); }
     }
+    // own markers (a pin with its number), the picked one bigger
+    g.font = `bold ${Math.round(S / 64)}px Inter, sans-serif`;
+    for (const mk of game.markers) {
+      const p = toCanvas(mk.x, mk.y, S), big = sel?.kind === "marker" && sel.id === mk.id, rr = big ? 13 : 10;
+      g.fillStyle = big ? "#ffd23f" : "#2bf0ff"; g.strokeStyle = "rgba(0,0,0,0.75)"; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - rr * 0.7, p.y - rr * 1.2); g.arc(p.x, p.y - rr * 1.5, rr * 0.8, Math.PI * 0.8, Math.PI * 0.2); g.closePath(); g.fill(); g.stroke();
+      g.fillStyle = "#0b0614"; g.fillText(String(mk.id), p.x, p.y - rr * 1.5);
+    }
+    if (sel?.kind === "place") {
+      const pl = game.places.find((q) => q.id === sel.id);
+      if (pl) { const p = toCanvas(pl.x, pl.y, S); g.strokeStyle = "#ffd23f"; g.lineWidth = 3; g.beginPath(); g.arc(p.x, p.y, r * 1.6, 0, Math.PI * 2); g.stroke(); }
+    }
+    g.font = `bold ${Math.round(S / 60)}px Inter, sans-serif`;
     // waypoint and player
     if (game.waypoint) {
       const p = toCanvas(game.waypoint.x, game.waypoint.y, S);
@@ -121,15 +139,54 @@ export default function BigMap({ game, onChange }: { game: Game; onChange: () =>
     if (pts.current.size < 2) drag.current.pinch = 0;
     if (!wasTap) return;
     const w = worldAt(e.clientX, e.clientY);
-    game.setWaypoint(w.x, w.y);
+    // what is under the finger: a marker, a place, else a new marker
+    const c = ref.current!, px = (span / c.getBoundingClientRect().width) * 16; // 16 screen pixels in world units
+    const mk = game.markers.find((m) => Math.hypot(m.x - w.x, m.y - w.y + px * 0.8) < px * 1.2);
+    const pl = mk ? null : game.places.find((q) => Math.hypot(q.x - w.x, q.y - w.y) < px && (filters.shops || !WALKABLE.has(q.id)) && (filters.jobs || q.kind !== "job"));
+    if (mk) setSel({ kind: "marker", id: mk.id });
+    else if (pl) setSel({ kind: "place", id: pl.id });
+    else { const m = game.addMarker(w.x, w.y); setSel({ kind: "marker", id: m.id }); }
+    setMsg("");
     draw(); onChange();
   };
+  // the picked marker / place and what you can do with it
+  const picked = (() => {
+    if (sel?.kind === "marker") { const m = game.markers.find((q) => q.id === sel.id); return m ? { name: m.name, x: m.x, y: m.y, marker: m.id } : null; }
+    if (sel?.kind === "place") { const pl = game.places.find((q) => q.id === sel.id); return pl ? { name: pl.name, x: pl.x, y: pl.y, marker: 0 } : null; }
+    return null;
+  })();
+  const go = (instant: boolean) => {
+    if (!picked) return;
+    const r = game.travelToPoint(picked.x, picked.y, picked.name, instant);
+    if (r) { setMsg(r); return; }
+    onTravel?.();
+  };
+  const dist = picked ? Math.hypot(picked.x - game.fx, picked.y - game.fy) / 10 : 0;
   const wheel = (e: React.WheelEvent<HTMLCanvasElement>) => zoomTo(zoom * (e.deltaY < 0 ? 1.25 : 0.8), worldAt(e.clientX, e.clientY));
   const pan = (dx: number, dy: number) => setCenter((c) => clampC({ x: c.x + dx * span * 0.25, y: c.y + dy * span * 0.25 }));
   const btn = "flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 bg-black/50 text-lg font-bold text-white/85 active:scale-90";
 
   return (
     <div className="flex flex-col items-center gap-2">
+      {picked && (
+        <div className="w-full max-w-[min(86vw,62vh)] rounded-xl border border-white/15 bg-black/70 p-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-bold text-white">{picked.name}</div>
+              <div className="text-[11px] text-white/55">{dist >= 1000 ? (dist / 1000).toFixed(1).replace(".", ",") + " km" : Math.round(dist) + " m"} entfernt</div>
+            </div>
+            <button onClick={() => { setSel(null); setMsg(""); }} className="rounded-lg px-2 py-1 text-white/60 hover:text-white" aria-label="Auswahl schließen"><Icon name="close" size={14} /></button>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-1.5 text-xs font-bold sm:grid-cols-4">
+            <button onClick={() => go(false)} className="rounded-lg bg-pink-500 px-2 py-2 text-white active:scale-95">Hinfliegen</button>
+            <button onClick={() => go(true)} className="rounded-lg bg-white/15 px-2 py-2 text-white active:scale-95">Sofort hin</button>
+            <button onClick={() => { game.setWaypoint(picked.x, picked.y); setMsg("GPS-Route gesetzt"); draw(); onChange(); }} className="rounded-lg bg-white/15 px-2 py-2 text-white active:scale-95">GPS-Route</button>
+            {picked.marker ? <button onClick={() => { game.removeMarker(picked.marker); setSel(null); draw(); onChange(); }} className="rounded-lg bg-red-500/70 px-2 py-2 text-white active:scale-95">Löschen</button>
+              : <button onClick={() => { const m = game.addMarker(picked.x, picked.y); m.name = picked.name; setSel({ kind: "marker", id: m.id }); draw(); onChange(); }} className="rounded-lg bg-white/15 px-2 py-2 text-white active:scale-95">Markieren</button>}
+          </div>
+          {msg && <div className="mt-1.5 text-[11px] text-amber-300">{msg}</div>}
+        </div>
+      )}
       <div className="relative">
         <canvas ref={ref} width={720} height={720} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onWheel={wheel}
           className="aspect-square w-[min(86vw,62vh)] cursor-crosshair touch-none rounded-2xl border border-white/15 bg-[#0b3a5c]" />
@@ -144,6 +201,16 @@ export default function BigMap({ game, onChange }: { game: Game; onChange: () =>
           <span /><button className={btn} onClick={() => pan(0, 1)} aria-label="Nach Süden">↓</button><span />
         </div>
       </div>
+      {game.markers.length > 0 && (
+        <div className="flex w-full max-w-[min(86vw,62vh)] flex-wrap items-center gap-1.5 text-[11px]">
+          <span className="font-semibold text-white/70">Markierungen:</span>
+          {game.markers.map((m) => (
+            <button key={m.id} onClick={() => { setSel({ kind: "marker", id: m.id }); setCenter(clampC({ x: m.x, y: m.y })); setMsg(""); }}
+              className={"max-w-[11rem] truncate rounded-full border px-2.5 py-1 font-semibold " + (sel?.kind === "marker" && sel.id === m.id ? "border-amber-300 bg-amber-400/25 text-white" : "border-cyan-300/40 bg-cyan-400/10 text-white/80")}>{m.name}</button>
+          ))}
+          <button onClick={() => { game.clearMarkers(); setSel(null); draw(); onChange(); }} className="rounded-full border border-white/15 px-2.5 py-1 text-white/60">Alle löschen</button>
+        </div>
+      )}
       <div className="flex w-full max-w-[min(86vw,62vh)] flex-wrap items-center gap-1.5 text-[11px]">
         <span className="font-semibold text-white/70">Anzeigen:</span>
         {FILTERS.map(([f, l]) => (
@@ -162,9 +229,9 @@ export default function BigMap({ game, onChange }: { game: Game; onChange: () =>
       <div className="flex w-full max-w-[min(86vw,62vh)] flex-wrap gap-x-3 gap-y-1 text-[11px] text-white/60">
         {game.places.filter((pl) => WALKABLE.has(pl.id)).map((pl) => <span key={pl.id} className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: pl.color }} />{pl.name}</span>)}
       </div>
-      <div className="flex items-center gap-3 text-xs text-white/60">
-        <span>Tippen setzt einen Wegpunkt · ziehen verschiebt · Mausrad / zwei Finger zoomen</span>
-        {game.waypoint && <button onClick={() => { game.clearWaypoint(); draw(); onChange(); }} className="rounded-lg border border-white/20 px-2 py-1 text-white/80">Wegpunkt löschen</button>}
+      <div className="flex flex-wrap items-center justify-center gap-3 text-xs text-white/60">
+        <span>Tippen setzt eine Markierung oder wählt einen Ort · ziehen verschiebt · Mausrad / zwei Finger zoomen</span>
+        {game.waypoint && <button onClick={() => { game.clearWaypoint(); draw(); onChange(); }} className="rounded-lg border border-white/20 px-2 py-1 text-white/80">GPS-Route beenden</button>}
       </div>
     </div>
   );

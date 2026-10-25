@@ -5,7 +5,7 @@ import { MODE_RULES, type Mode, type ModeRules } from "./modes";
 import { Wanted, CRIMES, type Crime } from "../ai/wanted";
 import { buildPlaces, onJetty, respawnCost, RESPAWN_RULES, type Place } from "../world/places";
 import { PedSystem, PED_LIMIT, isPolice, type Civilian, type Team } from "../ai/peds";
-import { Car, CARS, VEH_SCALE, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, isJet, isAircraft, isTwoWheel, hitCar, copyBody, repairBody, type CarDef, type FactionId } from "../vehicles/vehicles";
+import { Car, CARS, VEH_SCALE, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, isJet, isAircraft, isTwoWheel, hitCar, copyBody, repairBody, type CarDef, type CarModel, type FactionId } from "../vehicles/vehicles";
 import { Inventory, WEAPONS, WEAPON_DEFS, type Weapon } from "../gameplay/weapons";
 import { SHAPES, hasRig } from "../vehicles/carmodel";
 import { buildInteriors, interiorAt, interiorFloor, interiorCeil, inRoofHole, type Elevator, type Home, type Interior, type Seat } from "../world/interiors";
@@ -229,6 +229,8 @@ export class Game {
   range: { it: Interior; t: number; score: number; tgt: number; tT: number } | null = null;
   robbery: { it: Interior; t: number; paid: boolean } | null = null;
   garage: OwnedCar[] = [];
+  crafts: CarModel[] = [];   // boats and aircraft bought at the dealers (wait at the jetty / the heliport)
+  items: string[] = [];      // gadgets bought in the shops
   district: DistrictId = "downtown"; districtT = 0; // name is shown big for a moment after entering
   nearPlace: Place | null = null;
   modal: ModalInfo | null = null;
@@ -442,7 +444,7 @@ export class Game {
     // open world: fists and a pistol; arcade modes: endless pistol, rockets and sticky bombs
     if (rules.respawn) this.inv.reset(["pistol"], { pistol: 48 });
     else this.inv.reset(["pistol", "rocket", "bomb"], { rocket: 30, bomb: 30 }, ["pistol"], false);
-    this.outfit = 0; this.style = { ...DEFAULT_STYLE }; this.energyT = 0; this.seat = null; this.range = null; this.robbery = null; this.garage = []; this.shops.reset(); this.gangs.reset(); this.placeLatch = "";
+    this.outfit = 0; this.style = { ...DEFAULT_STYLE }; this.energyT = 0; this.seat = null; this.range = null; this.robbery = null; this.garage = []; this.crafts = []; this.items = []; this.markers = []; this.shops.reset(); this.gangs.reset(); this.placeLatch = "";
     this.district = districtAt(this.player.x, this.player.y);
     this.copSpawnT = this.diff.firstCop;
     const p = this.player;
@@ -500,6 +502,8 @@ export class Game {
     this.district = districtAt(this.fx, this.fy);
     this.progress = JSON.parse(JSON.stringify(sv.progress)) as Progress;
     this.style = { ...sv.style }; this.clock = sv.clock; this.setWeather(sv.weather); this.weatherT = 99;
+    this.markers = (sv.markers ?? []).map((m) => ({ ...m, id: ++this.markerN }));
+    this.crafts = [...(sv.crafts ?? [])] as CarModel[]; this.items = [...(sv.items ?? [])];
     this.r3d.resetCamera(this.onFoot ? pd.a : p.a);
   }
 
@@ -526,6 +530,7 @@ export class Game {
       garage: this.garage.map((c) => ({ ...c, tune: { ...c.tune } })), radio: this.radio.station,
       stats: { ...this.stats }, progress: JSON.parse(JSON.stringify(this.progress)) as Progress,
       style: { ...this.style, hair: (["short", "buzz", "curls", "long", "ponytail", "bald"] as const).find((h) => h === this.style.hair) ?? "short" }, clock: this.clock, weather: this.weather,
+      markers: this.markers.map((m) => ({ x: m.x, y: m.y, name: m.name })), crafts: [...this.crafts], items: [...this.items],
     };
     this.autosaveT = AUTOSAVE_EVERY;
     return writeSave(d);
@@ -1808,6 +1813,17 @@ export class Game {
   nav: { x: number; y: number; color: string } | null = null;
   private routeT = 0;
   setWaypoint(x: number, y: number) { this.waypoint = { x, y }; this.routeT = 0; sfx.beep(); }
+  // own markers on the big map (any number; one of them can be the GPS waypoint)
+  markers: { id: number; x: number; y: number; name: string }[] = [];
+  private markerN = 0;
+  addMarker(x: number, y: number) {
+    if (this.markers.length >= 40) this.markers.shift();
+    const n = ++this.markerN, m = { id: n, x, y, name: `Markierung ${n} · ${DISTRICTS[districtAt(x, y)].name}` };
+    this.markers.push(m); sfx.beep();
+    return m;
+  }
+  removeMarker(id: number) { this.markers = this.markers.filter((m) => m.id !== id); }
+  clearMarkers() { this.markers = []; }
   clearWaypoint() { this.waypoint = null; this.routeT = 0; }
   private updateNav(dt: number) {
     let goal: { x: number; y: number; color: string } | null = null;
@@ -2436,6 +2452,19 @@ export class Game {
     if (this.jailT > 0) return "Nicht im Gefängnis";
     const d = this.flightTargets().find((q) => q.id === id);
     if (!d) return "";
+    return this.travelGo(d, instant);
+  }
+  // fly / jump to any point of the map (big map markers): the nearest street or pavement next to it
+  travelToPoint(x: number, y: number, name: string, instant: boolean): string {
+    if (!this.rules.city) return "Nur in der Open World";
+    if (this.missions.active || this.hide.active) return "Nicht während einer Mission oder des Versteckspiels";
+    if (this.jailT > 0) return "Nicht im Gefängnis";
+    const it = interiorAt(this.interiors, x, y);
+    if (it && !it.prison) return this.travelGo({ name: it.name, x: it.door.x + 22, y: it.door.y }, instant);
+    const q = this.world.nearestSafeRoad(x, y);
+    return this.travelGo({ name, x: q.x, y: q.y }, instant);
+  }
+  private travelGo(d: { name: string; x: number; y: number }, instant: boolean): string {
     if (!this.onFoot) { const p = this.player; p.vx = 0; p.vy = 0; p.throttle = 0; this.exitCar(false); }
     this.act = null; this.approach = null; this.seat = null;
     const pd = this.ped, tz = this.groundH(d.x, d.y, 0);
@@ -3222,6 +3251,13 @@ export class Game {
         const d = Math.hypot(dx, dy);
         if (d > size / 2 - 7) { dx *= (size / 2 - 7) / d; dy *= (size / 2 - 7) / d; }
         ctx.strokeStyle = "#ff3cac"; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(cxm + dx, cym + dy, 5, 0, TAU); ctx.stroke();
+      }
+      // own markers from the big map (only while they are on the minimap)
+      for (const mk of this.markers) {
+        const dx = (mk.x - fx) * m, dy = (mk.y - fy) * m;
+        if (Math.hypot(dx, dy) > size / 2 - 6) continue;
+        ctx.fillStyle = "#2bf0ff"; ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(cxm + dx, cym + dy); ctx.lineTo(cxm + dx - 3.5, cym + dy - 6); ctx.arc(cxm + dx, cym + dy - 7.5, 4, Math.PI * 0.8, Math.PI * 0.2); ctx.closePath(); ctx.fill(); ctx.stroke();
       }
     }
     if (this.onFoot && !this.player.dead && !this.playerCarStored) {

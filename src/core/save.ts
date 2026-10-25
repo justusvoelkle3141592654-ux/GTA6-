@@ -46,6 +46,9 @@ export interface SaveData {
   style: { hair: (typeof HAIRS)[number]; beard: number; tattoo: number }; // barber
   clock: number;       // time of day (hours)
   weather: (typeof WEATHERS)[number];
+  markers?: { x: number; y: number; name: string }[]; // own markers on the big map (since the Realism update)
+  crafts?: string[];   // boats and aircraft bought at the dealers (since the Realism update)
+  items?: string[];    // gadgets from the shops: phone cases, scanner, ... (since the Realism update)
 }
 export type SaveResult = "saved" | "memory" | "wanted" | "busy" | "mode";
 
@@ -170,5 +173,8 @@ function validate(d: unknown): SaveData | null {
     stats, progress,
     style: isObj(d.style) ? { hair: oneOf(d.style.hair, HAIRS) ? d.style.hair : "short", beard: Math.round(clampN(d.style.beard, 0, 2, 1)), tattoo: Math.round(clampN(d.style.tattoo, 0, 3, 0)) } : { hair: "short", beard: 1, tattoo: 0 },
     clock: clampN(d.clock, 0, 23.99, 10), weather: oneOf(d.weather, WEATHERS) ? d.weather : "sun",
+    markers: Array.isArray(d.markers) ? d.markers.filter((m): m is { x: number; y: number; name: string } => isObj(m) && num(m.x) && num(m.y) && typeof m.name === "string").slice(0, 40).map((m) => ({ x: m.x, y: m.y, name: m.name.slice(0, 40) })) : [],
+    crafts: Array.isArray(d.crafts) ? d.crafts.filter((c): c is string => typeof c === "string" && (CAR_MODELS as readonly string[]).includes(c)).slice(0, 30) : [],
+    items: Array.isArray(d.items) ? d.items.filter((c): c is string => typeof c === "string").slice(0, 60) : [],
   };
 }

@@ -55,7 +55,7 @@ export default function PauseMenu({ game, tab, setTab, hud, config, isTouch, mut
             {!isTouch && <div className="text-center text-xs text-white/40">P / Esc = weiter · M = Karte</div>}
           </div>
         )}
-        {tab === "map" && <BigMap game={game} onChange={() => redraw((n) => n + 1)} />}
+        {tab === "map" && <BigMap game={game} onChange={() => redraw((n) => n + 1)} onTravel={onResume} />}
         {tab === "jobs" && <JobsTab game={game} onDone={onResume} />}
         {tab === "hide" && <HideTab game={game} onDone={onResume} />}
         {tab === "contacts" && <ContactsTab game={game} />}

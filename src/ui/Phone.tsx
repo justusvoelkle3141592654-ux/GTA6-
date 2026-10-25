@@ -46,7 +46,7 @@ export default function Phone({ game, onClose }: { game: Game; onClose: () => vo
           )}
           {app === "jobs" && <JobsTab game={game} compact onDone={close} />}
           {app === "contacts" && <ContactsTab game={game} />}
-          {app === "map" && <BigMap game={game} onChange={() => redraw((n) => n + 1)} />}
+          {app === "map" && <BigMap game={game} onChange={() => redraw((n) => n + 1)} onTravel={close} />}
           {app === "messages" && <MessagesApp game={game} />}
           {app === "garage" && <GarageTab game={game} onDone={close} />}
           {app === "radio" && <RadioApp game={game} />}
