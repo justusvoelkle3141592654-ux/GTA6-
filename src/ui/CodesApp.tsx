@@ -47,7 +47,7 @@ export default function CodesApp({ game }: { game: Game }) {
       <div className="rounded-sm bg-black/65 p-3">
         <div className="mb-2 font-display text-xl tracking-widest">Code eingeben</div>
         <div className="flex gap-2">
-          <input value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") go(); }} placeholder="Code"
+          <input value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { (e.target as HTMLInputElement).blur(); return; } e.stopPropagation(); if (e.key === "Enter") go(); }} placeholder="Code"
             autoCapitalize="characters" autoComplete="off" spellCheck={false}
             className="min-w-0 flex-1 rounded-sm border border-white/20 bg-white/10 px-3 py-2 font-bold uppercase tracking-widest text-white placeholder:text-white/30" />
           <button onClick={() => go()} className="rounded-sm bg-white px-4 py-2 font-display text-lg tracking-widest text-black">OK</button>

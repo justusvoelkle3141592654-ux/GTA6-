@@ -403,7 +403,7 @@ export class Game {
   // ---------- input ----------
   private onKeyDown = (e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement)?.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    if ((tag === "INPUT" || tag === "TEXTAREA") && e.code !== "Escape") return; // Esc still closes the phone or the menu
     const k = e.code;
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(k)) e.preventDefault();
     this.keys.add(k);

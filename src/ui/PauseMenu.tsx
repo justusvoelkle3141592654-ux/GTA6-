@@ -187,7 +187,7 @@ function JailInput({ value, onChange }: { value: number; onChange: (v: number) =
   return (
     <label className="mb-1 mt-2 flex items-center gap-2">
       <span className="text-white/70">Haftdauer</span>
-      <input type="number" inputMode="numeric" min={1} max={3600} value={txt} onChange={(e) => setTxt(e.target.value)} onBlur={commit} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") commit(); }}
+      <input type="number" inputMode="numeric" min={1} max={3600} value={txt} onChange={(e) => setTxt(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === "Escape") { commit(); return; } e.stopPropagation(); if (e.key === "Enter") commit(); }}
         className="w-20 rounded-lg border border-white/20 bg-white/10 px-2 py-1 text-right font-bold text-white" />
       <span className="text-white/60">Sekunden</span>
     </label>

@@ -186,3 +186,52 @@ Getestet wurde automatisiert in einem Headless-Chromium mit Software-Rendering (
   - Läden werden beim Sprengen nicht sichtbar zerstört (nur Rauch und geschlossen).
   - Verkäufer und Gäste fliehen nicht aus dem Laden, sie ducken sich am Platz.
   - Es gibt nur einen Cheat (TNT).
+
+## Nachtrag 4: Häuser, Codes, Schießen, Kamera, Lauftempo
+
+- **Häuser:**
+  - Acht neue begehbare Wohnhäuser, auf der Karte mit Türsymbol:
+    - 2 Wohnungen
+    - 2 Familienhäuser
+    - 2 WGs
+    - ein Atelier und ein Musikstudio
+  - Jedes hat einen Flur mit Wohnzimmer, ein Bad, eine Arbeitsecke und eine Küche mit Esstisch. Je nach Haus kommt ein eigenes Zimmer dazu: Schlafzimmer, Kinderzimmer mit Hochbett, WG-Zimmer oder Musikraum.
+  - In jedem Haus wohnen 2–3 Leute.
+  - Von außen ist nichts neu gestaltet.
+- **Codes:**
+  - Neue Handy-App „Codes“, gesichert mit der PIN 240413.
+  - 71 Codes in 9 Gruppen: Geld, Gesundheit, Waffen & Items, Polizei, Fahrzeuge, Fahrzeug-Extras, Welt, Du, Spaß.
+  - Das Codebuch steht in der App; Codes zum An- und Ausschalten sind gekennzeichnet und erscheinen aktiv im HUD unter den Sternen.
+  - Neue Items:
+    - Jetpack
+    - Fallschirm
+    - Sprungfedern (etwa 22 m hoch)
+    - Tarnumhang
+    - Explosivmunition, Goldmunition (fünffacher Schaden)
+    - Superfaust
+    - Feuerwerk, Meteoritenregen
+  - Weitere Codes:
+    - Unverwundbar, Zeitstopp, Zeitlupe, Mondschwerkraft, Leere Straßen
+    - Fahrzeuge: 14 zum Herholen, dazu Turbo und unzerstörbares Fahrzeug
+  - „TNT“ gibt 5 Blöcke.
+  - Der Cheat-Reiter im Pausenmenü ist entfernt.
+- **Feuermodus** (Einstellungen):
+  - „Cooldown“ wie bisher.
+  - „Dauerfeuer“: keine Pause zwischen den Schüssen (etwa 16 pro Sekunde) und kein Warten beim Nachladen.
+- **Zielhilfe:**
+  - Ohne Fahndung erfasst sie alle Menschen und fahrenden Autos.
+  - Mit Fahndung nur Polizeifahrzeuge jeder Art (Streifenwagen, Boote, Hubschrauber, Jets), dazu Missionsziele. Polizisten zu Fuß werden mit Fahndung nicht automatisch erfasst.
+- **In die Luft schießen:**
+  - Zu Fuß und aus dem Auto fliegen die Kugeln zu einem Hubschrauber oder Jet hoch, Raketen verfolgen ihn.
+  - Ohne Ziel schießt man nach oben, wenn man die Kamera nach oben dreht.
+- **Kamera:**
+  - Die rechte (oder mittlere) Maustaste gedrückt ziehen bzw. auf dem Handy rechts wischen dreht die Kamera um die Figur. Zu Fuß bleibt sie dann 3 Sekunden so stehen, bevor sie wieder hinter die Figur schwenkt.
+  - Neue Autoansichten: Motorhaube, von vorne, seitlich (Taste C bzw. Kameraknopf).
+- **Lauftempo:**
+  - Laufen etwa 20 km/h, Sprinten etwa 32 km/h (vorher etwa 59 und 90).
+  - Regler „Lauftempo“ in den Einstellungen (0,5- bis 3-fach).
+  - Polizisten und Banden zu Fuß sind nicht schneller als dein Sprint.
+- **Geprüft im Browser** (Playwright, Software-Grafik), nicht auf einem echten Handy:
+  - Lauf- und Sprinttempo, Zielhilfe mit und ohne Sterne, Schüsse aus dem Auto auf den Hubschrauber.
+  - Alle 71 Codes (fehlerfrei; Boote brauchen Wasser in der Nähe), PIN falsch/richtig, Riesensprung ohne Schaden.
+  - Alle 8 Häuser betreten, Codes-App und Autoansicht in der fertigen Spieldatei.
