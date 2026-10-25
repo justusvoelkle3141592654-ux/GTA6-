@@ -309,6 +309,7 @@ export class Game {
   progress: Progress = emptyProgress();
   private autosaveT = AUTOSAVE_EVERY;
   private acc = 0;
+  private glCanvas: HTMLCanvasElement;
   private raf = 0; private last = 0; private hudT = 0; private tmpB: Building[] = [];
 
   constructor(glCanvas: HTMLCanvasElement, overlay: HTMLCanvasElement, cb: Callbacks, config: GameConfig) {
@@ -330,6 +331,8 @@ export class Game {
     window.addEventListener("mousemove", this.onMouseMove);
     window.addEventListener("contextmenu", this.onContext);
     document.addEventListener("visibilitychange", this.onVis);
+    glCanvas.addEventListener("webglcontextlost", this.onGlLost);
+    this.glCanvas = glCanvas;
     this.onContact = (pl) => this.missions.talk(pl.id);
     this.setupMenu();
     this.last = performance.now();
@@ -348,6 +351,7 @@ export class Game {
     window.removeEventListener("mousemove", this.onMouseMove);
     window.removeEventListener("contextmenu", this.onContext);
     document.removeEventListener("visibilitychange", this.onVis);
+    this.glCanvas.removeEventListener("webglcontextlost", this.onGlLost);
     this.r3d.dispose();
   }
 
@@ -455,8 +459,10 @@ export class Game {
     this.lookDrag(e.movementX, e.movementY);
   };
   private onContext = (e: MouseEvent) => { if (this.state === "playing") e.preventDefault(); };
-  private onBlur = () => { this.keys.clear(); this.fireHeld = false; if (this.state === "playing") this.pause(); };
-  private onVis = () => { if (document.hidden && this.state === "playing") this.pause(); };
+  private onBlur = () => { this.releaseInput(); if (this.state === "playing") this.pause(); };
+  private onVis = () => { if (document.hidden) this.goBackground(); };
+  // the graphics driver dropped the 3D context (low memory, app switch): stop the game until it is back
+  private onGlLost = () => this.pause();
   private onMouseDown = (e: MouseEvent) => {
     if (this.state !== "playing" || e.button !== 0) return;
     const el = e.target as HTMLElement;
@@ -618,7 +624,18 @@ export class Game {
     return writeSave(d);
   }
 
-  pause() { if (this.state === "playing") { this.setState("paused"); this.keys.clear(); this.fireHeld = false; } }
+  pause() { if (this.state === "playing") { this.setState("paused"); this.releaseInput(); } }
+  // nothing stays pressed: keys, mouse and the touch controls (they disappear while paused and get no "finger up")
+  private releaseInput() {
+    this.keys.clear(); this.fireHeld = false;
+    const t = this.touch; t.active = false; t.jx = 0; t.jy = 0; t.drift = false; t.nitro = false; t.fire = false;
+  }
+  // the app goes to the background (home button, screen off, another app): pause and save if allowed,
+  // Android may end the app there without warning
+  goBackground() {
+    this.pause();
+    if (!this.saveBlock()) this.saveGame();
+  }
   resume() { if (this.state === "paused") { this.setState("playing"); this.last = performance.now(); } }
   finish() {
     if (this.state !== "playing" && this.state !== "paused") return;

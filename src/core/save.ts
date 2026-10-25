@@ -7,6 +7,7 @@ export type SaveDifficulty = "easy" | "normal" | "hard" | "hardcore";
 const DIFFICULTIES: SaveDifficulty[] = ["easy", "normal", "hard", "hardcore"];
 
 export const SAVE_KEY = "solarabay.save.v4";
+const BACKUP_KEY = SAVE_KEY + ".bak"; // the previous good save: used when the newest one cannot be read
 const LEGACY_KEYS = ["solarabay.save.v3", "solarabay.save.v2", "solarabay.save.v1"]; // older versions: read and converted
 export const SAVE_VERSION = 4;
 const HAIRS = ["short", "buzz", "curls", "long", "ponytail", "bald"] as const;
@@ -71,26 +72,40 @@ export const storageAvailable = () => storage() !== null;
 export function writeSave(d: SaveData): "saved" | "memory" {
   const raw = JSON.stringify(d);
   const s = storage();
-  if (s) { try { s.setItem(SAVE_KEY, raw); return "saved"; } catch { /* quota: fall through */ } }
+  if (s) {
+    try {
+      // keep the last readable save as a backup before it is overwritten
+      const prev = s.getItem(SAVE_KEY);
+      if (prev && parse(prev)) { try { s.setItem(BACKUP_KEY, prev); } catch { /* no room for the backup: the save itself still counts */ } }
+      s.setItem(SAVE_KEY, raw);
+      memory = null;
+      return "saved";
+    } catch { /* quota: fall through */ }
+  }
   memory = raw;
   return "memory";
 }
 
 export function clearSave() {
   memory = null;
-  try { window.localStorage.removeItem(SAVE_KEY); for (const k of LEGACY_KEYS) window.localStorage.removeItem(k); } catch { /* ignore */ }
+  try { const s = window.localStorage; s.removeItem(SAVE_KEY); s.removeItem(BACKUP_KEY); for (const k of LEGACY_KEYS) s.removeItem(k); } catch { /* ignore */ }
 }
 
-export function loadSave(): SaveData | null {
-  let raw: string | null = null;
-  try {
-    const s = window.localStorage;
-    raw = s.getItem(SAVE_KEY);
-    for (const k of LEGACY_KEYS) raw = raw ?? s.getItem(k);
-  } catch { /* ignore */ }
-  raw = raw ?? memory;
+function parse(raw: string | null): SaveData | null {
   if (!raw) return null;
   try { return validate(JSON.parse(raw)); } catch { return null; }
+}
+
+// the newest readable save: this session's memory save (newer than the stored one when storage failed),
+// then the stored save, its backup and the saves of older versions
+export function loadSave(): SaveData | null {
+  const m = parse(memory);
+  if (m) return m;
+  try {
+    const s = window.localStorage;
+    for (const k of [SAVE_KEY, BACKUP_KEY, ...LEGACY_KEYS]) { const d = parse(s.getItem(k)); if (d) return d; }
+  } catch { /* ignore */ }
+  return null;
 }
 
 export const hasSave = () => loadSave() !== null;

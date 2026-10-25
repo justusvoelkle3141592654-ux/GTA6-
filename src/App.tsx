@@ -105,6 +105,7 @@ export default function App() {
       }, cfgRef.current);
     } catch (e) { console.error(e); setGlError(true); return null; }
     gameRef.current = game;
+    (window as unknown as { solaraHide?: () => void }).solaraHide = () => game.goBackground(); // the Android app goes to the background
     game.openJobs = () => { game.pause(); setPauseTab("jobs"); };
     if (import.meta.env.DEV) (window as unknown as { game?: Game }).game = game; // debugging / automated tests
     setTouchInput(game.touch);
@@ -149,6 +150,22 @@ export default function App() {
   const cycleCam = () => gameRef.current?.cycleCamera();
 
   useEffect(() => { if (state !== "paused" && state !== "playing") setPauseTab("menu"); }, [state]);
+
+  // Android back button (called by the app, see android/.../MainActivity.java): true when the game used it,
+  // false in the main menu so the app goes to the background
+  useEffect(() => {
+    const w = window as unknown as { solaraBack?: () => boolean };
+    w.solaraBack = () => {
+      const g = gameRef.current;
+      if (!g || g.state === "menu") return false;
+      if (g.state === "over") { toMenu(); return true; }
+      if (g.state === "paused" && pauseTab !== "menu") { setPauseTab("menu"); return true; } // a page of the pause menu: back to its first page
+      window.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape" }));
+      window.dispatchEvent(new KeyboardEvent("keyup", { code: "Escape", key: "Escape" }));
+      return true;
+    };
+    return () => { delete w.solaraBack; };
+  });
 
   const g = gameRef.current;
   const playing = state === "playing";

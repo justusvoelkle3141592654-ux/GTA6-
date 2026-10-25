@@ -20,6 +20,8 @@ export const SAVE_MSG: Record<SaveResult, string> = {
   saved: "Gespeichert", memory: "Nur vorübergehend gespeichert – der Browser blockiert den lokalen Speicher",
   wanted: "Speichern geht nur ohne Fahndung (keine Sterne)", busy: "Gerade nicht möglich", mode: "",
 };
+// leaving for the main menu saves; when saving is blocked a second tap is needed (the progress since the last save is lost)
+export const LEAVE_MSG = (r: SaveResult) => `Nicht gespeichert: ${SAVE_MSG[r]}. Nochmal tippen = ohne Speichern zum Hauptmenü`;
 
 interface Props {
   game: Game; tab: PauseTab; setTab: (t: PauseTab) => void; hud: HudData; config: GameConfig; isTouch: boolean; muted: boolean;
@@ -29,6 +31,11 @@ interface Props {
 export default function PauseMenu({ game, tab, setTab, hud, config, isTouch, muted, onResume, onCam, onRestart, onFinish, onMute, onMenu, onSaved }: Props) {
   const open = config.mode === "open";
   const [saveMsg, setSaveMsg] = useState("");
+  const [leave, setLeave] = useState(false);
+  const toMenu = () => {
+    const block = open ? game.saveBlock() : null;
+    if (block && !leave) setLeave(true); else onMenu();
+  };
   const [, redraw] = useState(0);
   const tabs: [PauseTab, string][] = open
     ? [["menu", "Weiter"], ["map", "Karte"], ["jobs", "Jobs"], ["hide", "Verstecken"], ["contacts", "Kontakte"], ["progress", "Fortschritt"], ["garage", "Garage"], ["flight", "Flug"], ["spawn", "Spawnen"], ["settings", "Einstellungen"], ["help", "Hilfe"]]
@@ -59,7 +66,8 @@ export default function PauseMenu({ game, tab, setTab, hud, config, isTouch, mut
             {!open && <button onClick={onFinish} className={row}>Fahrt beenden</button>}
             {!open && <button onClick={onRestart} className={row}>Neustart</button>}
             <button onClick={onMute} className={row}>Ton<span className="text-white/60 group-hover:text-black/60">{muted ? "aus" : "an"}</span></button>
-            <button onClick={onMenu} className={row}>Hauptmenü{open ? " (speichert)" : ""}</button>
+            <button onClick={toMenu} className={row}>Hauptmenü{open ? (leave ? " ohne Speichern" : " (speichert)") : ""}</button>
+            {leave && <div ref={(el) => el?.scrollIntoView({ block: "nearest" })} className="bg-black/60 px-4 py-1.5 text-xs text-yellow-200">{LEAVE_MSG(game.saveBlock() ?? "busy")}</div>}
             {!isTouch && <div className="mt-2 text-center text-xs text-white/50">P / Esc = weiter · M = Karte</div>}
           </div>
         )}
@@ -81,7 +89,8 @@ export default function PauseMenu({ game, tab, setTab, hud, config, isTouch, mut
 export function Progress({ game, narrow = false }: { game: Game; narrow?: boolean }) {
   const pr = game.progress, st = game.stats, done = new Set(pr.missions);
   const rep = (v: number) => (v <= -30 ? "feindlich" : v >= 30 ? "freundlich" : "neutral");
-  const pct = Math.round(((pr.missions.length / MISSIONS.length) * 0.5 + (pr.shells.length / Math.max(1, game.jobs.shells.length)) * 0.2 + (pr.jumps.length / Math.max(1, game.jobs.jumps.length)) * 0.15 + (RACES.filter((r) => pr.records[r.id]).length / RACES.length) * 0.15) * 100);
+  const part = (n: number, of: number) => Math.min(1, n / Math.max(1, of)); // an old save may hold ids that no longer exist: never above 100 %
+  const pct = Math.round((part(pr.missions.length, MISSIONS.length) * 0.5 + part(pr.shells.length, game.jobs.shells.length) * 0.2 + part(pr.jumps.length, game.jobs.jumps.length) * 0.15 + part(RACES.filter((r) => pr.records[r.id]).length, RACES.length) * 0.15) * 100);
   return (
     <div className={narrow ? "grid gap-3" : "grid gap-3 sm:grid-cols-2"}>
       <div className="rounded-sm border border-white/5 bg-black/65 p-4 sm:col-span-2">

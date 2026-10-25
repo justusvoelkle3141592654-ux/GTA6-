@@ -8,13 +8,23 @@ android {
         applicationId = "de.solarabay.game"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "3.2"
+        versionCode = 7
+        versionName = "3.3"
+    }
+    // a fixed key in the project (from version 3.3): every build gets the same signature, so an update installs over the
+    // installed app and keeps its save games. Only meant for sideloading, not for a store (the key is not secret).
+    signingConfigs {
+        create("solarabay") {
+            storeFile = file("solarabay.jks")
+            storePassword = "solarabay"
+            keyAlias = "solarabay"
+            keyPassword = "solarabay"
+        }
     }
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug") // installable without a store key (sideloading)
+            signingConfig = signingConfigs.getByName("solarabay")
         }
     }
     compileOptions {

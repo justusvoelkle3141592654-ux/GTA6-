@@ -5,7 +5,7 @@ import BigMap from "./BigMap";
 import Help from "./Help";
 import Icon from "./icons";
 import { ContactsTab, FlightTab, GarageTab, HideTab, JobsTab, MessagesApp, RadioApp } from "./GameTabs";
-import { CAM_LABEL, Progress, SAVE_MSG, SettingsTab, SpawnTab } from "./PauseMenu";
+import { CAM_LABEL, LEAVE_MSG, Progress, SAVE_MSG, SettingsTab, SpawnTab } from "./PauseMenu";
 import CodesApp from "./CodesApp";
 
 type App = "home" | "jobs" | "contacts" | "map" | "messages" | "garage" | "radio" | "hide" | "flight" | "spawn" | "codes" | "progress" | "settings" | "help" | "system";
@@ -77,7 +77,12 @@ export default function Phone(props: PhoneProps) {
 // what the first page of the pause menu offers: save, camera, sound, cancel the mission, main menu
 function SystemApp({ game, onClose, config, muted, onCam, onMute, onMenu, onSaved }: PhoneProps) {
   const [msg, setMsg] = useState("");
+  const [leave, setLeave] = useState(false);
   const open = config.mode === "open";
+  const toMenu = () => {
+    const block = open ? game.saveBlock() : null;
+    if (block && !leave) setLeave(true); else { onClose(); onMenu(); }
+  };
   const b = "w-full rounded-xl bg-white/10 px-4 py-3 text-left text-sm font-bold text-white active:scale-[0.98]";
   return (
     <div className="space-y-2">
@@ -86,7 +91,8 @@ function SystemApp({ game, onClose, config, muted, onCam, onMute, onMenu, onSave
       <button className={b} onClick={onCam}>Kamera: {CAM_LABEL[config.camera]}</button>
       <button className={b} onClick={onMute}>{muted ? "Ton an" : "Ton aus"}</button>
       {open && game.missions.active && <button className={b} onClick={() => { game.missions.fail("Abgebrochen"); onClose(); }}>Mission abbrechen</button>}
-      <button className={b} onClick={() => { onClose(); onMenu(); }}>Hauptmenü{open ? " (speichert)" : ""}</button>
+      <button className={b} onClick={toMenu}>Hauptmenü{open ? (leave ? " ohne Speichern" : " (speichert)") : ""}</button>
+      {leave && <div ref={(el) => el?.scrollIntoView({ block: "nearest" })} className="px-1 text-xs text-yellow-200">{LEAVE_MSG(game.saveBlock() ?? "busy")}</div>}
       <div className="pt-1 text-[11px] text-white/45">Alles aus dem Pausenmenü gibt es hier als App: Karte, Spawnen, Flug, Garage, Fortschritt, Einstellungen und Hilfe.</div>
     </div>
   );
