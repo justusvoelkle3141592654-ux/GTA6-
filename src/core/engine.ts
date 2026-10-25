@@ -144,6 +144,11 @@ const SWIM_DRAIN = 1 / 95, SWIM_REGEN = 1 / 15; // swimming stamina per second
 const RAMP_CONE = (35 * Math.PI) / 180;      // a ramp is entered only within this angle of its direction
 // a random event that happens about p times per 1/60 s, independent of the step size
 const P60 = (p: number, dt: number) => Math.random() < p * dt * 60;
+// distance from (x, y) to the segment a-b (fast bullets move more than a body width per step)
+const segDist = (ax: number, ay: number, bx: number, by: number, x: number, y: number) => {
+  const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy, t = L > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L)) : 0;
+  return Math.hypot(ax + dx * t - x, ay + dy * t - y);
+};
 // a thing the auto aim can lock onto (cars and people that attack you)
 export interface AimTarget { x: number; y: number; z: number; vx: number; vy: number; car: Car | null; ped: Civilian | null; }
 
@@ -1300,7 +1305,7 @@ export class Game {
           if (cv && cv.id !== q.src && PedSystem.hostile(q.team, cv)) { this.peds.damage(cv, q.dmg, q.px, q.py, 90, q.src); hit = true; }
         }
         if (hit) { /* already hit somebody */ }
-        else if (this.onFoot) { const pd = this.ped; if (Math.hypot(q.x - pd.x, q.y - pd.y) < 9 && Math.abs(q.z - pd.z - 12) < 16) { this.damagePed(q.dmg); hit = true; } }
+        else if (this.onFoot) { const pd = this.ped; if (segDist(q.px, q.py, q.x, q.y, pd.x, pd.y) < 9 && Math.abs(q.z - pd.z - 12) < 16) { this.damagePed(q.dmg); hit = true; } }
         else { const p = this.player; if (Math.hypot(q.x - p.x, q.y - p.y) < 24 && Math.abs(q.z - p.z) < 30) { this.damagePlayerCar(q.dmg * 0.35); this.sparks(q.x, q.y, q.z, 4, -q.vx, -q.vy, 0.5); hit = true; } }
         // strafing from the air: the bullets kick up dust where they hit the ground
         if (!hit && q.z < gh && q.vz < 0 && Math.hypot(q.x - this.fx, q.y - this.fy) < 900) { this.emit(q.x, q.y, gh + 1, rnd(-20, 20), rnd(-20, 20), rnd(30, 70), rnd(0.3, 0.6), rnd(5, 8), 20, "#8a7a62", 0, 2); this.sparks(q.x, q.y, gh + 1, 2, 0, 0, 0.4); }

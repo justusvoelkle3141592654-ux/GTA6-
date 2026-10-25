@@ -39,6 +39,7 @@ export interface Civilian {
 export interface PedHost {
   readonly cars: readonly Car[];
   readonly fx: number; readonly fy: number; readonly fz: number;
+  readonly fvx: number; readonly fvy: number;
   readonly onFoot: boolean;
   readonly ped: { x: number; y: number };
   readonly stars: number;
@@ -49,9 +50,9 @@ export interface PedHost {
 
 // uniforms and gang colours
 export const ROLE_LOOK: Record<"cop" | "swat" | "army" | FactionId, { shirt: string; pants: string; hp: number }> = {
-  cop: { shirt: "#1f3a6e", pants: "#16213a", hp: 80 },
-  swat: { shirt: "#1b1d22", pants: "#22252b", hp: 160 },
-  army: { shirt: "#4b5320", pants: "#3b3f2a", hp: 200 },
+  cop: { shirt: "#1f3a6e", pants: "#16213a", hp: 120 },
+  swat: { shirt: "#1b1d22", pants: "#22252b", hp: 220 },
+  army: { shirt: "#4b5320", pants: "#3b3f2a", hp: 280 },
   halcones: { shirt: "#c0392b", pants: "#2b2f3a", hp: 70 },
   kings: { shirt: "#7d3c98", pants: "#1c1c22", hp: 70 },
 };
@@ -59,7 +60,7 @@ export const ROLE_LOOK: Record<"cop" | "swat" | "army" | FactionId, { shirt: str
 export const MAX_PEDS = 32;
 export const PED_LIMIT = { high: 24, low: 12 };
 const HOSTILE_EXTRA = 8;                 // armed peds may exceed the normal limit by this much
-const ATTACK_RANGE = 230, ATTACK_KEEP = 120, ENEMY_DMG = { cop: 7, swat: 10, army: 12, gang: 6 };
+const ATTACK_RANGE = 230, ATTACK_KEEP = 120, ENEMY_DMG = { cop: 9, swat: 12, army: 14, gang: 6 };
 const INSET = 12;                        // sidewalk path: distance from the block edge (buildings start at 18)
 const SPAWN_MIN = 300, SPAWN_MAX = 950, DESPAWN = 1150;
 const WALK_V: [number, number] = [14, 19], FLEE_V: [number, number] = [75, 95]; // 1.4–1.9 m/s walking, running away
@@ -495,24 +496,40 @@ export class PedSystem {
     const foe = c.target >= 0 ? this.list[c.target] : null;
     const fx = foe ? foe.x : h.fx, fy = foe ? foe.y : h.fy, fz = foe ? foe.z : h.fz;
     const dx = fx - c.x, dy = fy - c.y, d = foe ? Math.max(1, Math.hypot(dx, dy)) : dPlayer;
-    c.a = Math.atan2(dy, dx);
     const speed = c.role === "swat" || c.role === "army" ? 125 : cop ? 135 : 115;
     const arrest = cop && !foe && h.stars <= 1; // 1 star: they want to cuff you, not shoot
-    if (d > (arrest ? 18 : ATTACK_KEEP)) {
+    const sees = this.world.lineClear(c.x, c.y, fx, fy, 30);
+    if (cop && !arrest) {
+      // police tactics: every officer takes its own side around you (they surround you instead of bunching up),
+      // keeps moving sideways while firing, and closes in around walls when it has no line of fire
+      const slot = (c.id * 2.39996) % (Math.PI * 2);
+      const r = sees ? (c.role === "cop" ? 105 : 135) : 30;
+      const side = Math.sin(c.t * 1.4 + c.id) * (sees ? 28 : 0);
+      c.tx = fx + Math.cos(slot) * r - Math.sin(slot) * side; c.ty = fy + Math.sin(slot) * r + Math.cos(slot) * side;
+      c.speed = Math.hypot(c.tx - c.x, c.ty - c.y) > 60 ? speed : speed * 0.45;
+      if (Math.hypot(c.tx - c.x, c.ty - c.y) > 4) this.move(c, dt); else { c.vx = 0; c.vy = 0; }
+    } else if (d > (arrest ? 18 : ATTACK_KEEP)) {
       const nx = c.x + (dx / d) * speed * dt, ny = c.y + (dy / d) * speed * dt;
       if (!this.blocked(nx, c.y)) c.x = nx;
       if (!this.blocked(c.x, ny)) c.y = ny;
       c.vx = (dx / d) * speed; c.vy = (dy / d) * speed;
       c.walk += dt * speed * 0.05;
     } else { c.vx = 0; c.vy = 0; }
+    c.a = Math.atan2(dy, dx); // always facing the target
     if (!c.armed || arrest || d > ATTACK_RANGE) return;
     c.shootT -= dt;
     if (c.shootT > 0) return;
-    c.shootT = c.role === "swat" || c.role === "army" ? rnd(0.35, 0.7) : rnd(0.7, 1.4);
-    if (!this.world.lineClear(c.x, c.y, fx, fy, 30)) return;
+    c.shootT = c.role === "swat" || c.role === "army" ? rnd(0.3, 0.6) : cop ? rnd(0.55, 1.1) : rnd(0.7, 1.4);
+    if (!sees) return;
     const dmg = c.role === "swat" ? ENEMY_DMG.swat : c.role === "army" ? ENEMY_DMG.army : cop ? ENEMY_DMG.cop : ENEMY_DMG.gang;
+    // the police lead their shots (where you will be when the bullet arrives) and aim tighter than gangs
+    const tvx = foe ? foe.vx : h.fvx, tvy = foe ? foe.vy : h.fvy, lead = cop ? d / 1100 : 0;
+    const aim = Math.atan2(fy + tvy * lead - c.y, fx + tvx * lead - c.x);
+    // they need a few seconds to find their aim, and a running target is harder to hit
+    const moving = Math.hypot(tvx, tvy) > 60 ? 0.05 : 0;
+    const spread = (c.role === "swat" || c.role === "army" ? 0.04 : cop ? 0.06 : 0.1) + moving + (cop ? 0.2 * Math.max(0, 1 - c.t / 4) : 0);
     const za = Math.atan2(fz + 12 - (c.z + 15), d);
-    h.enemyShot(c.x + Math.cos(c.a) * 8, c.y + Math.sin(c.a) * 8, c.z + 15 + Math.sin(za) * 8, c.a + rnd(-0.1, 0.1), dmg, PedSystem.teamOf(c), c.id);
+    h.enemyShot(c.x + Math.cos(aim) * 8, c.y + Math.sin(aim) * 8, c.z + 15 + Math.sin(za) * 8, aim + rnd(-spread, spread), dmg, PedSystem.teamOf(c), c.id);
   }
 
   // buildings, harbour containers and tree trunks block pedestrians

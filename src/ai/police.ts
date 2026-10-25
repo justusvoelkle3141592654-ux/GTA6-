@@ -35,9 +35,9 @@ const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 const wrapA = (a: number) => { while (a > Math.PI) a -= TAU; while (a < -Math.PI) a += TAU; return a; };
 // police cars by wanted level: patrol cars, fast interceptors from 2 stars, heavy SUVs from 3
 const COP_LOOK: Partial<Record<CarModel, { color: string; hp: number; mass: number }>> = {
-  police: { color: "#f4f6fa", hp: 100, mass: 1.25 },
-  interceptor: { color: "#15161b", hp: 150, mass: 1.45 },
-  polsuv: { color: "#f4f6fa", hp: 240, mass: 2.1 },
+  police: { color: "#f4f6fa", hp: 130, mass: 1.25 },
+  interceptor: { color: "#15161b", hp: 190, mass: 1.45 },
+  polsuv: { color: "#f4f6fa", hp: 300, mass: 2.1 },
 };
 
 export class Police {
@@ -166,7 +166,8 @@ export class Police {
     const direct = (elevated || (d < 650 && w.lineClear(c.x, c.y, fx, fy)) || (outside && d < 1400)) && !wetBetween(c.x, c.y, fx, fy);
     if (c.model === "armor") this.turret(c, d, dt);
     // half of the cars try to cut you off: they head for the point in front of you
-    const intercept = c.siren > 5 && this.seen && !g.onFoot && g.player.speed > 150;
+    // (from 3 stars every car does it)
+    const intercept = (c.siren > 5 || g.wanted.stars >= 3) && this.seen && !g.onFoot && g.player.speed > 150;
     if (roofRamp && !elevated) {
       const rs = w.rampStart(roofRamp, 60);
       tx = rs.x; ty = rs.y;
