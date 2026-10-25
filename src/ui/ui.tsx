@@ -30,10 +30,20 @@ export function Btn({ children, onClick, primary, disabled }: { children: ReactN
 }
 
 const STAR_SLOTS = [0, 1, 2, 3, 4, 5];
-export function Stars({ n, size = "text-2xl", max = 5 }: { n: number; size?: string; max?: number }) {
+// wanted level (GTA style: white stars with a dark rim, empty ones faint); behind the last star a red one
+// that switches hardcore on and off
+export function Stars({ n, size = "text-2xl", max = 5, hardcore, onHardcore }: { n: number; size?: string; max?: number; hardcore?: boolean; onHardcore?: () => void }) {
+  const px = starPx(size), rim = "drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000) drop-shadow(0 1px 2px rgba(0,0,0,0.9))";
   return (
-    <div className={`flex gap-0.5 ${size} leading-none`}>
-      {STAR_SLOTS.slice(0, max).map((i) => <span key={i} className={i < n ? "text-yellow-300" : "text-white/15"} style={i < n ? { filter: "drop-shadow(0 0 6px rgba(255,210,63,0.9))" } : undefined}><Icon name="star" fill size={starPx(size)} /></span>)}
+    <div className={`flex items-center justify-end gap-0.5 ${size} leading-none`}>
+      {STAR_SLOTS.slice(0, max).map((i) => <span key={i} className={i < n ? (hardcore ? "text-red-100" : "text-white") : "text-neutral-600/70"} style={{ filter: rim }}><Icon name="star" fill size={px} /></span>)}
+      {onHardcore && (
+        <button onClick={onHardcore} title="Hardcore an/aus" aria-label={hardcore ? "Hardcore ausschalten" : "Hardcore einschalten"}
+          className={"pointer-events-auto ml-1 flex items-center gap-0.5 rounded-md px-1 py-0.5 active:scale-90 " + (hardcore ? "bg-red-600/80 text-white shadow-[0_0_12px_rgba(255,30,30,0.8)]" : "bg-black/40 text-red-400/80 hover:text-red-300")}>
+          <Icon name="star" fill size={Math.round(px * 0.85)} />
+          <span className="font-display text-[11px] tracking-wider">{hardcore ? "HC AN" : "HC"}</span>
+        </button>
+      )}
     </div>
   );
 }

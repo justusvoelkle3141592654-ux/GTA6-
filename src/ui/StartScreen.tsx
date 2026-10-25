@@ -59,7 +59,8 @@ export default function StartScreen({ name, setName, scores, config, update, onS
                 <Choice<Mode> value={config.mode} onChange={(v) => update({ mode: v })} options={[{ v: "open", label: "Open World", sub: "Story, Jobs, Läden" }, { v: "chase", label: "Verfolgungsjagd", sub: "Cops, Sterne, Takedowns" }, { v: "free", label: "Freie Fahrt", sub: "Keine Cops, kein Schaden" }]} />
               </Section>
               <Section title="Schwierigkeit">
-                <Choice<Difficulty> value={config.difficulty} disabled={config.mode === "free"} onChange={(v) => update({ difficulty: v })} options={[{ v: "easy", label: "Leicht", sub: "Wenig Cops, Heilung" }, { v: "normal", label: "Normal", sub: "Ausgewogen" }, { v: "hard", label: "Schwer", sub: "Bis zu 9 Cops" }, { v: "hardcore", label: "Hardcore", sub: "Endlos Panzer & Jets" }]} />
+                <Choice<Difficulty> value={config.difficulty} disabled={config.mode === "free"} onChange={(v) => update({ difficulty: v })} options={[{ v: "easy", label: "Leicht", sub: "Wenig Cops, Heilung" }, { v: "normal", label: "Normal", sub: "Ausgewogen" }, { v: "hard", label: "Schwer", sub: "Bis zu 9 Cops" }]} />
+                <div className="mt-1.5 text-xs text-white/50">Hardcore schaltest du im Spiel ein: der rote Stern hinter den Fahndungssternen.</div>
               </Section>
               <Section title="Dein Auto (unterwegs klaust du dir einfach ein anderes)">
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

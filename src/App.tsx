@@ -118,6 +118,16 @@ export default function App() {
     if (apply) gameRef.current?.configure(next);
   }
 
+  // hardcore sits behind the wanted stars in the HUD (not in the start menu): tap it to switch on and off
+  const toggleHardcore = () => {
+    const cur = cfgRef.current.difficulty;
+    let back: GameConfig["difficulty"] = "normal";
+    try { const v = localStorage.getItem("solarabay.prevdiff"); if (v === "easy" || v === "normal" || v === "hard") back = v; } catch { /* ignore */ }
+    if (cur !== "hardcore") { try { localStorage.setItem("solarabay.prevdiff", cur); } catch { /* ignore */ } }
+    const on = cur !== "hardcore";
+    updateConfig({ difficulty: on ? "hardcore" : back });
+    gameRef.current?.banner(on ? "HARDCORE" : "HARDCORE AUS", on ? "Sterne steigen schnell, Panzer und Jets ohne Ende" : "Zurück zum normalen Schwierigkeitsgrad", on ? "#ff2a3a" : "#ffffff", 2.4);
+  };
   const start = () => { saveName(nameRef.current); setOver(null); setRank(-1); setHud(EMPTY_HUD); gameRef.current?.configure(cfgRef.current); gameRef.current?.start(); };
   const continueGame = () => {
     const sv = loadSave();
@@ -162,7 +172,8 @@ export default function App() {
 
       {(playing || state === "paused") && g && (
         <Hud hud={hud} isTouch={isTouch} rules={rules} camera={config.camera} onPause={() => g.pause()} onCam={cycleCam} onZoom={() => g.toggleZoom()} onToggleCar={() => g.toggleCar()}
-          onInteract={() => g.interact()} onRadio={() => g.cycleRadio()} onJob={() => g.toggleJob()} onPhone={() => g.openModal({ kind: "phone" })} onDetonate={() => g.detonate()} onWeapon={(w) => g.setWeapon(w)} onWheel={() => g.openModal({ kind: "wheel" })} />
+          onInteract={() => g.interact()} onRadio={() => g.cycleRadio()} onJob={() => g.toggleJob()} onPhone={() => g.openModal({ kind: "phone" })} onDetonate={() => g.detonate()} onWeapon={(w) => g.setWeapon(w)} onWheel={() => g.openModal({ kind: "wheel" })}
+          hardcore={config.difficulty === "hardcore"} onHardcore={toggleHardcore} />
       )}
       {playing && isTouch && touchInput && g && (
         <TouchControls input={touchInput} nitro01={hud.nitro01} flying={hud.alt >= 0 || hud.fly} jet={hud.jet} relative={config.camera !== "top"} onFoot={hud.onFoot} weapon={hud.weapon} ammo={hud.reloading ? "…" : ammoText(hud.ammo, hud.reserve)} bombsPlaced={hud.bombsPlaced}

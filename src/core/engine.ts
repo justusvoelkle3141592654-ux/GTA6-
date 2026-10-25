@@ -3327,39 +3327,51 @@ export class Game {
   }
 
   private drawMinimap(ctx: CanvasRenderingContext2D) {
-    // size follows the HUD scale; the safe area keeps it away from a notch
-    const hs = currentSettings.hudScale, size = (this.mobile ? 104 : 150) * hs, pad = (this.mobile ? 10 : 18) * hs;
-    const x = this.cw - size - pad - this.safe.r, y = (this.mobile ? 64 * hs : pad) + this.safe.t;
-    const cxm = x + size / 2, cym = y + size / 2;
-    const range = inCity(this.fx, this.fy) ? 1500 : 2600;
+    // GTA style: a rounded rectangle in the bottom left corner (on phones top left, the stick is down there),
+    // the health and vest bars right under it; size follows the HUD scale, the safe area keeps it away from a notch
+    const hs = currentSettings.hudScale, mh = (this.mobile ? 92 : 140) * hs, mw = mh * 1.55, pad = (this.mobile ? 10 : 18) * hs;
+    const barH = 6 * hs, bars = this.rules.damage ? (this.onFoot ? 1 : 2) : 0, below = bars * (barH + 3 * hs);
+    const x = pad + this.safe.l, y = this.mobile ? pad + this.safe.t : this.ch - pad - this.safe.b - mh - below;
+    const cxm = x + mw / 2, cym = y + mh / 2;
+    const range = (inCity(this.fx, this.fy) ? 1500 : 2600) * 1.25; // half the width of the map in world units
     const MS = MAP_MAX - MAP_MIN;
     const sc = this.minimap.width / MS;
     const fx = this.fx, fy = this.fy;
+    const m = mw / (range * 2);
+    // inside the frame (inset px from the edge) / pulled onto the edge
+    const inRect = (dx: number, dy: number, inset: number) => Math.abs(dx) < mw / 2 - inset && Math.abs(dy) < mh / 2 - inset;
+    const toEdge = (dx: number, dy: number, inset: number): [number, number] => {
+      const k = Math.min(1, (mw / 2 - inset) / Math.max(1e-6, Math.abs(dx)), (mh / 2 - inset) / Math.max(1e-6, Math.abs(dy)));
+      return [dx * k, dy * k];
+    };
+    const r = 10 * hs;
+    const frame = () => { ctx.beginPath(); ctx.roundRect(x, y, mw, mh, r); };
     ctx.save();
-    ctx.beginPath(); ctx.arc(cxm, cym, size / 2, 0, TAU); ctx.fillStyle = "#06121f"; ctx.fill(); ctx.clip();
+    ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.beginPath(); ctx.roundRect(x - 3, y - 3, mw + 6, mh + 6 + below, r + 2); ctx.fill();
+    frame(); ctx.fillStyle = "#1b2633"; ctx.fill(); ctx.clip();
     // turning map: your heading points up (everything below is drawn in the turned frame)
     if (currentSettings.mapRotate) { ctx.translate(cxm, cym); ctx.rotate(-this.fa - Math.PI / 2); ctx.translate(-cxm, -cym); }
-    const srcS = range * 2 * sc, W = this.minimap.width;
-    const sx = (fx - range - MAP_MIN) * sc, sy = (fy - range - MAP_MIN) * sc;
+    // a square that covers the frame in any rotation
+    const R = range * Math.hypot(mw, mh) / mw, W = this.minimap.width, srcS = R * 2 * sc;
+    const sx = (fx - R - MAP_MIN) * sc, sy = (fy - R - MAP_MIN) * sc;
     const sx0 = Math.max(0, sx), sy0 = Math.max(0, sy), sx1 = Math.min(W, sx + srcS), sy1 = Math.min(W, sy + srcS);
     if (sx1 > sx0 && sy1 > sy0) {
-      const f = size / srcS;
-      ctx.globalAlpha = 0.92;
-      ctx.drawImage(this.minimap, sx0, sy0, sx1 - sx0, sy1 - sy0, x + (sx0 - sx) * f, y + (sy0 - sy) * f, (sx1 - sx0) * f, (sy1 - sy0) * f);
+      const f = (R * 2 * m) / srcS, ox = cxm - R * m, oy = cym - R * m;
+      ctx.globalAlpha = 0.95;
+      ctx.drawImage(this.minimap, sx0, sy0, sx1 - sx0, sy1 - sy0, ox + (sx0 - sx) * f, oy + (sy0 - sy) * f, (sx1 - sx0) * f, (sy1 - sy0) * f);
       ctx.globalAlpha = 1;
+      // a slight blue-grey tint (the GTA map look)
+      ctx.fillStyle = "rgba(40,60,85,0.22)"; ctx.fillRect(cxm - R * m, cym - R * m, R * 2 * m, R * 2 * m);
     }
-    const m = size / (range * 2);
     for (const pk of this.pickups) {
       const dx = (pk.x - fx) * m, dy = (pk.y - fy) * m;
-      if (Math.abs(dx) > size / 2 || Math.abs(dy) > size / 2) continue;
+      if (!inRect(dx, dy, 0)) continue;
       ctx.fillStyle = pk.type === "cash" ? "#3dff8b" : pk.type === "nitro" ? "#2bf0ff" : pk.type === "rocket" ? "#ff9a2a" : pk.type === "bomb" ? "#ff4d6d" : "#fff";
       ctx.fillRect(cxm + dx - 2, cym + dy - 2, 4, 4);
     }
     for (const c of this.cars) {
       if (c.kind !== "cop" || c.dead) continue;
-      let dx = (c.x - fx) * m, dy = (c.y - fy) * m;
-      const d = Math.hypot(dx, dy);
-      if (d > size / 2 - 5) { dx *= (size / 2 - 5) / d; dy *= (size / 2 - 5) / d; }
+      const [dx, dy] = toEdge((c.x - fx) * m, (c.y - fy) * m, 5);
       ctx.fillStyle = Math.sin(this.t * 14 + c.siren) > 0 ? "#ff2244" : "#3d7bff";
       ctx.beginPath(); ctx.arc(cxm + dx, cym + dy, 3.5, 0, TAU); ctx.fill();
     }
@@ -3379,7 +3391,7 @@ export class Game {
       for (const pl of this.places) {
         if (pl.kind === "contact") continue;
         const dx = (pl.x - fx) * m, dy = (pl.y - fy) * m;
-        if (Math.hypot(dx, dy) > size / 2 - 7) continue;
+        if (!inRect(dx, dy, 7)) continue;
         drawPlaceIcon(ctx, pl, cxm + dx, cym + dy, 6);
       }
       // mission / job markers stay on the edge when far away
@@ -3397,9 +3409,7 @@ export class Game {
       const sa = this.jobs.searchArea;
       if (sa) { ctx.strokeStyle = "rgba(157,77,255,0.85)"; ctx.lineWidth = 2; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.arc(cxm + (sa.x - fx) * m, cym + (sa.y - fy) * m, sa.r * m, 0, TAU); ctx.stroke(); ctx.setLineDash([]); }
       for (const list of [this.missions.markers, this.jobs.markers, this.hide.markers]) for (const mk of list) {
-        let dx = (mk.x - fx) * m, dy = (mk.y - fy) * m;
-        const d = Math.hypot(dx, dy);
-        if (d > size / 2 - 7) { dx *= (size / 2 - 7) / d; dy *= (size / 2 - 7) / d; }
+        const [dx, dy] = toEdge((mk.x - fx) * m, (mk.y - fy) * m, 7);
         ctx.fillStyle = mk.color; ctx.beginPath(); ctx.arc(cxm + dx, cym + dy, mk.kind === "enemy" ? 4 : 6, 0, TAU); ctx.fill();
         if (mk.label) { ctx.fillStyle = "#fff"; ctx.fillText(mk.label, cxm + dx, cym + dy + 0.5); }
       }
@@ -3410,21 +3420,17 @@ export class Game {
       }
       const h = this.police.heli;
       if (h && !h.dead) {
-        let dx = (h.x - fx) * m, dy = (h.y - fy) * m;
-        const d = Math.hypot(dx, dy);
-        if (d > size / 2 - 6) { dx *= (size / 2 - 6) / d; dy *= (size / 2 - 6) / d; }
+        const [dx, dy] = toEdge((h.x - fx) * m, (h.y - fy) * m, 6);
         ctx.fillStyle = "#ffffff"; ctx.fillRect(cxm + dx - 5, cym + dy - 1, 10, 2); ctx.fillRect(cxm + dx - 1, cym + dy - 5, 2, 10); // helicopter: rotor cross
       }
       if (this.waypoint) {
-        let dx = (this.waypoint.x - fx) * m, dy = (this.waypoint.y - fy) * m;
-        const d = Math.hypot(dx, dy);
-        if (d > size / 2 - 7) { dx *= (size / 2 - 7) / d; dy *= (size / 2 - 7) / d; }
+        const [dx, dy] = toEdge((this.waypoint.x - fx) * m, (this.waypoint.y - fy) * m, 7);
         ctx.strokeStyle = "#ff3cac"; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(cxm + dx, cym + dy, 5, 0, TAU); ctx.stroke();
       }
       // own markers from the big map (only while they are on the minimap)
       for (const mk of this.markers) {
         const dx = (mk.x - fx) * m, dy = (mk.y - fy) * m;
-        if (Math.hypot(dx, dy) > size / 2 - 6) continue;
+        if (!inRect(dx, dy, 6)) continue;
         ctx.fillStyle = "#2bf0ff"; ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.moveTo(cxm + dx, cym + dy); ctx.lineTo(cxm + dx - 3.5, cym + dy - 6); ctx.arc(cxm + dx, cym + dy - 7.5, 4, Math.PI * 0.8, Math.PI * 0.2); ctx.closePath(); ctx.fill(); ctx.stroke();
       }
@@ -3433,16 +3439,31 @@ export class Game {
       const dx = (this.player.x - fx) * m, dy = (this.player.y - fy) * m;
       ctx.fillStyle = "#ffd23f"; ctx.fillRect(cxm + dx - 3, cym + dy - 3, 6, 6);
     }
-    ctx.translate(cxm, cym); ctx.rotate(this.fa);
-    ctx.fillStyle = "#ff3cac";
-    ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-5, -5); ctx.lineTo(-2, 0); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fill();
+    // you: a white arrow with a dark rim
+    ctx.translate(cxm, cym); ctx.rotate(this.fa); ctx.scale(hs, hs);
+    ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "rgba(0,0,0,0.8)"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-6, -6); ctx.lineTo(-3, 0); ctx.lineTo(-6, 6); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.restore();
-    ctx.strokeStyle = "rgba(255,60,172,0.8)"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(cxm, cym, size / 2, 0, TAU); ctx.stroke();
-    // north marker on the rim
+    ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 1.5; frame(); ctx.stroke();
+    // north marker on the edge
     const na = currentSettings.mapRotate ? -this.fa - Math.PI : -Math.PI / 2;
-    ctx.fillStyle = "#ffffff"; ctx.font = `bold ${Math.round(10 * hs)}px Inter, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText("N", cxm + Math.cos(na) * (size / 2 - 7 * hs), cym + Math.sin(na) * (size / 2 - 7 * hs));
+    const [nx, ny] = toEdge(Math.cos(na) * mw, Math.sin(na) * mw, 8 * hs);
+    ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.beginPath(); ctx.arc(cxm + nx, cym + ny, 7 * hs, 0, TAU); ctx.fill();
+    ctx.fillStyle = "#ffffff"; ctx.font = `bold ${Math.round(9 * hs)}px Inter, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("N", cxm + nx, cym + ny + 0.5);
+    // health | vest (in a vehicle also: vehicle | nitro) - the bars under the map
+    if (bars) {
+      const pd = this.ped, p = this.player, low = pd.hp / pd.maxHp < 0.25 && Math.sin(this.t * 10) > 0;
+      const row = (yy: number, a: number, ca: string, b: number, cb: string) => {
+        const wa = mw * 0.62 - 2 * hs, wb = mw * 0.38 - 2 * hs, xb = x + mw * 0.62 + 2 * hs;
+        ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(x, yy, wa, barH); ctx.fillRect(xb, yy, wb, barH);
+        ctx.fillStyle = ca; ctx.fillRect(x, yy, wa * clamp(a, 0, 1), barH);
+        ctx.fillStyle = cb; ctx.fillRect(xb, yy, wb * clamp(b, 0, 1), barH);
+      };
+      const y0 = y + mh + 4 * hs;
+      row(y0, pd.hp / pd.maxHp, low ? "#e8473c" : "#5cb85c", pd.armor / MAX_ARMOR, "#4a90d9");
+      if (bars > 1) row(y0 + barH + 3 * hs, p.dead ? 0 : p.hp / p.maxHp, p.hp / p.maxHp < 0.3 ? "#e8473c" : "#e0913a", this.nitro, "#3fd0e0");
+    }
   }
   // safe area of phones with a notch (CSS env values, read on resize)
   safe = { t: 0, r: 0, b: 0, l: 0 };
