@@ -60,6 +60,7 @@ export class Police {
   // a cop car / cop on foot / the helicopter can see (x, y)
   copSees(x: number, y: number, loud = false): boolean {
     const g = this.g;
+    if (g.cheats.has("invisible")) return false; // cloak (code)
     for (const c of g.cars) {
       if (c.kind !== "cop" || c.dead || c.calm) continue;
       const d = Math.hypot(c.x - x, c.y - y);
@@ -76,6 +77,7 @@ export class Police {
   }
   // also counts calm patrol cars: a crime right in front of them is noticed
   patrolSees(x: number, y: number): boolean {
+    if (this.g.cheats.has("invisible")) return false;
     for (const c of this.g.cars) {
       if (c.kind !== "cop" || c.dead || !c.calm) continue;
       const d = Math.hypot(c.x - x, c.y - y);

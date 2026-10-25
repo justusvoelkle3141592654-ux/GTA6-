@@ -23,7 +23,7 @@ import { loadSettings, applySettings } from "./core/settings";
 const EMPTY_HUD: HudData = {
   score: 0, mult: 1, combo01: 0, stars: 1, searching: false, cash: 0, health01: 1, carHealth01: 1, nitro01: 1, kmh: 0, time: 0, drift: 0, bust01: 0, takedowns: 0,
   weapon: "pistol", ammo: -1, reserve: -1, reloading: false, owned: ["pistol"], bombsPlaced: 0, jet: false, ending: null, endT: 0, jailT: -1, onFoot: false, canEnter: false, hint: "", air: false,
-  armor01: 0, district: "", districtColor: "", place: "", radio: "", objective: "", objTimer: -1, job: "", alt: -1, fly: false, camNear: true, swim: false,
+  armor01: 0, district: "", districtColor: "", place: "", radio: "", objective: "", objTimer: -1, job: "", alt: -1, fly: false, camNear: true, swim: false, cheats: [], jump: false,
 };
 const CFG_KEY = "solarabay.config.v1";
 const LEGACY_CFG_KEY = "viceheat.config.v3";
@@ -179,7 +179,7 @@ export default function App() {
           hardcore={config.difficulty === "hardcore"} onHardcore={toggleHardcore} />
       )}
       {playing && isTouch && touchInput && g && (
-        <TouchControls input={touchInput} nitro01={hud.nitro01} flying={hud.alt >= 0 || hud.fly} jet={hud.jet} relative={config.camera !== "top"} onFoot={hud.onFoot} weapon={hud.weapon} ammo={hud.reloading ? "…" : ammoText(hud.ammo, hud.reserve)} bombsPlaced={hud.bombsPlaced}
+        <TouchControls jump={hud.jump} input={touchInput} nitro01={hud.nitro01} flying={hud.alt >= 0 || hud.fly} jet={hud.jet} relative={config.camera !== "top"} onFoot={hud.onFoot} weapon={hud.weapon} ammo={hud.reloading ? "…" : ammoText(hud.ammo, hud.reserve)} bombsPlaced={hud.bombsPlaced}
           onCycleWeapon={() => g.cycleWeapon()} onWheel={() => g.openModal({ kind: "wheel" })} onDetonate={() => g.detonate()} onLook={(dx, dy) => g.lookDrag(dx, dy)} />
       )}
 

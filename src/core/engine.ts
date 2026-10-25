@@ -7,7 +7,7 @@ import { Wanted, CRIMES, type Crime } from "../ai/wanted";
 import { buildPlaces, onJetty, respawnCost, RESPAWN_RULES, type Place } from "../world/places";
 import { PedSystem, PED_LIMIT, isPolice, type Civilian, type Team } from "../ai/peds";
 import { Car, CARS, VEH_SCALE, MODEL_STATS, MODEL_NAME, isCraft, isBoat, isHeli, isJet, isPlane, isAircraft, isTwoWheel, hitCar, copyBody, repairBody, type CarDef, type CarModel, type FactionId } from "../vehicles/vehicles";
-import { Inventory, WEAPONS, WEAPON_DEFS, type Weapon } from "../gameplay/weapons";
+import { CHEAT_ONLY, Inventory, WEAPONS, WEAPON_DEFS, type Weapon } from "../gameplay/weapons";
 import { SHAPES, hasRig } from "../vehicles/carmodel";
 import { buildInteriors, interiorAt, interiorFloor, interiorCeil, inRoofHole, type Elevator, type Home, type Interior, type Seat } from "../world/interiors";
 import type { ActKind } from "../render/people3d";
@@ -32,6 +32,7 @@ import { Craft } from "../vehicles/craft";
 import { HideSeek, SPOT_NAME } from "../gameplay/hide";
 import { Spawner } from "../gameplay/spawner";
 import { IndoorPeople, type IndoorPerson } from "../gameplay/indoor";
+import { FLAG_NAME, runCheat, type CheatFlag } from "../gameplay/cheats";
 import type { Weather } from "../render/atmosphere";
 
 export type GameState = "menu" | "playing" | "paused" | "over" | "modal";
@@ -99,6 +100,8 @@ export interface HudData {
   fly: boolean;           // fly mode on
   camNear: boolean;       // follow camera close
   swim: boolean;          // swimming in the bay
+  cheats: string[];       // names of the codes that are switched on
+  jump: boolean;          // springs in the shoes: a jump button on phones
 }
 export type EndReason = "dead" | "arrested";
 export const END_LABEL: Record<EndReason, string> = { dead: "WASTED", arrested: "BUSTED" };
@@ -522,6 +525,7 @@ export class Game {
     // open world: fists and a pistol; arcade modes: endless pistol, rockets and sticky bombs
     if (rules.respawn) this.inv.reset(["pistol"], { pistol: 48 });
     else this.inv.reset(["pistol", "rocket", "bomb"], { rocket: 30, bomb: 30 }, ["pistol"], false);
+    this.cheats.clear(); this.meteorT = 0; this.fireworkT = 0;
     this.outfit = 0; this.style = { ...DEFAULT_STYLE }; this.energyT = 0; this.seat = null; this.range = null; this.robbery = null; this.garage = []; this.crafts = []; this.items = []; this.markers = []; this.shops.reset(); this.gangs.reset(); this.placeLatch = "";
     this.district = districtAt(this.player.x, this.player.y);
     this.copSpawnT = this.diff.firstCop;
@@ -719,6 +723,7 @@ export class Game {
     const p = this.player;
     if (p.dead) return;
     p.hitFlash = 0.15;
+    if (this.cheats.has("god") || this.cheats.has("carGod")) return;
     if (!this.rules.damage) return;
     amt *= this.diff.dmg * tuneDamage(p.tune);
     p.hp -= amt;
@@ -735,7 +740,7 @@ export class Game {
     if (this.state !== "playing" || this.ending || amt <= 0 || !this.onFoot || this.fall) return;
     const pd = this.ped;
     pd.hitFlash = 0.3;
-    if (!this.rules.damage) return;
+    if (!this.rules.damage || this.cheats.has("god")) return;
     amt *= this.diff.dmg;
     // the vest takes most of the hit
     if (pd.armor > 0) { const a = Math.min(pd.armor, amt * 0.75); pd.armor -= a; amt -= a; }
@@ -797,7 +802,7 @@ export class Game {
   }
 
   crime(c: Crime, mul = 1) {
-    if (this.state !== "playing" || this.ending) return;
+    if (this.state !== "playing" || this.ending || this.cheats.has("nopolice")) return;
     if (this.jobs.onDuty && (c === "shot" || c === "civCrash" || c === "rocket" || c === "explosion")) return; // patrol: allowed while chasing suspects
     // arcade modes and an existing wanted level: every crime counts right away
     if (!this.rules.starsDecay || this.wanted.stars > 0) { this.wanted.crime(c, mul); return; }
@@ -1050,7 +1055,7 @@ export class Game {
     if (d.kind === "sticky" && this.bombs.length >= 30) { this.setHint("Max. 30 Bomben – erst zünden (G)", 1.5); sfx.empty(); this.fireCd = 0.3; return; }
     if (!this.inv.consume()) {
       if (this.inv.reloadT > 0) { sfx.reload(); this.setHint("Nachladen …", 0.8); }
-      else { sfx.empty(); this.setHint(w === "tnt" ? "Kein TNT mehr – nur über Cheats (Pause → Cheats)" : this.rules.respawn ? `Keine Munition: ${d.name} – Waffenladen (W)` : `Keine Munition – such die Säulen`, 1.5); }
+      else { sfx.empty(); this.setHint(w === "tnt" ? "Kein TNT mehr – nur über Codes (Handy → Codes)" : this.rules.respawn ? `Keine Munition: ${d.name} – Waffenladen (W)` : `Keine Munition – such die Säulen`, 1.5); }
       this.fireCd = 0.3;
       return;
     }
@@ -1082,7 +1087,7 @@ export class Game {
       this.jobs.onShot();
       for (let i = 0; i < d.pellets; i++) {
         const aa = a + rnd(-d.spread, d.spread);
-        this.addProj("bullet", "player", "player", -1, d.dmg, ox, oy, oz, Math.cos(aa) * speed * cp * rnd(0.92, 1) + bvx * 0.3, Math.sin(aa) * speed * cp * rnd(0.92, 1) + bvy * 0.3, spz, aa, d.range * (pitch > 0.05 ? 1.6 : 1));
+        this.addProj("bullet", "player", "player", -1, d.dmg * (this.cheats.has("gold") ? 5 : 1), ox, oy, oz, Math.cos(aa) * speed * cp * rnd(0.92, 1) + bvx * 0.3, Math.sin(aa) * speed * cp * rnd(0.92, 1) + bvy * 0.3, spz, aa, d.range * (pitch > 0.05 ? 1.6 : 1));
       }
       if (w === "shotgun") { sfx.shotgun(); this.shake(0.14); } else { sfx.shot(); this.shake(0.05); }
       this.flashes.push({ x: ox + Math.cos(a) * 18, y: oy + Math.sin(a) * 18, z: oz, life: 0.06, max: 0.06, size: w === "shotgun" ? 140 : 90 });
@@ -1179,7 +1184,8 @@ export class Game {
     if (c) {
       pd.a = Math.atan2(c.y - pd.y, c.x - pd.x);
       sfx.punch(); this.shake(0.08);
-      if (this.peds.damage(c, d.dmg, pd.x, pd.y, d.id === "bat" ? 220 : 120)) this.onPedDown(c);
+      const sf = this.cheats.has("fist");
+      if (this.peds.damage(c, d.dmg * (sf ? 20 : 1), pd.x, pd.y, sf ? 950 : d.id === "bat" ? 220 : 120)) { if (sf) c.vz = 420; this.onPedDown(c); }
       else { if (c.tag !== "suspect") this.crime("shot"); if (c.faction) this.gangs.provoked(c.faction); }
       return;
     }
@@ -1215,18 +1221,60 @@ export class Game {
       if (it.kind !== "safehouse" && !it.prison && !it.homes) this.banner("GESPRENGT", `${it.name} liegt in Trümmern`, "#ff5a3d", 2.4);
     }
   }
-  // a cheat code from the cheat menu; returns what happened
-  cheat(code: string): string {
-    const c = code.trim().toUpperCase();
-    if (!c) return "";
-    if (this.state !== "playing" && this.state !== "modal" && this.state !== "paused") return "Erst ein Spiel starten";
-    if (c === "TNT") {
-      this.inv.give("tnt", 1); this.inv.select("tnt");
-      sfx.checkpoint();
-      return `1 Block TNT (jetzt ${this.inv.total("tnt")}) – ausgewählt, Feuer legt ihn ab`;
+  // ---------- cheat codes (phone app "Codes", gameplay/cheats.ts) ----------
+  cheats = new Set<CheatFlag>();
+  private meteorT = 0; private fireworkT = 0; private fxT = 0; private jumpHeld = false;
+  cheat(code: string): string { const r = runCheat(this, code); if (r === "Unbekannter Code" || r === "") sfx.empty(); else sfx.checkpoint(); return r; }
+  get vehMul() { return currentSettings.vehSpeed * (this.cheats.has("turbo") ? 2 : 1); }
+  private get grav() { return this.cheats.has("moon") ? GRAV * 0.35 : GRAV; }
+  jailFree(): string { if (this.jailT <= 0) return "Du bist nicht im Gefängnis"; this.release(false); return "Frei!"; }
+  ownAllHomes(): string {
+    let n = 0;
+    for (const it of this.interiors) for (const h of it.homes ?? []) if (!this.ownsHome(h.id)) { this.progress.unlocks.push("home:" + h.id); n++; }
+    return n ? `${n} Wohnungen gehören jetzt dir` : "Alle Wohnungen gehören dir schon";
+  }
+  cheatsOff(): string {
+    for (const w of WEAPONS) if (!CHEAT_ONLY.includes(w) && this.rules.respawn) this.inv.infinite.delete(w);
+    if (this.flyMode) this.toggleFly();
+    this.cheats.clear(); this.meteorT = 0; this.fireworkT = 0;
+    return "Alle Cheats aus";
+  }
+  // one-off effects of the codes
+  cheatFx(kind: "money" | "boom" | "meteors" | "fireworks" | "clearTraffic") {
+    if (kind === "money") for (let i = 0; i < 30; i++) { const a = Math.random() * TAU, d = rnd(25, 160); this.pickups.push({ x: this.fx + Math.cos(a) * d, y: this.fy + Math.sin(a) * d, type: "cash", t: 0, value: Math.round(rnd(1, 5)) * 100 }); }
+    if (kind === "boom") for (const c of this.cars) if (c !== this.player && !c.dead && Math.hypot(c.x - this.fx, c.y - this.fy) < 520) { c.hp = 0; this.damageCar(c, 9999, false, false); }
+    if (kind === "meteors") this.meteorT = 12;
+    if (kind === "fireworks") this.fireworkT = 9;
+    if (kind === "clearTraffic") this.cars = this.cars.filter((c) => c === this.player || c.kind !== "civ" || c.parked || c.keep || c.owned);
+  }
+  private updateCheats(dt: number) {
+    const pd = this.ped;
+    if (this.cheats.has("nitro")) this.nitro = 1;
+    this.fxT -= dt;
+    // meteorites: fiery blasts around you (not on you), they count as nobody's crime
+    if (this.meteorT > 0) {
+      this.meteorT -= dt;
+      if (this.fxT <= 0) {
+        this.fxT = 0.45;
+        const a = Math.random() * TAU, d = rnd(160, 700), x = this.fx + Math.cos(a) * d, y = this.fy + Math.sin(a) * d;
+        for (let i = 0; i < 10; i++) this.emit(x - 40 + i * 4, y - 30 + i * 3, 320 - i * 30, 0, 0, 0, 0.35, 14 - i, 10, "#ff8a2a", 2, 1);
+        this.explode(x, y, 1.3, 3, false);
+      }
     }
-    sfx.empty();
-    return "Unbekannter Cheat";
+    // fireworks: colourful bursts high above you
+    if (this.fireworkT > 0) {
+      this.fireworkT -= dt;
+      if (this.fxT <= 0) {
+        this.fxT = 0.38;
+        const cols = ["#ff3c6e", "#3dff8b", "#2bf0ff", "#ffd23f", "#c86bff", "#ffffff"], col = cols[Math.floor(Math.random() * cols.length)];
+        const x = this.fx + rnd(-260, 260), y = this.fy + rnd(-260, 260), z = this.fz + rnd(220, 380);
+        for (let i = 0; i < 46; i++) { const a = Math.random() * TAU, e = rnd(-1, 1), s = rnd(120, 200); this.emit(x, y, z, Math.cos(a) * s * Math.sqrt(1 - e * e), Math.sin(a) * s * Math.sqrt(1 - e * e), e * s, rnd(1.1, 1.7), rnd(4, 7), -2, col, 5, 1.8); }
+        this.flashes.push({ x, y, z, life: 0.25, max: 0.25, size: 380 });
+        sfx.shot();
+      }
+    }
+    // jetpack: flames under you while you fly on foot
+    if (this.cheats.has("jetpack") && this.flyMode && this.onFoot) { const bx = pd.x - Math.cos(pd.a) * 3, by = pd.y - Math.sin(pd.a) * 3; this.emit(bx, by, pd.z + 10, rnd(-8, 8), rnd(-8, 8), -160, 0.18, 4, 18, "#ffb347", 2, 2); this.emit(bx, by, pd.z + 6, rnd(-10, 10), rnd(-10, 10), -60, 0.6, 5, 22, "#8a8a92", 0, 1.5); }
   }
 
   // a person in a room was hit by the player
@@ -1429,6 +1477,7 @@ export class Game {
           remove = true;
         }
       }
+      if (remove && q.kind === "bullet" && this.cheats.has("explosive")) this.explode(q.x, q.y, 0.45, 2, true, Math.max(q.z - 8, gh));
       if (remove) this.dropProj(i);
     }
     for (const b of this.bombs) {
@@ -1852,7 +1901,7 @@ export class Game {
       if (this.hitStop > 0) this.hitStop -= dt;
       else {
         // fixed physics step with an accumulator (no tunnelling at high speed, same result at any frame rate)
-        this.acc += dt * this.timeScale;
+        this.acc += dt * this.timeScale * (this.cheats.has("slowmo") ? 0.45 : 1);
         let n = 0;
         while (this.acc >= STEP && n < 10) { this.update(STEP); this.acc -= STEP; n++; }
         if (n >= 10) this.acc = 0;
@@ -1897,6 +1946,8 @@ export class Game {
       fly: this.flyMode,
       camNear: currentSettings.camNear,
       swim: this.onFoot && this.ped.swim,
+      cheats: [...this.cheats].map((f) => FLAG_NAME[f]),
+      jump: this.onFoot && this.cheats.has("jump") && !this.flyMode,
     };
   }
   // what E does right now (shown as a button)
@@ -2108,7 +2159,7 @@ export class Game {
     if (this.seat) { if (m > 0.15) this.seat = null; else { pd.vx = pd.vy = 0; pd.moving = false; pd.x = this.seat.x; pd.y = this.seat.y; pd.a = this.seat.a; return; } }
     const L = Math.hypot(dx, dy);
     // running about 20 km/h, sprinting about 32 km/h (a bit faster than a real person), times the setting
-    const spd = this.flyMode ? 420 * currentSettings.vehSpeed : pd.swim ? 75 : (pd.sprint ? RUN_V.sprint : RUN_V.run) * currentSettings.runSpeed * (this.energyT > 0 ? 1.15 : 1);
+    const spd = this.flyMode ? 420 * this.vehMul : pd.swim ? 75 : (pd.sprint ? RUN_V.sprint : RUN_V.run) * currentSettings.runSpeed * (this.energyT > 0 ? 1.15 : 1) * (this.cheats.has("quick") ? 2 : 1);
     const tvx = L > 0 ? (dx / L) * spd * Math.min(1, m / 0.8) : 0, tvy = L > 0 ? (dy / L) * spd * Math.min(1, m / 0.8) : 0;
     const kk = Math.min(1, dt * 10);
     pd.vx += (tvx - pd.vx) * kk; pd.vy += (tvy - pd.vy) * kk;
@@ -2216,8 +2267,14 @@ export class Game {
     // ground: water surface, jetty, bridge deck / tunnel floor / terrain, roofs (only the one you stand on), ramps
     let ground = wet ? WATER_Y - 13 : jetty ? 2.5 : this.groundH(pd.x, pd.y, pd.z + 4);
     if (!wet) ground = Math.max(ground, w.rampH(pd.x, pd.y), interiorFloor(this.interiors, pd.x, pd.y, pd.z));
+    // springs in the shoes (code): Space / SPRUNG jumps very high, landing does not hurt
+    const jumpKey = this.bind.held("handbrake", this.keys) || this.touch.drift;
+    if (this.cheats.has("jump") && jumpKey && !this.jumpHeld && !pd.air && !pd.swim) { pd.air = true; pd.vz = 520; pd.fallFrom = pd.z; sfx.land(); }
+    this.jumpHeld = jumpKey;
     if (pd.air) {
-      pd.vz -= GRAV * dt; pd.z += pd.vz * dt;
+      pd.vz -= this.grav * dt; pd.z += pd.vz * dt;
+      // parachute (code): a slow, safe way down
+      if (this.cheats.has("parachute") && pd.vz < -110) { pd.vz = -110; pd.fallFrom = pd.z; }
       if (pd.z <= ground) {
         const drop = pd.fallFrom - ground;
         pd.air = false; pd.z = ground; pd.vz = 0;
@@ -2341,11 +2398,12 @@ export class Game {
     if (playing && !this.ending) {
       this.updateInside(dt);
       this.updatePerks(dt);
+      this.updateCheats(dt);
       this.stepLift(dt);
       this.updateJail(dt);
       this.time += dt;
       const hours = (dt * 24) / (Math.max(1, currentSettings.dayMinutes) * 60);
-      this.clock = (this.clock + hours) % 24;
+      if (!this.cheats.has("timeStop")) this.clock = (this.clock + hours) % 24;
       this.weatherT += dt; this.weatherNext -= hours;
       if (this.weatherNext <= 0) this.setWeather();
       if (this.onFoot) { this.readPedInput(dt); p.throttle = 0; p.steer = 0; p.handbrake = true; p.nitro = false; }
@@ -2376,10 +2434,10 @@ export class Game {
       c.ox = c.x; c.oy = c.y; // where it was before this step (walls push it back to the side it came from)
       const grass = this.onGrass(c.x, c.y);
       if (isPlane(c.model) && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.jet(c, dt, mine ? this.lift : -1, mine); if (!c.air && !(c.model === "seaplane" && isWater(c.x, c.y))) this.collideWorld(c); continue; }
-      if (isHeli(c.model) && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.fly(c, dt, mine ? this.lift : -1, mine, mine ? currentSettings.vehSpeed : 1); this.collideWorld(c); continue; }
+      if (isHeli(c.model) && !c.dead) { const mine = c === p && playing && !this.onFoot && !this.ending; this.craft.fly(c, dt, mine ? this.lift : -1, mine, mine ? this.vehMul : 1); this.collideWorld(c); continue; }
       if (isBoat(c.model) && !c.dead) {
         const st = MODEL_STATS[c.model], mine = c === p && playing;
-        const vs = mine ? currentSettings.vehSpeed : 1; // vehicle multiplier (settings)
+        const vs = mine ? this.vehMul : 1; // vehicle multiplier (settings, turbo code)
         this.craft.boat(c, dt, (st.acc + (mine && p.nitro ? 400 : 0)) * vs, !mine ? st.maxV * (c.kind === "cop" ? 0.9 : 0.8) : (st.maxV + (p.nitro ? 200 : 0) + st.maxV * (tuneSpeed(p.tune) - 1)) * vs);
         this.collideWorld(c);
         continue;
@@ -2397,7 +2455,7 @@ export class Game {
         else if (playing) {
           const st = p.model === def.model ? def : MODEL_STATS[p.model];
           // vehicle multiplier from the settings: more top speed and pull, a bit more grip so it stays drivable
-          const vs = currentSettings.vehSpeed;
+          const vs = this.vehMul;
           const t = p.tune, top = st.maxV * tuneSpeed(t) * vs, grip = st.grip * tuneGrip(t) * Math.sqrt(vs);
           // boost pad: much more top speed and pull for a moment
           if (!p.air) this.boostPad(p, top);
@@ -2458,7 +2516,7 @@ export class Game {
       if (c.wrecked) c.wreckT += dt;
     }
 
-    const civTarget = Math.round((this.mobile ? 12 : 16) * currentSettings.traffic); // traffic density (settings)
+    const civTarget = this.cheats.has("noTraffic") ? 0 : Math.round((this.mobile ? 12 : 16) * currentSettings.traffic); // traffic density (settings, code)
     let civs = 0, cops = 0;
     for (let i = this.cars.length - 1; i >= 0; i--) {
       const c = this.cars[i];
@@ -2701,7 +2759,7 @@ export class Game {
         const sp = Math.hypot(c.vx, c.vy);
         if (sp > AIR_MAX) { c.vx *= AIR_MAX / sp; c.vy *= AIR_MAX / sp; }
       }
-      c.vz -= GRAV * dt * (boostAir ? 0.45 : 1) * (c.boostAir ? 0.7 : 1);
+      c.vz -= this.grav * dt * (boostAir ? 0.45 : 1) * (c.boostAir ? 0.7 : 1);
       this.airSpin(c, dt);
       c.x += c.vx * dt; c.y += c.vy * dt; c.z += c.vz * dt;
       this.sweep(c, dt);
@@ -2757,7 +2815,7 @@ export class Game {
 
   private followTerrain(c: Car, dt: number) {
     const gh = this.carGround(c);
-    const zFall = c.z + c.vz * dt - 0.5 * GRAV * dt * dt;
+    const zFall = c.z + c.vz * dt - 0.5 * this.grav * dt * dt;
     // leave the ground when launched off a ramp or hill crest, or when driving off a roof edge or a cliff
     if ((zFall > gh + 1.5 && c.vz > 40 && c.speed > 120) || c.z - gh > 25) { c.air = true; c.airT = 0; c.z = zFall; }
     else {
@@ -2838,7 +2896,7 @@ export class Game {
     c.vF = c.vx * ca + c.vy * sa; c.vR = -c.vx * sa + c.vy * ca;
     const gh = this.carGround(c);
     if (c.air || c.z - gh > 25) {
-      c.air = true; c.vz -= GRAV * dt; c.z += c.vz * dt; this.airSpin(c, dt);
+      c.air = true; c.vz -= this.grav * dt; c.z += c.vz * dt; this.airSpin(c, dt);
       if (c.z <= gh) { if (c.flipT > 0) { c.z = gh; c.air = false; c.vz = 0; c.rollV = c.pitchV = 0; } else this.land(c, gh); }
     } else c.z = gh;
   }

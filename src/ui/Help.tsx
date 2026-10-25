@@ -39,7 +39,8 @@ export default function Help({ isTouch, bind }: { isTouch: boolean; bind: Bindin
         <p><b className="text-white/80">Jobs:</b> 15 Jobs im Menü (J), im Handy (T) oder an ihrem Punkt auf der Karte annehmen. Fehlt das Fahrzeug, wird es geliefert.</p>
         <p><b className="text-white/80">Versteckspiel:</b> eigener Reiter im Pausenmenü und im Handy, fünf Spielfelder, drei Modi.</p>
         <p><b className="text-white/80">Hardcore:</b> der rote Stern <b>HC</b> hinter den Fahndungssternen schaltet ihn an und aus. <b className="text-white/80">Haft:</b> wie lange, stellst du unter Einstellungen ein (Sekunden).</p>
-        <p><b className="text-white/80">Cheats:</b> Pausenmenü oder Handy → Cheats. <b>TNT</b> gibt einen Block Sprengstoff pro Eingabe; ablegen mit Feuer, nach 5 Sekunden geht er hoch – auch ganze Läden.</p>
+        <p><b className="text-white/80">Codes:</b> Handy → Codes, mit PIN gesichert; über 60 Codes, das Codebuch steht in der App. <b>TNT</b> gibt 5 Blöcke Sprengstoff; ablegen mit Feuer, nach 5 Sekunden geht er hoch – auch ganze Läden.</p>
+        <p><b className="text-white/80">Kamera:</b> rechte Maustaste gedrückt ziehen oder auf dem Handy rechts wischen dreht die Kamera um dich. Im Auto wechselt C zwischen Verfolger, Ego, Motorhaube, von vorne, seitlich und Vogelperspektive.</p>
         <p><b className="text-white/80">Speichern:</b> automatisch jede Minute ohne Sterne, außerdem im Safehouse (Bett) und im Pausenmenü.</p>
       </div>
     </div>

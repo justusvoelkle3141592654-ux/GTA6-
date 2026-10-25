@@ -63,6 +63,7 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onZoo
         </div>}
         {rules.cops && <div className={"mt-1" + (hud.searching ? " animate-pulse" : "")}><Stars n={hud.stars} max={rules.maxStars} size={isTouch ? "text-xl" : "text-2xl"} hardcore={hardcore} onHardcore={onHardcore} /></div>}
         {!rules.respawn && rules.cops && <div className="mt-1 flex items-center justify-end gap-1 text-xs text-white/70" style={outline}><Icon name="siren" size={14} />{hud.takedowns}</div>}
+        {hud.cheats.length > 0 && <div className="mt-1 max-w-[16rem] text-[10px] font-semibold uppercase leading-tight tracking-wider text-yellow-200/90" style={outline}>{hud.cheats.join(" · ")}</div>}
         {isTouch && hud.district && <div className="mt-1 font-display text-base tracking-widest text-white/80" style={outline}>{hud.district}</div>}
       </Zone>
 

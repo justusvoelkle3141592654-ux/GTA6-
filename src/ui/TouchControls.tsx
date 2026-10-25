@@ -17,12 +17,13 @@ interface Props {
   onWheel: () => void;
   onDetonate: () => void;
   onLook: (dx: number, dy: number) => void; // swiping on the right half turns the camera
+  jump?: boolean;   // springs in the shoes (code): a jump button on foot
 }
 
 const RADIUS = 60;
 const LONG_PRESS = 420; // ms: holding the weapon button opens the wheel
 
-export default function TouchControls({ input, nitro01, relative = false, onFoot, flying = false, jet = false, weapon, ammo, bombsPlaced, onCycleWeapon, onWheel, onDetonate, onLook }: Props) {
+export default function TouchControls({ input, nitro01, relative = false, onFoot, flying = false, jet = false, weapon, ammo, bombsPlaced, onCycleWeapon, onWheel, onDetonate, onLook, jump = false }: Props) {
   // camera: one finger swiping over the free right half of the screen
   const look = useRef<{ id: number; x: number; y: number } | null>(null);
   const lookDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -115,7 +116,7 @@ export default function TouchControls({ input, nitro01, relative = false, onFoot
             <WeaponIcon w={weapon} size={26} />
             <span className="mt-0.5 font-display text-xs tracking-wider text-white/80">{ammo}</span>
           </button>
-          {(!onFoot || flying) && btn(flying ? "HOCH" : "DRIFT", drift, setDrift, "drift", "#ff3cac", "h-16 w-16")}
+          {(!onFoot || flying || jump) && btn(flying ? "HOCH" : onFoot ? "SPRUNG" : "DRIFT", drift, setDrift, "drift", "#ff3cac", "h-16 w-16")}
         </div>
         <div className="flex flex-col items-center gap-3">
           {btn(flying ? "RUNTER" : onFoot ? "SPRINT" : "NITRO", nitro, setNitro, "nitro", "#2bf0ff", "h-16 w-16",
