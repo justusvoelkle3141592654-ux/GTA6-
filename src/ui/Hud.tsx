@@ -1,9 +1,9 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { CameraMode, HudData } from "../core/engine";
 import type { ModeRules } from "../core/modes";
-import type { Weapon } from "../gameplay/weapons";
+import { WEAPON_DEFS, type Weapon } from "../gameplay/weapons";
 import { currentSettings } from "../core/settings";
-import { Stars, WeaponIcon, ammoText, fmt, fmtTime, wName } from "./ui";
+import { Stars, WeaponIcon, fmt, fmtTime, wName } from "./ui";
 import Icon from "./icons";
 
 interface Props {
@@ -31,11 +31,43 @@ const CAM_SHORT: Record<CameraMode, string> = { chase: "3D", fp: "EGO", hood: "H
 // the toolbar: compact square buttons, a label only where the symbol alone is not clear
 const tool = "sb-icon-btn pointer-events-auto h-10 min-w-10 gap-1.5 px-2 text-[11px] font-bold tracking-wider";
 
+// desktop (website): the weapon in the hand with its ammunition, big enough to read at a glance;
+// magazine / reserve, a bar for the magazine, yellow when it runs low or reloads, red when empty
+function WeaponCard({ hud }: { hud: HudData }) {
+  const d = WEAPON_DEFS[hud.weapon];
+  const melee = d.kind === "melee", endless = !melee && hud.ammo < 0;
+  const mag = Math.max(0, hud.ammo), reserve = hud.reserve;
+  const empty = !melee && !endless && mag === 0 && reserve <= 0;
+  const low = !melee && !endless && !empty && (d.clip > 0 ? mag <= Math.max(2, Math.ceil(d.clip * 0.25)) : mag <= 1);
+  const col = empty ? "text-alert-400" : hud.reloading || low ? "text-sun-400" : "text-fog-100";
+  const note = hud.reloading ? "Lädt nach …" : empty ? "Keine Munition – Waffenladen" : low ? (d.clip > 0 && reserve > 0 ? "Bald nachladen (R)" : "Munition knapp") : "";
+  return (
+    <div className="mb-2 inline-flex items-center gap-3 rounded-[6px] border border-white/10 bg-ink-950/75 py-2 pl-3 pr-3 text-left" style={{ boxShadow: "inset 3px 0 0 var(--color-sun-500)" }}>
+      <WeaponIcon w={hud.weapon} size={30} className={melee ? "text-fog-300" : "text-fog-100"} />
+      <div className="min-w-[7rem]">
+        <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-fog-500">{d.name}</div>
+        {melee ? <div className="font-display text-2xl leading-tight tracking-wider text-fog-300">Nahkampf</div>
+          : endless ? <div className="sb-num text-4xl leading-none text-fog-100" aria-label="Munition unbegrenzt">∞</div>
+          : (
+            <div className={"flex items-baseline gap-1.5 " + col} aria-label={reserve >= 0 ? `Munition: ${mag} im Magazin, ${reserve} in Reserve` : `Munition: ${mag}`}>
+              <span className="sb-num text-[2.6rem] leading-none">{mag}</span>
+              {reserve >= 0 ? <span className="sb-num text-xl text-fog-300">/ {reserve}</span> : <span className="text-xs font-semibold text-fog-300">übrig</span>}
+            </div>
+          )}
+        {!melee && !endless && d.clip > 0 && (
+          <div className="sb-track mt-1 h-1"><div className={"h-full " + (empty ? "bg-alert-500" : low || hud.reloading ? "bg-sun-400" : "bg-fog-100")} style={{ width: `${Math.min(1, mag / d.clip) * 100}%` }} /></div>
+        )}
+        {note && <div className={"mt-1 text-[11px] font-semibold " + (empty ? "text-alert-400" : "text-sun-300")}>{note}</div>}
+      </div>
+    </div>
+  );
+}
+
 export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onZoom, onToggleCar, onInteract, onRadio, onJob, onPhone, onDetonate, onWeapon, onWheel, hardcore, onHardcore }: Props) {
-  const ammo = ammoText(hud.ammo, hud.reserve);
   // the minimap is drawn by the game: bottom left (phones: top left), the bars under it
   const mmH = (isTouch ? 92 : 140) * currentSettings.hudScale + (rules.damage ? (hud.onFoot ? 9 : 18) * currentSettings.hudScale : 0) + 10;
   const end = hud.ending, endK = Math.min(1, hud.endT * 2);
+  const tb = isTouch ? tool : tool + " w-auto"; // website: labelled buttons as wide as their text
   return (
     <div className="pointer-events-none absolute inset-0 z-[12] select-none font-sans">
       {/* end of a run: the picture turns grey, one calm title with a line under it */}
@@ -49,13 +81,8 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onZoo
         </div>
       )}
 
-      {/* top right: weapon (desktop), money, wanted level, district (phones) */}
+      {/* top right: money, wanted level, district (phones); the weapon and its ammunition: bottom right (desktop) / weapon button (phones) */}
       <Zone at="tr">
-        {!isTouch && hud.weapon !== "fist" && (
-          <div className="sb-hud-text mb-1 flex items-center justify-end gap-2 text-fog-100">
-            <WeaponIcon w={hud.weapon} size={22} />{ammo && <span className={"sb-num text-xl " + (hud.reloading ? "text-sun-400" : "")}>{hud.reloading ? "NACHLADEN" : ammo}</span>}
-          </div>
-        )}
         {rules.respawn ? (
           <div className="sb-num sb-hud-text text-[2.6rem] leading-none text-fog-100 sm:text-5xl"><span className="mr-0.5 text-[0.7em] text-ok-400">$</span>{fmt(hud.cash)}</div>
         ) : (
@@ -86,17 +113,17 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onZoo
       {/* top centre: toolbar, then the current goal */}
       <Zone at="tc">
         <div className="flex justify-center gap-1.5">
-          <button onClick={onPause} className={tool} aria-label="Pause"><Icon name="pause" size={17} /></button>
-          <button onClick={onCam} className={tool} aria-label="Kamera wechseln"><Icon name="camera" size={16} />{CAM_SHORT[camera]}</button>
-          {(camera === "chase" || camera === "top") && <button onClick={onZoom} className={tool} aria-label="Kamera nah oder weit">{hud.camNear ? "NAH" : "WEIT"}</button>}
+          <button onClick={onPause} className={tb} aria-label="Pause"><Icon name="pause" size={17} /></button>
+          <button onClick={onCam} className={tb} aria-label="Kamera wechseln"><Icon name="camera" size={16} />{CAM_SHORT[camera]}</button>
+          {(camera === "chase" || camera === "top") && <button onClick={onZoom} className={tb} aria-label="Kamera nah oder weit">{hud.camNear ? "NAH" : "WEIT"}</button>}
           {!isTouch && (
-            <button onClick={onToggleCar} className={tool + (hud.onFoot && hud.canEnter ? " is-on" : "")}>
+            <button onClick={onToggleCar} className={tb + (hud.onFoot && hud.canEnter ? " is-on" : "")}>
               <Icon name={hud.onFoot ? "car" : "exit"} size={16} />{hud.onFoot ? "EINSTEIGEN" : "AUSSTEIGEN"}
             </button>
           )}
-          {!hud.onFoot && rules.city && <button onClick={onRadio} className={tool} aria-label="Radio"><Icon name="radio" size={17} /></button>}
-          {hud.job && rules.city && <button onClick={onJob} className={tool + (hud.job === "beenden" ? " is-on" : "")} aria-label={hud.job === "beenden" ? "Job beenden" : "Jobs"}><Icon name="money" size={16} />{hud.job === "beenden" ? "ENDE" : isTouch ? "" : "JOBS"}{!isTouch && <span className="text-fog-500">J</span>}</button>}
-          {rules.city && <button onClick={onPhone} className={tool} aria-label="Handy"><Icon name="phone" size={16} />{!isTouch && <span className="text-fog-500">T</span>}</button>}
+          {!hud.onFoot && rules.city && <button onClick={onRadio} className={tb} aria-label="Radio"><Icon name="radio" size={17} /></button>}
+          {hud.job && rules.city && <button onClick={onJob} className={tb + (hud.job === "beenden" ? " is-on" : "")} aria-label={hud.job === "beenden" ? "Job beenden" : "Jobs"}><Icon name="money" size={16} />{hud.job === "beenden" ? "ENDE" : isTouch ? "" : "JOBS"}{!isTouch && <span className="text-fog-500">J</span>}</button>}
+          {rules.city && <button onClick={onPhone} className={tb} aria-label="Handy"><Icon name="phone" size={16} />{!isTouch && <span className="text-fog-500">T</span>}</button>}
         </div>
         {!rules.respawn && <div className="sb-hud-text mt-1.5 text-xs font-semibold tracking-widest text-fog-300">{fmtTime(hud.time)}</div>}
         {hud.objective && (
@@ -140,7 +167,7 @@ export default function Hud({ hud, isTouch, rules, camera, onPause, onCam, onZoo
             </div>
           )}
           {!hud.onFoot && <div className="sb-num sb-hud-text mb-2 text-4xl leading-none text-fog-100">{hud.kmh}<span className="ml-1 text-sm text-fog-300">KM/H</span></div>}
-          <div className="sb-hud-text mb-1 font-display text-lg tracking-wider text-fog-100">{wName(hud.weapon)}</div>
+          <WeaponCard hud={hud} />
           <div className="pointer-events-auto flex items-center justify-end gap-1">
             {hud.owned.map((w, i) => (
               <button key={w} onClick={() => onWeapon(w)} aria-label={wName(w)} className={"sb-icon-btn h-11 w-11 flex-col gap-0 " + (hud.weapon === w ? "is-on bg-sun-500/15" : "")}>
